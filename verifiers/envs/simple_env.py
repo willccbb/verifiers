@@ -14,10 +14,11 @@ class SimpleEnv(BaseEnv):
                  sampling_args: Dict[str, Any] = {},
                  **kwargs):
         super().__init__(**kwargs)
-        sampling_args = {
+        default_args = {
             "skip_special_tokens": False,
             "spaces_between_special_tokens": False,
         }
+        default_args.update(sampling_args)
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         self.sampling_args = sampling_args
