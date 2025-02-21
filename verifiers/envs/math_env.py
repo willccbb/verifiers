@@ -15,7 +15,18 @@ class MathEnv(SimpleEnv):
                  few_shot: List[Dict[str, str]] = MATH_FEW_SHOT[0],
                  fields: List[str | Tuple[str, ...]] = ["reasoning", "answer"],
                  **kwargs):
-        super().__init__(system_prompt=system_prompt, few_shot=few_shot, **kwargs)
+        sampling_args = {
+            "skip_special_tokens": False,
+            "spaces_between_special_tokens": False,
+            "stop": ["</answer>"],
+            "include_stop_str_in_output": True,
+        }
+        super().__init__(
+            system_prompt=system_prompt,
+            few_shot=few_shot,
+            sampling_args=sampling_args,
+            **kwargs,
+        )
         self.parser = XMLParser(fields=fields)
         self.dataset_name = dataset
         self.dataset = preprocess_dataset(
