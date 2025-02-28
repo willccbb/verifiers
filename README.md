@@ -1,6 +1,11 @@
 # Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
 This repository contains a set of tools for reinforcement learning with LLMs in verifiable environments. 
+## Conda Environment Setup
+```
+conda create -n verifiers
+conda activate verifiers
+```
 
 ## Installation
 
