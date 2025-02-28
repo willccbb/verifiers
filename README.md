@@ -2,7 +2,7 @@
 
 This repository contains a set of tools for reinforcement learning with LLMs in verifiable environments. 
 ## Conda Environment Setup
-```
+```bash
 conda create -n verifiers
 conda activate verifiers
 ```
@@ -11,8 +11,8 @@ conda activate verifiers
 
 PyPI [coming soon](https://pypi.org/project/verifiers/) once a couple more features are added, just clone it for now and run:
 ```
-uv pip install -e .
-uv pip install flash-attn --no-build-isolation
+pip install -e .
+pip install flash-attn --no-build-isolation
 ```
 Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).
 
