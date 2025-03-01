@@ -20,4 +20,4 @@ dependencies = [
     "vllm==0.7.3",
 ]
 [tool.setuptools]
-py-modules = []
+py-modules = ["verifiers"]
