@@ -19,3 +19,5 @@ dependencies = [
     "liger-kernel>=0.5.2",
     "vllm==0.7.3",
 ]
+[tool.setuptools]
+py-modules = []
