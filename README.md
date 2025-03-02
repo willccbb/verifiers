@@ -3,7 +3,7 @@
 This repository contains a set of tools for reinforcement learning with LLMs in verifiable environments. 
 ## Conda Environment Setup
 ```bash
-conda create -n verifiers
+conda create -n verifiers python=3.11
 conda activate verifiers
 ```
 

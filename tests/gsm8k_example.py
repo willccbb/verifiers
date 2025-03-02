@@ -1,5 +1,5 @@
 from verifiers.envs import ToolEnv
-from basic_tools import calculate
+from verifiers.tools.calculator import calculate
 
 # Example few-shot for GSM8K with calculator
 CALCULATOR_FEW_SHOT = [

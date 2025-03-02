@@ -3,7 +3,7 @@ from vllm import LLM, SamplingParams
 
 sampling_params = SamplingParams(temperature=0.8, top_p=0.95, max_tokens=1024)
 
-llm = LLM(model="Qwen/Qwen2.5-1.5B-Instruct")
+llm = LLM(model="Qwen/Qwen2.5-7B-Instruct", tensor_parallel_size=2)
 
 SYSTEM_PROMPT = """
 Respond in the following format, using careful step-by-step thinking:
