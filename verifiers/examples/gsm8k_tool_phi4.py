@@ -3,12 +3,12 @@ from verifiers.tools.calculator import calculator
 from verifiers.prompts import CALCULATOR_FEW_SHOT
 import torch 
 
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+model_name = "microsoft/Phi-4-mini-instruct"
 
 model_kwargs = dict(
     torch_dtype=torch.bfloat16,
     attn_implementation="flash_attention_2",
-    use_cache=False,
+    use_cache=False, # needed for phi4 and vllm to work
     device_map="cuda", # must use in order to avoid `model.to('cuda')` error from Flash Atention
 )
 model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs=model_kwargs)
@@ -27,7 +27,7 @@ rubric = vf_env.get_rubric()
 
 # notable defaults: lr = 1e-6, max_grad_norm = 0.01, constant lr 10 warmup steps, 1024 tokens in+out
 training_args = vf.get_default_grpo_config(
-    run_name="math_calculator_qwen2.5-1.5b",
+    run_name="math_calculator_phi-4-mini-instruct",
     num_gpus=2
 )
 # rollouts per prompt
@@ -46,6 +46,7 @@ training_args.eval_on_start = True
 training_args.eval_steps = 100
 training_args.per_device_eval_batch_size = 2
 training_args.eval_accumulation_steps = 1
+
 trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,

@@ -12,6 +12,17 @@ uv sync
 uv pip install flash-attn --no-build-isolation
 source .venv/bin/activate
 accelerate launch --config-file configs/zero3.yaml --num-processes [N-1] verifiers/examples/gsm8k_calculator.py
+
+# Example of using MathEnv with a system using two (2) RTX 4090's and deepspeed with cpu offloading
+accelerate launch --config-file configs/zero3_cpu_offload.yaml --num-processes=2 verifiers/examples/gsm8k_simple.py
+
+# Example of using ToolEnv with a system using two (2) RTX 4090's and deepspeed with cpu offloading
+accelerate launch --config-file configs/zero3_cpu_offload.yaml --num-processes=2 verifiers/examples/gsm8k_calculator.py
+
+# Example of using ToolEnv with a system using two (2) RTX 4090's and deepspeed with cpu offloading
+accelerate launch --config-file configs/zero3_cpu_offload.yaml --num-processes=2 verifiers/examples/gsm8k_tool_phi4.py
+
+
 ```
 
 

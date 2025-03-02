@@ -1,5 +1,8 @@
 from trl import GRPOConfig
 
+caching_args = dict()
+
+
 def get_default_grpo_config(run_name: str,
                             num_gpus: int = 1) -> GRPOConfig:
     return GRPOConfig(
@@ -27,6 +30,8 @@ def get_default_grpo_config(run_name: str,
         use_vllm=True,
         vllm_device=f"cuda:{num_gpus-1}",
         vllm_gpu_memory_utilization=0.7 if num_gpus > 1 else 0.3,
+        vllm_enable_prefix_caching=False, # needed for phi4 and vllm
+        vllm_max_model_len=6000, # need to set a lower number in order to get an RTX 4090 to work with phi4
         logging_steps=1,
         log_on_each_node=False,
         log_completions=True,
