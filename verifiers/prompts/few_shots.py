@@ -244,9 +244,7 @@ CALCULATOR_FEW_SHOT = [
                 reasoning="Together they have 48 marbles:\n- Tom: 12 marbles\n- Janet: 36 marbles (3 times Tom's)\n- Total: 48 marbles",
                 answer="48 marbles"
             )
-        }
-    ],
-    [
+        },
         {
             'role': 'user',
             'content': 'Samantha is baking cookies. Each batch requires 2.5 cups of flour. If she has 10 cups of flour, how many complete batches can she make?'
