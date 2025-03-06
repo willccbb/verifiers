@@ -25,14 +25,14 @@ Tested with Python 3.11 and this [image](https://hub.docker.com/layers/pytorch/p
 # script.py
 import verifiers as vf
 from verifiers.tools import calculator
-from verifiers.prompts import SEARCH_FEW_SHOT
+from verifiers.prompts import CALCULATOR_FEW_SHOT
 
 model_name = "Qwen/Qwen2.5-7B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
 vf_env = vf.ToolEnv(
     dataset="gsm8k",
-    few_shot=SEARCH_FEW_SHOT[0],
+    few_shot=CALCULATOR_FEW_SHOT[0],
     tools=[calculator],
     max_steps=3
 )
