@@ -33,11 +33,11 @@ training_args.num_iterations = 2
 # no ref model
 training_args.beta = 0.04
 # evals
-training_args.eval_strategy = "steps"
-training_args.eval_on_start = True
-training_args.eval_steps = 100
-training_args.per_device_eval_batch_size = 8
-training_args.eval_accumulation_steps = 1
+#training_args.eval_strategy = "steps"
+##training_args.eval_on_start = True
+#training_args.eval_steps = 100
+# training_args.per_device_eval_batch_size = 8
+# training_args.eval_accumulation_steps = 1
 trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,
@@ -45,7 +45,7 @@ trainer = vf.GRPOEnvTrainer(
     env=vf_env,
     args=training_args,
     train_dataset=dataset,
-    eval_dataset=eval_dataset,
+    #eval_dataset=eval_dataset,
 )
 
 trainer.train() 

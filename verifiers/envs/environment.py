@@ -13,6 +13,8 @@ class Environment(ABC):
             setattr(self, key, value)
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
         self.tokenizer = None
+        self.dataset = None
+        self.eval_dataset = None
 
     @abstractmethod
     def get_dataset(self, **kwargs: Any) -> Dataset | None:

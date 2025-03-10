@@ -2,6 +2,9 @@
 
 This repository contains a set of tools for reinforcement learning with LLMs in verifiable environments. 
 
+**Note:** This repository in its current state should be viewed as "research code", and is not guaranteed to yield optimal training results. RL is delicate, expect that experimentation will be required. The examples are intended for illustrative purposes of usage patterns rather than stable training recipes. You are encouraged to write your own standalone training scripts, modifying environments/datasets/rewards/configs as needed for your use case.
+
+
 ## Installation
 
 PyPI [coming soon](https://pypi.org/project/verifiers/) once a couple more features are added, just clone it for now and run:
@@ -41,7 +44,7 @@ trainer = vf.GRPOEnvTrainer(
     processing_class=tokenizer,
     env=vf_env,
     reward_funcs=vf_env.get_rubric(),
-    args=vf.get_default_grpo_config(run_name="gsm8k", num_gpus=2),
+    args=vf.get_default_grpo_config(run_name="gsm8k-calc", num_gpus=2),
     train_dataset=vf_env.get_dataset(),
 )
 trainer.train()
