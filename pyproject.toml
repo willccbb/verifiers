@@ -6,18 +6,18 @@ authors = [
 version = "0.1.0"
 description = "Verifiers for reinforcement learning with LLMs"
 license = {text = "MIT"}
-requires-python = ">=3.11"
+requires-python = ">=3.11,<=3.12"
 dependencies = [
     "torch",
     "setuptools",
-    "deepspeed==0.16.3",
+    "deepspeed",
     "accelerate",
     "peft",
     "wandb",
     "rich",
     "duckduckgo-search",
     "trl @ git+https://github.com/huggingface/trl.git",
-    "liger-kernel>=0.5.2",
-    "vllm>=0.7.3",
-    "brave-search>=0.1.8",
+    "liger-kernel",
+    "vllm,
+    "brave-search",
 ]
