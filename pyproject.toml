@@ -16,8 +16,11 @@ dependencies = [
     "wandb",
     "rich",
     "duckduckgo-search",
-    "trl @ git+https://github.com/huggingface/trl.git",
+    "trl==0.16.0",
     "liger-kernel",
     "vllm",
     "brave-search",
 ]
+
+[tool.setuptools]
+packages = ["verifiers"]
