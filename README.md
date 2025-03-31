@@ -1,5 +1,7 @@
 # Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
+## TEMPORARILY BUSTED, I KNOW, WORKING ON IT
+
 This repository contains a set of tools for reinforcement learning with LLMs in verifiable environments. 
 
 **Note:** This repository in its current state should be viewed as "research code", and is not guaranteed to yield optimal training results. RL is delicate, expect that experimentation will be required. The examples are intended for illustrative purposes of usage patterns rather than stable training recipes. You are encouraged to write your own standalone training scripts, modifying environments/datasets/rewards/configs as needed for your use case.
@@ -17,9 +19,7 @@ source .venv/bin/activate
 accelerate launch --config-file configs/zero3.yaml --num-processes [N-1] verifiers/examples/gsm8k_calculator.py
 ```
 
-
 Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).
-
 
 Tested with Python 3.11 and this [image](https://hub.docker.com/layers/pytorch/pytorch/2.5.1-cuda12.1-cudnn9-devel/images/sha256-e8e63dd7baca894ba11fe1ba48a52a550793c8974f89b533d697784dd20a4dc0). If you encounter version issues, please confirm that you are able to run basic TRL training in your environment before opening an issue. `flash-attn` and `liger-kernel` are used for performance reasons. Recommended usage is via `accelerate` with DeepSpeed ZeRO 3 ([example config](https://github.com/huggingface/trl/blob/main/examples/accelerate_configs/deepspeed_zero3.yaml)) but `torchrun` works in my tests as well. You should really be using `uv` (`curl -LsSf https://astral.sh/uv/install.sh | sh`). I don't have the bandwidth to help debug your version issues if you're using `pip`, sorry.
 
