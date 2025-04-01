@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import random
 import time
 from typing import List, Dict, Sequence, Any, Union, Tuple
+from copy import deepcopy
 
 from datasets import Dataset
 from trl.trainer.grpo_trainer import RewardFunc
@@ -66,7 +67,7 @@ class MultiStepEnv(Environment):
             # sleep for 0-1 seconds to avoid rate limiting
             time.sleep(self.sleep_time * random.random())
 
-            state = states[j].copy()
+            state = deepcopy(states[j])
             if len(state["prompt_ids"]) == 0:
                 state["prompt_ids"] = llm_response.prompt_token_ids
             state["messages"].append({"role": "assistant", "content": llm_response.outputs[0].text})
