@@ -29,12 +29,12 @@ See `verifiers/examples/math_train.py` for an example with the ToolEnv environme
 
 To run on a 8-GPU node with 4 inference GPUs and 4 training GPUs:
 ```sh
-# Launch vLLM inference server from verifers/, with .venv active
+# Launch vLLM inference server from verifiers/, with .venv active
 CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-7B-Instruct" --tensor_parallel_size 4 --max_model_len 8192  --gpu_memory_utilization 0.9 --enable_prefix_caching True
 ```
 
 ```sh
-# Run training script from verifers/, with .venv active
+# Run training script from verifiers/, with .venv active
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --num-processes 4 --config-file configs/zero3.yaml verifiers/examples/math_train.py
 ```
 
