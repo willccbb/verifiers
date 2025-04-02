@@ -1,12 +1,12 @@
 def calculator(expression: str) -> str:
     """Evaluates a single line of Python math expression. No imports or variables allowed.
-    
+
     Args:
         expression: A mathematical expression using only numbers and basic operators (+,-,*,/,**,())
-        
+
     Returns:
         The result of the calculation or an error message
-        
+
     Examples:
         "2 + 2" -> "4"
         "3 * (17 + 4)" -> "63"

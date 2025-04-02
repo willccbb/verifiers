@@ -1,6 +1,7 @@
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 
+
 class MathRubric(Rubric):
     def __init__(self):
         self.parser = XMLParser(fields=["reasoning", "answer"])

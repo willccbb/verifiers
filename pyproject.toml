@@ -20,6 +20,10 @@ dependencies = [
     "liger-kernel",
     "vllm",
     "brave-search",
+    "latex2sympy>=1.0.3",
+    "math-verify[antlr4-13-2]>=0.1.0",
+    "pylatexenc>=2.10",
+    "requests>=2.32.3",
 ]
 
 [tool.setuptools]

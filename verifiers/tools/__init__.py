@@ -1,4 +1,6 @@
+from .ask import ask
 from .calculator import calculator
-from .search import search_ddg, search_brave
+from .search import search
+from .python import python
 
-__all__ = ["calculator", "search_ddg", "search_brave"] 
+__all__ = ["ask", "calculator", "search", "python"] 

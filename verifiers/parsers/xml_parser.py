@@ -84,7 +84,7 @@ class XMLParser:
                 # Return average XML score across all messages
                 if not xml_scores:
                     return 0.0
-                return 0.2 * (sum(xml_scores) / len(xml_scores))  # 0.2 weight as in both rubrics
+                return (sum(xml_scores) / len(xml_scores))
             
             # Apply the XML check to each completion trajectory
             return [count_xml(c) for c in completions]
@@ -188,7 +188,7 @@ class XMLParser:
                 # Return average format adherence
                 if not format_scores:
                     return 0.0
-                return 0.2 * (sum(format_scores) / len(format_scores))  # 0.2 weight as in both rubrics
+                return (sum(format_scores) / len(format_scores))
             
             # Apply the format check to each completion trajectory
             return [check_format(c) for c in completions]

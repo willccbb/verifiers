@@ -1,18 +1,51 @@
 from abc import abstractmethod
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 import random
 import time
 from typing import List, Dict, Sequence, Any, Union, Tuple
 
 from datasets import Dataset
-from trl.trainer.grpo_trainer import RewardFunc
+from pydantic import BaseModel
 from ..imports import LLM, SamplingParams  # type: ignore
+from verifiers.inference.vllm_client import VLLMClient
 
 from verifiers.envs.environment import Environment
+from verifiers.utils import format_dataset
 
+class ChatOutput(BaseModel):
+    token_ids: List[int]
+    text: str
 
-class MultiStepEnv(Environment):
+class ChatResponseItem(BaseModel):
+    prompt_token_ids: List[int]
+    outputs: List[ChatOutput]
+
+class ChatResponse(BaseModel):
+    responses: List[ChatResponseItem]
+
+def dict_to_chat_response(data: Dict[str, Any]) -> ChatResponse:
+    """
+    Recursively convert a dictionary to a ChatResponse object
+    """
+    # First, convert all outputs to ChatOutput objects
+    if "responses" in data:
+        for i, response_item in enumerate(data["responses"]):
+            if "outputs" in response_item:
+                data["responses"][i]["outputs"] = [
+                    ChatOutput(**output) for output in response_item["outputs"]
+                ]
+        
+        # Then convert all response items to ChatResponseItem objects
+        data["responses"] = [ChatResponseItem(**item) for item in data["responses"]]
+    
+    # Finally, convert the entire dict to a ChatResponse object
+    return ChatResponse(**data)
+
+class MultiTurnEnv(Environment):
     def __init__(self,
+                 dataset: Dataset | None = None,
+                 eval_dataset: Dataset | None = None,
                  system_prompt: str = "",
                  few_shot: List[Dict[str, str]] = [],
                  sampling_args: Dict[str, Any] = {},
@@ -24,6 +57,22 @@ class MultiStepEnv(Environment):
         super().__init__(**kwargs)
         self.system_prompt = system_prompt
         self.few_shot = few_shot
+        if dataset is not None:
+            self.dataset = format_dataset(
+                dataset=dataset,
+                system_prompt=self.system_prompt,
+                few_shot=self.few_shot
+            )
+        else:
+            self.dataset = None
+        if eval_dataset is not None:
+            self.eval_dataset = format_dataset(
+                dataset=eval_dataset,
+                system_prompt=self.system_prompt,
+                few_shot=few_shot
+            )
+        else:   
+            self.eval_dataset = None
         self.sampling_args = {
             "skip_special_tokens": False,
             "spaces_between_special_tokens": False,
@@ -34,15 +83,16 @@ class MultiStepEnv(Environment):
         self.max_workers = max_workers
         self.sleep_time = sleep_time
         self.max_steps = max_steps
-    def get_dataset(self, **kwargs: Any) -> Dataset | None:
-        pass
 
-    def get_eval_dataset(self, **kwargs: Any) -> Dataset | None:
-        pass
+    def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
+        if n > 0 and self.dataset is not None:
+            return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
+        return self.dataset
 
-    @abstractmethod
-    def get_rubric(self, **kwargs: Any) -> List[RewardFunc]:
-        pass
+    def get_eval_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
+        if n > 0 and self.eval_dataset is not None:
+            return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
+        return self.eval_dataset
 
     @abstractmethod
     def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
@@ -54,19 +104,37 @@ class MultiStepEnv(Environment):
 
     def step(self,
              states: List[Dict[str, Any]],
-             llm: LLM,
+             llm: LLM | VLLMClient,
              sampling_params: SamplingParams) -> List[Dict[str, Any]]:
         
         live_indices = [i for i, s in enumerate(states) if not s["completed"]]
         messages_to_step = [states[i]["messages"] for i in live_indices]
-        llm_responses = llm.chat(messages_to_step, sampling_params=sampling_params, use_tqdm=False) # type: ignore
+
+        if isinstance(llm, VLLMClient):
+            llm_responses = llm.chat(
+                messages_to_step,
+                n=1,
+                repetition_penalty=sampling_params.repetition_penalty,
+                temperature=sampling_params.temperature,
+                top_p=sampling_params.top_p,
+                top_k=sampling_params.top_k,
+                min_p=sampling_params.min_p,
+                max_tokens=sampling_params.max_tokens, # type: ignore
+                stop=sampling_params.stop, # type: ignore
+                include_stop_str_in_output=sampling_params.include_stop_str_in_output,
+                skip_special_tokens=sampling_params.skip_special_tokens,
+                spaces_between_special_tokens=sampling_params.spaces_between_special_tokens
+            ) # type: ignore
+            llm_responses = dict_to_chat_response(llm_responses).responses
+        else:
+            llm_responses = llm.chat(messages_to_step, sampling_params=sampling_params, use_tqdm=False) # type: ignore
 
         #for i, j in enumerate(live_indices):
         def update_state(j, llm_response):
             # sleep for 0-1 seconds to avoid rate limiting
             time.sleep(self.sleep_time * random.random())
 
-            state = states[j].copy()
+            state = deepcopy(states[j])
             if len(state["prompt_ids"]) == 0:
                 state["prompt_ids"] = llm_response.prompt_token_ids
             state["messages"].append({"role": "assistant", "content": llm_response.outputs[0].text})
@@ -85,18 +153,33 @@ class MultiStepEnv(Environment):
             state["completion_ids"].extend(list(llm_response.outputs[0].token_ids))
             state["completion_ids"] = state["completion_ids"][len(state["prompt_ids"]):]
 
-            if self.is_completed(state["messages"]) or len(state["completion_ids"]) > sampling_params.max_tokens: # type: ignore
+            if state["completion_ids"][-1] != 198 and state["completion_ids"][-2] != self.message_end_id:
+                state["completion_ids"].append(self.message_end_id)
+                state["completion_ids"].append(198)
+                state["completion_mask"].append(1)
+                state["completion_mask"].append(1)
+
+            if len(state["completion_ids"]) > len(state["completion_mask"]): # type: ignore
+                state["completion_mask"].extend([1] * (len(state["completion_ids"]) - len(state["completion_mask"]))) # type: ignore
+            if len(state["completion_mask"]) > len(state["completion_ids"]): # type: ignore
+                state["completion_mask"] = state["completion_mask"][:len(state["completion_ids"])] # type: ignore
+            
+            if self.is_completed(state["messages"]) or len(state["completion_ids"]) > sampling_params.max_tokens - 1: # type: ignore
                 state["completed"] = True
                 state["completion_ids"] = state["completion_ids"][:sampling_params.max_tokens]
                 state["completion_mask"] = state["completion_mask"][:len(state["completion_ids"])]
             else:
                 state["messages"].append(self.env_response(state["messages"]))
 
+            # enforce that the completion mask and completion ids are the same length
+            # weird bug that happens rarely and only for certain models; something tokenizer related :(
             if not len(state["completion_mask"]) == len(state["completion_ids"]):
                 print(state["messages"])
                 print(state["completion_mask"])
                 print(state["completion_ids"])
-                raise ValueError(f"Completion mask and completion ids are not the same length for state {j}")
+                min_len = min(len(state["completion_mask"]), len(state["completion_ids"]))
+                state["completion_mask"] = state["completion_mask"][:min_len]
+                state["completion_ids"] = state["completion_ids"][:min_len]
 
             return j, state
 
@@ -112,7 +195,7 @@ class MultiStepEnv(Environment):
         return states
 
     def generate(self, prompts: List[List[Dict[str, Any]]],
-                 llm: LLM,
+                 llm: LLM | VLLMClient,  
                  sampling_params: SamplingParams,
                  **kwargs: Any) -> Dict[str, List[Sequence[int]] | List[str] |  List[List[Dict[str, Any]]]]:
         custom_sp = sampling_params.clone()
@@ -149,6 +232,7 @@ class MultiStepEnv(Environment):
              client: Any,
              model: str,
              messages: List[Dict[str, str]],
+             sampling_args: Dict[str, Any] = {},
              **kwargs: Any) -> Tuple[List[Dict[str, str]], bool]:
         """
         Execute a single step using OpenAI API, including environment response if needed.
@@ -162,13 +246,14 @@ class MultiStepEnv(Environment):
         Returns:
             Updated messages list with assistant response and possibly environment response
         """
-        messages_copy = messages.copy()
+        messages_copy = deepcopy(messages)
         
         try:            
             # Get assistant response
             response = client.chat.completions.create(
                 model=model,
                 messages=messages_copy,
+                extra_body=sampling_args
             )
             
             # Add assistant response to messages
@@ -202,6 +287,9 @@ class MultiStepEnv(Environment):
                 timeout: int = 60,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any):
+        
+        eval_sampling_args = deepcopy(self.sampling_args)
+        eval_sampling_args.update(sampling_args)
         """
         Evaluate model using OpenAI API with proper concurrency.
         
@@ -233,7 +321,7 @@ class MultiStepEnv(Environment):
                 async with semaphore:
                     # Initialize conversation with system prompt and few-shot examples
                     prompt = example["prompt"]
-                    messages = example["prompt"].copy()
+                    messages = deepcopy(example["prompt"])
                     answer = example["answer"]
                     
                     # Save the length of initial messages to extract just the interaction part later
@@ -250,7 +338,7 @@ class MultiStepEnv(Environment):
                                     client=client,
                                     model=model,
                                     messages=messages,
-                                    **sampling_args
+                                    sampling_args=eval_sampling_args
                                 )
                             )
                             
@@ -271,6 +359,7 @@ class MultiStepEnv(Environment):
                     return {
                         "prompt": prompt,
                         "completions": completions,
+                        "task": example["task"],
                         "answer": answer
                     }
             
@@ -301,15 +390,17 @@ class MultiStepEnv(Environment):
             # Calculate rewards
             results_prompt = [result["prompt"] for result in results]
             results_answer = [result["answer"] for result in results]
+            results_task = [result["task"] for result in results]
             results_completions = [result["completions"] for result in results]
-            results = {"prompt": results_prompt, "answer": results_answer, "completions": results_completions}
+            results = {"prompt": results_prompt, "answer": results_answer, "completions": results_completions, "task": results_task}
             
-            reward_funcs = self.get_rubric()
+            reward_funcs = self.get_reward_funcs()
             rewards = {}
             
             for reward_func in reward_funcs:
                 func_rewards = reward_func(**results) # type: ignore
-                func_reward_avg = sum(func_rewards) / len(func_rewards)
+                func_rewards = [fr for fr in func_rewards if fr is not None]
+                func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
                 func_name = reward_func.__name__ # type: ignore
                 print(f"{func_name}: {func_reward_avg}")
                 rewards[func_name] = func_reward_avg

@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Sequence, Union
+from typing import Any, Dict, List, Sequence, Callable
 import logging
 
 from datasets import Dataset
-from trl.trainer.grpo_trainer import RewardFunc
+
+from verifiers import RewardFunc
 from ..imports import LLM, SamplingParams  # type: ignore
 
 class Environment(ABC):
@@ -15,6 +16,10 @@ class Environment(ABC):
         self.tokenizer = None
         self.dataset = None
         self.eval_dataset = None
+        self.eot_id = 151643
+        self.message_end_id = 151645
+        self.reward_funcs = []
+        self.reward_weights = []
 
     @abstractmethod
     def get_dataset(self, **kwargs: Any) -> Dataset | None:
@@ -25,7 +30,11 @@ class Environment(ABC):
         pass
 
     @abstractmethod
-    def get_rubric(self, **kwargs: Any) -> List[RewardFunc]:
+    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
+        pass
+    
+    @abstractmethod
+    def get_reward_weights(self, **kwargs: Any) -> List[float]:
         pass
     
     @abstractmethod

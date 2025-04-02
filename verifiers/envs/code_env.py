@@ -2,17 +2,17 @@ import subprocess
 from typing import List, Dict, Any
 
 from datasets import Dataset
-from trl.trainer.grpo_trainer import RewardFunc
 
-from verifiers.envs.multistep_env import MultiStepEnv
+from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.prompts import CODE_FEW_SHOT, CODE_PROMPT
 from verifiers.rubrics import CodeRubric
 from verifiers.utils import preprocess_dataset
 
-class CodeEnv(MultiStepEnv):
+class CodeEnv(MultiTurnEnv):
     def __init__(self,
-                 dataset: str = "gsm8k",        
+                 dataset: Dataset | None = None,
+                 eval_dataset: Dataset | None = None,
                  system_prompt: str = CODE_PROMPT,
                  few_shot: List[Dict[str, str]] = CODE_FEW_SHOT[0],
                  sampling_args: Dict[str, Any] = {
@@ -22,40 +22,18 @@ class CodeEnv(MultiStepEnv):
                  mask_env_response: bool = True, 
                  max_steps: int = 5, **kwargs):
         super().__init__(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
             system_prompt=system_prompt,
             few_shot=few_shot,
             mask_env_response=mask_env_response,
+            max_steps=max_steps,
             sampling_args=sampling_args,
             **kwargs
         )
-        self.dataset_name = dataset
-        self.dataset = preprocess_dataset(
-            dataset_name=dataset,
-            split="train",
-            system_prompt=system_prompt,
-            few_shot=few_shot
-        )
-        self.eval_dataset = None
-        self.max_steps = max_steps
         self.llm_parser = XMLParser(fields=["reasoning", ("code", "answer")])
         self.env_parser = XMLParser(fields=["output"])
         self.rubric = CodeRubric(parser=self.llm_parser, env_parser=self.env_parser)
-
-    def get_dataset(self, **kwargs: Any) -> Dataset:
-        return self.dataset
-    
-    def get_eval_dataset(self, **kwargs: Any) -> Dataset:
-        if self.eval_dataset is None:
-            self.eval_dataset = preprocess_dataset(
-                dataset_name=self.dataset_name,
-                split="test",
-                system_prompt=self.system_prompt,
-                few_shot=self.few_shot
-            )
-        return self.eval_dataset
-    
-    def get_rubric(self, **kwargs: Any) -> List[RewardFunc]:
-        return self.rubric.get_reward_funcs()
     
     def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
         try:
