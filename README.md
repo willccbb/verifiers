@@ -4,13 +4,13 @@ This repository contains a set of tools for reinforcement learning with LLMs in 
 
 **WARNING:** This repository in its current state should be viewed as **in-progress research code**, and is not guaranteed to yield stable or optimal training results. Best results will likely be found on reasonable timescales when using 7B+ models, and at least 8 GPUs.
 
-**Note:** If you don't need multi-turn tool calling or multi-agent interactions, you should probably just use TRL (or Unsloth/Axolotl) for GRPO. This is mostly a multi-turn LLM RL repo with some other bells and whistles.
+**Note:** If you don't need multi-turn tool calling or agentic interactions, you should probably just use TRL (or Unsloth/Axolotl) for GRPO. This is mostly a multi-turn LLM RL repo with some other bells and whistles.
 
 
 ## Setup
 
 PyPI [coming soon](https://pypi.org/project/verifiers/), for now just do:
-```
+```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync
@@ -28,12 +28,12 @@ If you encounter version issues, please confirm that you are able to run basic T
 See `verifiers/examples/math_train.py` for an example with the ToolEnv environment + a Python tool.
 
 To run on a 8-GPU node with 4 inference GPUs and 4 training GPUs:
-```sh
+```bash
 # Launch vLLM inference server from verifiers/, with .venv active
 CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-7B-Instruct" --tensor_parallel_size 4 --max_model_len 8192  --gpu_memory_utilization 0.9 --enable_prefix_caching True
 ```
 
-```sh
+```bash
 # Run training script from verifiers/, with .venv active
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --num-processes 4 --config-file configs/zero3.yaml verifiers/examples/math_train.py
 ```
@@ -56,8 +56,8 @@ def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[st
 ```
 
 ## Features
-- [X] Environments (`MultiTurnEnv`): `DoubleCheckEnv`, `CodeEnv`, `ToolEnv`
-- [X] Multi-turn tool use in `CodeEnv` and `ToolEnv`
+- [X] Environments (`MultiTurnEnv`): `DoubleCheckEnv`, `CodeEnv`, `ToolEnv`, `SmolaToolEnv`
+- [X] Multi-turn tool use in `ToolEnv`, `SmolaToolEnv`, `CodeEnv`
 - [X] Dataset formatting + XML parsers
 - [X] Basic rubrics for math/code correctness + formatting
 - [X] Defaults for GRPO, model, tokenizer, etc.
