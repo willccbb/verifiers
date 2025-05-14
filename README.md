@@ -21,6 +21,8 @@ Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=N
 
 If you encounter version issues, please confirm that you are able to run basic TRL training in your environment before opening an issue.
 
+If you run into NCCL timeout/hang issues, try setting `NCCL_P2P_DISABLE=1` (see [here](https://github.com/huggingface/trl/issues/2923) for more details).
+
 ## Usage (Multi-GPU)
 
 ### Training with Multi-Turn GRPO
