@@ -18,7 +18,7 @@ from trl.import_utils import is_fastapi_available, is_pydantic_available, is_uvi
 
 
 #if is_fastapi_available():
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import FastAPI
 
 #if is_pydantic_available():
 from pydantic import BaseModel
@@ -263,7 +263,6 @@ def llm_worker(
         # directly reuse the KV cache if it shares the same prefix with one of the existing queries.
         # This is particularly useful here because we generate completions from the same prompts.
         enable_prefix_caching=script_args.enable_prefix_caching,
-        kv_cache_dtype=script_args.kv_cache_dtype,
         max_model_len=script_args.max_model_len,
         worker_extension_cls="verifiers.inference.vllm_serve.WeightSyncWorkerExtension",
     )
@@ -358,23 +357,7 @@ def main(script_args: ScriptArguments):
                 process.join()  # ensure process termination after calling terminate()
 
     app = FastAPI(lifespan=lifespan) 
-
-    # llm = LLM(
-    #     model=script_args.model,
-    #     revision=script_args.revision,
-    #     tensor_parallel_size=script_args.tensor_parallel_size,
-    #     gpu_memory_utilization=script_args.gpu_memory_utilization,
-    #     dtype=script_args.dtype,
-    #     # Automatic Prefix Caching caches the KV cache of existing queries, so that a new query can
-    #     # directly reuse the KV cache if it shares the same prefix with one of the existing queries.
-    #     # This is particularly useful here because we generate completions from the same prompts.
-    #     enable_prefix_caching=script_args.enable_prefix_caching,
-    #     max_model_len=script_args.max_model_len,
-    #     worker_cls="verifiers.inference.vllm_serve.WeightSyncWorkerExtension",
-    # )
-
-    # app = FastAPI()
-
+ 
     # Define the endpoints for the model server
     @app.get("/health/")
     async def health():

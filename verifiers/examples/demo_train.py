@@ -1,51 +1,34 @@
-from peft import LoraConfig
 from trl import GRPOConfig
 
 import verifiers as vf
 from verifiers.tools import python
 from verifiers.utils import preprocess_dataset
 
-model_name = "Qwen/Qwen3-1.7B"
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 
 """
 2-GPU training (single node, 1 training + 1 inference)
 
-CUDA_VISIBLE_DEVICES=0 python verifiers/inference/vllm_serve.py --model 'Qwen/Qwen3-1.7B' --max_model_len 2048 --dtype bfloat16 --gpu_memory_utilization 0.95 --enable_prefix_caching True
-
+CUDA_VISIBLE_DEVICES=0 python verifiers/inference/vllm_serve.py --model 'Qwen/Qwen2.5-1.5B-Instruct' --max_model_len 4096 --dtype bfloat16 --gpu_memory_utilization 0.95 --enable_prefix_caching True
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/demo_train.py
+---
+4-GPU training (single node, 2 training + 2 inference)
+
+CUDA_VISIBLE_DEVICES=0,1 python verifiers/inference/vllm_serve.py --model 'Qwen/Qwen2.5-1.5B-Instruct' --max_model_len 4096 --dtype bfloat16 --gpu_memory_utilization 0.95 --enable_prefix_caching True
+CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num-processes 2 --config-file configs/zero3.yaml verifiers/examples/demo_train.py
 """
 
-TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
-
-You have access to the following tools to help solve problems:
-
-{tool_descriptions}
-
-Tools can be called by writing a JSON command inside <tool> tags with:
-- "name": the name of the tool to use
-- "args": the arguments for the tool
-
-Example usage:
-<tool>
-{{"name": "python", "args": {{"code": "import sympy\nx = sympy.symbols('x')\nprint(sympy.solve(x**2 - 4, x))"}}}}
-</tool>
-
-You will then see the tool's output inside <result> tags. You may call tools multiple times if needed.
-
-The <answer>...</answer> tags should contain only your final answer.
+SIMPLE_PROMPT = """
+You are a helpful assistant. In each turn, think step-by-step inside <think>...</think> tags, then give your final answer inside <answer>...</answer> tags.
 """
 
 dataset = preprocess_dataset("math", "train", n=1000)
 
-vf_env = vf.ToolEnv(
+#vf_env = vf.SingleTurnEnv(
+vf_env = vf.DoubleCheckEnv(
     dataset=dataset,
-    system_prompt=TOOL_PROMPT,
-    few_shot=[],
-    tools=[python],
-    llm_fields=["think", ("tool", "answer")],
-    env_fields=["result"],
-    max_steps=3
+    system_prompt=SIMPLE_PROMPT,
+    few_shot=[]
 )
 print(vf_env.system_prompt)
 
@@ -64,8 +47,8 @@ training_args=GRPOConfig(
     max_grad_norm=0.1,
     num_iterations=1,
     beta=0,
-    max_prompt_length=1024,
-    max_completion_length=1024,
+    max_prompt_length=512,
+    max_completion_length=1536,
     per_device_train_batch_size=16,
     num_generations=4,
     gradient_accumulation_steps=1,
@@ -74,21 +57,11 @@ training_args=GRPOConfig(
     save_steps=100,
     save_only_model=True,
     use_vllm=True,
-    vllm_server_host="0.0.0.0", # replace with your inference server's host for multi-node setups
-    vllm_server_port=8000,
-    vllm_gpu_memory_utilization=0.9,
     logging_steps=1,
     log_on_each_node=False,
     log_completions=True,
     report_to="wandb",
     reward_weights=vf_env.get_reward_weights()
-)
-
-peft_config = LoraConfig(
-    r=16,
-    lora_alpha=64,
-    target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "down_proj", "up_proj"],
-    task_type="CAUSAL_LM",
 )
 
 trainer = vf.GRPOEnvTrainer(
@@ -97,8 +70,6 @@ trainer = vf.GRPOEnvTrainer(
     reward_funcs=vf_env.get_reward_funcs(),
     env=vf_env,
     args=training_args,
-    train_dataset=vf_env.get_dataset(),
-    eval_dataset=vf_env.get_eval_dataset(),
-    peft_config=peft_config
+    train_dataset=vf_env.get_dataset()
 )
 trainer.train()
