@@ -26,7 +26,7 @@ rubric = vf.Rubric(funcs=[
 	parser.get_format_reward_func(),
 ], weights=[1.0, 0.2])
 
-N = len(dataset)
+N = len(dataset) # last 2000 rows
 vf_env = vf.SingleTurnEnv(
     eval_dataset=dataset.select(range(N - 2000, N)),
     system_prompt=system_prompt,
@@ -34,6 +34,7 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric
 )
 
+# collect R1 rollouts from API
 import os
 from openai import OpenAI
 base_url = os.getenv("DEEPSEEK_API_URL")
@@ -53,9 +54,9 @@ def flatten_rewards(rewards: dict) -> list[float]:
 
 dataset = Dataset.from_dict({
     "prompt": results['prompt'],
-    "completions": results['completions'],
+    "completion": results['completion'],
     "answer": results['answer'],
-    "rewards": flatten_rewards(results['rewards']),
+    "reward": flatten_rewards(results['rewards']),
 })
 
 # filter to top half of rows by rewards

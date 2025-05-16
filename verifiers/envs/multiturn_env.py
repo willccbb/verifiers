@@ -394,8 +394,8 @@ class MultiTurnEnv(Environment):
                 results_task = [result["task"] for result in results]
             else:
                 results_task = None
-            results_completions = [result["completions"] for result in results]
-            results = {"prompt": results_prompt, "answer": results_answer, "completions": results_completions, "task": results_task}
+            results_completion = [result["completion"] for result in results]
+            results = {"prompt": results_prompt, "answer": results_answer, "completion": results_completion, "task": results_task}
             
             reward_funcs = self.get_reward_funcs()
 
