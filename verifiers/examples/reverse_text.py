@@ -2,7 +2,7 @@ from datasets import load_dataset
 import verifiers as vf
 
 #model = 'Qwen/Qwen2.5-1.5B-Instruct'
-model = 'willcb/Qwen2.5-1.5B-Reverse-SFT'
+model_name = 'willcb/Qwen2.5-1.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
 parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
 system_prompt = f"""Reverse the given text.
@@ -35,7 +35,7 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric
 )
 
-model, tokenizer = vf.get_model_and_tokenizer(model)
+model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,

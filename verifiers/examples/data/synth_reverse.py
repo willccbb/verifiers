@@ -60,7 +60,7 @@ dataset = Dataset.from_dict({
 })
 
 # filter to top half of rows by rewards
-dataset = dataset.sort("rewards", reverse=True).select(range(len(dataset) // 2))
+dataset = dataset.sort("reward", reverse=True).select(range(len(dataset) // 2))
 print(dataset[0])
 
 # save to hub

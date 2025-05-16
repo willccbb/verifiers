@@ -1,5 +1,5 @@
+import verifiers as vf
 from datasets import load_dataset
-from transformers import AutoTokenizer 
 from trl import SFTTrainer, SFTConfig
 
 
@@ -7,10 +7,9 @@ from trl import SFTTrainer, SFTConfig
 accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/sft/warmup_reverse.py
 """
 
+# convenience function for liger kernel + FA2 loading
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
 dataset = load_dataset('willcb/R1-reverse-wikipedia-paragraphs-v1-1000', split='train')
-model = "Qwen/Qwen2.5-1.5B-Instruct"
-tokenizer = AutoTokenizer.from_pretrained(model)
-
 
 tok_counts = []
 for row in dataset:
@@ -32,8 +31,8 @@ print(f"Median tokens: {sorted(tok_counts)[len(tok_counts) // 2]}")
 args = SFTConfig(
     max_length=4096,
     output_dir="outputs/sft-warmup-reverse",
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=2,
+    per_device_train_batch_size=1,
+    gradient_accumulation_steps=4,
     gradient_checkpointing=True,
     bf16=True,
     learning_rate=2e-5,
@@ -47,7 +46,7 @@ args = SFTConfig(
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen2.5-1.5B-Reverse-SFT",
+    hub_model_id="Qwen2.5-7B-Reverse-SFT",
 )
 
 trainer = SFTTrainer(
