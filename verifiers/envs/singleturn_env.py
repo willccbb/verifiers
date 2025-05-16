@@ -12,9 +12,15 @@ class SingleTurnEnv(MultiTurnEnv):
                  dataset: Dataset | None = None,
                  system_prompt: str = SIMPLE_PROMPT,
                  few_shot: List[Dict[str, str]] = DOUBLECHECK_FEW_SHOT[0],
+                 llm_fields: List[str] | None = None,
                  **kwargs):
         super().__init__(dataset=dataset, system_prompt=system_prompt, few_shot=few_shot, **kwargs)
         self.rubric = MathRubric()
+        if llm_fields is not None:
+            self.llm_fields = llm_fields
+            self.parser = 
+        else:
+            self.llm_fields = ["answer"]
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()

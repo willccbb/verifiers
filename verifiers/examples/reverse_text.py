@@ -19,10 +19,12 @@ def lcs_ratio(x: str, y: str) -> float:
     from difflib import SequenceMatcher
     return SequenceMatcher(None, x, y).ratio()
 
-def lcs_reward_func(prompts: List[str], completions: List[str]) -> List[float]:
+def lcs_reward_func(prompts: List[str], completions: List[str], parser: vf.Parser) -> List[float]:
     """
     Return the reward for the completions.
     """
+    reverse_prompts = [prompt[::-1] for prompt in prompts]
+    answers = [parser.parse(completion)['answer'] for completion in completions]
     return [lcs_ratio(prompt, completion) for prompt, parser.parse(co) in zip(prompts, completions)]
 
 vf_env = vf.SingleTurnEnv(

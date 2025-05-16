@@ -129,7 +129,6 @@ class MultiTurnEnv(Environment):
         else:
             llm_responses = llm.chat(messages_to_step, sampling_params=sampling_params, use_tqdm=False) # type: ignore
 
-        #for i, j in enumerate(live_indices):
         def update_state(j, llm_response):
             # sleep for 0-1 seconds to avoid rate limiting
             time.sleep(self.sleep_time * random.random())
