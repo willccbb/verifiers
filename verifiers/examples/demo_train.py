@@ -32,7 +32,7 @@ vf_env = vf.DoubleCheckEnv(
 )
 print(vf_env.system_prompt)
 
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
+#model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "demo-grpo_" + model_name.split("/")[-1].lower()
 
 training_args=GRPOConfig(
@@ -65,8 +65,8 @@ training_args=GRPOConfig(
 )
 
 trainer = vf.GRPOEnvTrainer(
-    model=model,
-    processing_class=tokenizer,
+    model=model_name,
+    #processing_class=tokenizer,
     reward_funcs=vf_env.get_reward_funcs(),
     env=vf_env,
     args=training_args,

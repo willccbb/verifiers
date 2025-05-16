@@ -3,8 +3,7 @@ from datasets import load_dataset, Dataset
 from trl import GRPOConfig, GRPOTrainer
 
 """
-CUDA_VISIBLE_DEVICES=0 trl vllm-serve --model Qwen/Qwen2.5-1.5B-Instruct --enable-prefix-caching True --dtype bfloat
-16 --max-model-len 2048 --gpu-memory-utilization 0.95
+CUDA_VISIBLE_DEVICES=0 trl vllm-serve --model Qwen/Qwen2.5-1.5B-Instruct --enable-prefix-caching True --dtype bfloat16 --max-model-len 2048 --gpu-memory-utilization 0.95
 
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/trl_grpo.py
 """

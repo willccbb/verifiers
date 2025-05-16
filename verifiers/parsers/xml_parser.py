@@ -35,6 +35,19 @@ class XMLParser:
             seen.add(canonical)
             self._fields.append((canonical, alternatives))
     
+    def get_format_str(self) -> str:
+        """
+        Return a string that describes the format of the XML.
+        """
+        format_str = ""
+        for field in self._fields:
+            if len(field[1]) > 1:
+                options = " | ".join(field[1])
+                format_str += f"<[ {options} ]>\n...\n</[ {options} ]>\n"
+            else:
+                format_str += f"<{field[0]}>\n...\n</{field[0]}>\n"
+        return format_str.strip()
+
     def get_xml_reward_func(self) -> Callable:
         """
         Return a reward function that checks for proper XML tag usage.

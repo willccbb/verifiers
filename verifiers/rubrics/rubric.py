@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, Dict
+from typing import List, Dict, Callable
 import logging
 
 from verifiers.trainers.grpo_env_trainer import RewardFunc
@@ -9,13 +9,18 @@ def equals_reward_func(completions, answer, **kwargs) -> List[float]:
     return [1.0 if r == a else 0.0 for r, a in zip(responses, answer)]
 
 class Rubric(ABC):
-    def __init__(self, **kwargs):
+    def __init__(self, 
+                 funcs: List[Callable] = [],
+                 weights: List[float] = [],
+                 answer_field: str = "answer",
+                 **kwargs):
         self.logger = logging.getLogger(f"verifiers.parsers.{self.__class__.__name__}")
         self.parser = None
         for key, value in kwargs.items():
             setattr(self, key, value)
-        self.reward_funcs = []
-        self.reward_weights = []
+        self.answer_field = answer_field
+        self.reward_funcs = funcs
+        self.reward_weights = weights
 
     def get_assistant_messages(self, trajectory: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Helper function to extract assistant messages from a trajectory."""
@@ -28,7 +33,7 @@ class Rubric(ABC):
                 if self.parser is None:
                     raise ValueError("Parser is not set")
                 parsed = self.parser.parse(msg['content'])
-                if hasattr(parsed, 'answer') and parsed.answer is not None:
+                if hasattr(parsed, self.answer_field) and parsed.answer is not None:
                     return parsed.answer
         return None
 
