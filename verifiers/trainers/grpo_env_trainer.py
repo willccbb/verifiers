@@ -56,7 +56,7 @@ class GRPOEnvTrainer(GRPOTrainer):
             self,
             model: Union[str, PreTrainedModel],
             env: Environment,
-            reward_funcs: Union[RewardFunc, list[RewardFunc]],
+            reward_funcs: Union[RewardFunc, list[RewardFunc]] | None = None,
             scale_rewards: bool = False,
             args: Optional[GRPOConfig] = None,
             train_dataset: Optional[Union[Dataset, IterableDataset]] = None,
@@ -67,6 +67,15 @@ class GRPOEnvTrainer(GRPOTrainer):
             peft_config: Optional["PeftConfig"] = None,
             **kwargs,
     ):
+        if train_dataset is None:
+            train_dataset = env.get_dataset()
+        if eval_dataset is None:
+            eval_dataset = env.get_eval_dataset()
+        if reward_funcs is None:
+            reward_funcs = env.get_reward_funcs()
+        if args.reward_weights is None:
+            args.reward_weights = env.get_reward_weights()
+
         self.vllm_client = None
         if not args.use_vllm: # type: ignore
             raise ValueError("vLLM must be enabled for GRPOEnvTrainer")

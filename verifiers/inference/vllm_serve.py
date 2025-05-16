@@ -144,7 +144,7 @@ class ScriptArguments:
             Host address to run the server on.
         port (`int`, *optional*, defaults to `8000`):
             Port to run the server on.
-        gpu_memory_utilization (`float`, *optional*, defaults to `0.9`):
+        gpu_memory_utilization (`float`, *optional*, defaults to `0.95`):
             Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV cache on the
             device dedicated to generation powered by vLLM. Higher values will increase the KV cache size and thus
             improve the model's throughput. However, if the value is too high, it may cause out-of-memory (OOM) errors
@@ -191,7 +191,7 @@ class ScriptArguments:
         metadata={"help": "Port to run the server on."},
     )
     gpu_memory_utilization: float = field(
-        default=0.9,
+        default=0.95,
         metadata={
             "help": "Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV "
             "cache on the device dedicated to generation powered by vLLM. Higher values will increase the KV cache "

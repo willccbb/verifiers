@@ -270,7 +270,6 @@ class MultiTurnEnv(Environment):
                 # If not done, get and add environment response
                 env_msg = self.env_response(messages_copy)
                 messages_copy.append(env_msg)
-            
             return messages_copy, rollout_is_completed
             
         except Exception as e:
@@ -283,7 +282,7 @@ class MultiTurnEnv(Environment):
                 client: Any,
                 model: str,
                 max_concurrent: int = 32,
-                timeout: int = 60,
+                timeout: int = 300,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any):
         
@@ -355,12 +354,14 @@ class MultiTurnEnv(Environment):
                     # Extract only the interaction part (not system/few-shot)
                     completions = messages[initial_length:]
                     
-                    return {
+                    result = {
                         "prompt": prompt,
                         "completions": completions,
-                        "task": example["task"],
                         "answer": answer
                     }
+                    if 'task' in example:
+                        result['task'] = example['task']
+                    return result
             
             async def run_all_examples():
                 # Create semaphore for concurrency control
@@ -389,22 +390,32 @@ class MultiTurnEnv(Environment):
             # Calculate rewards
             results_prompt = [result["prompt"] for result in results]
             results_answer = [result["answer"] for result in results]
-            results_task = [result["task"] for result in results]
+            if 'task' in results[0]:
+                results_task = [result["task"] for result in results]
+            else:
+                results_task = None
             results_completions = [result["completions"] for result in results]
             results = {"prompt": results_prompt, "answer": results_answer, "completions": results_completions, "task": results_task}
             
             reward_funcs = self.get_reward_funcs()
-            rewards = {}
+
+            results_rewards = {}
+            rewards_avg = {}
             
             for reward_func in reward_funcs:
-                func_rewards = reward_func(**results) # type: ignore
-                func_rewards = [fr for fr in func_rewards if fr is not None]
-                func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
                 func_name = reward_func.__name__ # type: ignore
+                results_rewards[func_name] = []
+                func_rewards_all = reward_func(**results) # type: ignore
+                results_rewards[func_name] = func_rewards_all
+                func_rewards = [fr for fr in func_rewards_all if fr is not None]
+                func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
+                
                 print(f"{func_name}: {func_reward_avg}")
-                rewards[func_name] = func_reward_avg
+                rewards_avg[func_name] = func_reward_avg
             
-            return rewards
+            results['rewards'] = results_rewards
+            results['rewards_avg'] = rewards_avg
+            return results
             
         # Run the evaluation function
         return run_evaluation()

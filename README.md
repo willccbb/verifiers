@@ -15,6 +15,7 @@ git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync
 uv pip install flash-attn --no-build-isolation
+uv pip install -e .
 source .venv/bin/activate
 ```
 Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).

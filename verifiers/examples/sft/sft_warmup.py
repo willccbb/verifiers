@@ -1,13 +1,12 @@
 from datasets import load_dataset
 import verifiers as vf
 
-model = 'Qwen/Qwen2.5-1.5B-Instruct'
 dataset = load_dataset('agentlans/wikipedia-paragraphs').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
-parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
-system_prompt = f"""Reverse the given text.
+parser = vf.XMLParser(['think', 'answer'], answer_field="answer")
+system_prompt = f"""Respond in the following format:
+{parser.get_format_str()}
 
-Respond in the following format:
-{parser.get_format_str()}"""
+Reverse the given text character-by-character."""
 
 def lcs_reward_func(completions, answer, **kwargs) -> list[float]:
     """
@@ -28,17 +27,15 @@ rubric = vf.Rubric(funcs=[
 ], weights=[1.0, 0.2])
 
 vf_env = vf.SingleTurnEnv(
-    dataset=dataset['train'],
+    eval_dataset=dataset['train'].select(range(20)),
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric
 )
 
-trainer = vf.GRPOEnvTrainer(
-    model=model,
-    env=vf_env,
-    args=vf.defaults(run_name='reverse_text') # TRL GRPOConfig, modify as needed
-)
-trainer.train()
-
-
+import os
+from openai import OpenAI
+base_url = os.getenv("DEEPSEEK_API_URL")
+api_key = os.getenv("DEEPSEEK_API_KEY")
+client = OpenAI(base_url=base_url, api_key=api_key)
+vf_env.eval_api(client, "deepseek-reasoner", max_concurrent=20, sampling_args={"temperature": 0.6})

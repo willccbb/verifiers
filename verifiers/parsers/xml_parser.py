@@ -2,8 +2,10 @@ import re
 from typing import List, Dict, Any, Union, Tuple, Optional, Callable
 from types import SimpleNamespace
 
-class XMLParser:
-    def __init__(self, fields: List[Union[str, Tuple[str, ...]]]):
+from verifiers.parsers import Parser
+
+class XMLParser(Parser):
+    def __init__(self, fields: List[Union[str, Tuple[str, ...]]], answer_field: str = "answer"):
         """
         Initialize the parser with field definitions.
         
@@ -16,6 +18,7 @@ class XMLParser:
         The schema is assumed to have no duplicate names.
         """
         self._fields: List[Tuple[str, List[str]]] = []  # List of (canonical, [alternatives])
+        self.answer_field = answer_field
         seen = set()
         for field in fields:
             if isinstance(field, str):
@@ -34,7 +37,16 @@ class XMLParser:
                 raise ValueError(f"Duplicate field name: {canonical}")
             seen.add(canonical)
             self._fields.append((canonical, alternatives))
-    
+
+    def parse_answer(self, trajectory: List[Dict[str, str]]) -> str | None:
+        """Extract the last answer from a trajectory."""
+        for msg in reversed(trajectory):
+            if msg['role'] == 'assistant':
+                parsed = self.parse(msg['content'])
+                if hasattr(parsed, self.answer_field) and parsed.answer is not None:
+                    return parsed.answer
+        return None
+
     def get_format_str(self) -> str:
         """
         Return a string that describes the format of the XML.

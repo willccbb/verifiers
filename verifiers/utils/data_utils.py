@@ -256,12 +256,11 @@ Please ensure that the dataset is formatted with 'prompt' (str) and 'answer' (st
 
 def format_prompt(prompt: str,
                   system_prompt: str | None = None,
-                  few_shot: List[Dict[str, str]] | None = None,
-                  fewshot_prob: float = 1.0) -> List[Dict[str, str]]:
+                  few_shot: List[Dict[str, str]] | None = None) -> List[Dict[str, str]]:
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    if few_shot and random.random() < fewshot_prob:
+    if few_shot:
         messages.extend(few_shot)
     messages.append({"role": "user", "content": prompt})
     return messages
@@ -269,11 +268,15 @@ def format_prompt(prompt: str,
 def format_dataset(dataset: Dataset,
                    system_prompt: str | None = None,
                    few_shot: List[Dict[str, str]] | None = None,
-                   fewshot_prob: float = 1.0,
                    question_key: str = "question",
                    answer_key: str = "answer",
                    ) -> Dataset:
-    return dataset.map(lambda x: {
-        "prompt": format_prompt(x[question_key], system_prompt, few_shot, fewshot_prob),
-        "answer": x[answer_key]
-    }, num_proc=10)
+    if answer_key == "answer":
+        return dataset.map(lambda x: {
+            "prompt": format_prompt(x[question_key], system_prompt, few_shot),
+        }, num_proc=10)
+    else:
+        return dataset.map(lambda x: {
+            "prompt": format_prompt(x[question_key], system_prompt, few_shot),
+            "answer": x[answer_key]
+        }, num_proc=10)
