@@ -35,11 +35,10 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric
 )
 
-run_name = "rev_warmup_grpo_fft"
+run_name = "rev_warmup_grpo_fft_gr=1e-2_delta=2"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
-from trl import GRPOConfig
-args = GRPOConfig(
+args = vf.GRPOEnvConfig(
     output_dir=f"outputs/{run_name}",
     run_name=run_name,
     learning_rate=1e-6,
@@ -48,6 +47,7 @@ args = GRPOConfig(
     max_steps=1000,
     bf16=True,
     beta=0,
+    delta=2.0,
     max_grad_norm=0.01,
     num_iterations=2,
     max_prompt_length=1024,

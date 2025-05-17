@@ -1,9 +1,10 @@
 from peft import LoraConfig
-from trl import GRPOConfig
 from typing import List, Optional
+from verifiers import GRPOEnvConfig
 
-def get_default_grpo_config(run_name: str) -> GRPOConfig:
-    return GRPOConfig(
+
+def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
+    return GRPOEnvConfig(
         output_dir=f"outputs/{run_name}",
         run_name=run_name,
         learning_rate=1e-6,
