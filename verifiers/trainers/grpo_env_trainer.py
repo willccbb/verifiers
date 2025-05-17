@@ -13,9 +13,10 @@ from transformers import (
     TrainerCallback,
     is_wandb_available
 )
-from verifiers import RewardFunc, GRPOEnvConfig
+from verifiers import RewardFunc
 from verifiers.envs.environment import Environment
 from verifiers.utils.logging_utils import print_prompt_completions_sample
+from verifiers.utils.config_utils import GRPOEnvConfig
 from verifiers.imports import LLM, SamplingParams
 from verifiers.inference.vllm_client import VLLMClient
 
