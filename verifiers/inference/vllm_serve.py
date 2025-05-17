@@ -215,7 +215,7 @@ class ScriptArguments:
         },
     )
     enable_prefix_caching: Optional[bool] = field(
-        default=None,
+        default=True,
         metadata={
             "help": "Whether to enable prefix caching in vLLM. If set to `True`, ensure that the model and the "
             "hardware support this feature."

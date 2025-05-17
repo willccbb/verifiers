@@ -46,17 +46,20 @@ print(results['rewards_avg'])
 
 # make dataset from results
 # cols: prompt, completions, answer, rewards
-def flatten_rewards(rewards: dict) -> list[float]:
+def flatten_rewards(rewards: dict, weights: list[float] | None = None) -> list[float]:
     """
     flatten dict of lists into a single list, summing elementwise.
     """
-    return [sum(r) for r in zip(*rewards.values())]
+    if weights is None:
+        return [sum(r) for r in zip(*rewards.values())]
+    else:
+        return [sum(w * r for w, r in zip(weights, r)) for r in zip(*rewards.values())]
 
 dataset = Dataset.from_dict({
     "prompt": results['prompt'],
     "completion": results['completion'],
     "answer": results['answer'],
-    "reward": flatten_rewards(results['rewards']),
+    "reward": flatten_rewards(results['rewards'], weights=rubric.get_reward_weights()),
 })
 
 # filter to top half of rows by rewards
