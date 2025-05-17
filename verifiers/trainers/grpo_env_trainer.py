@@ -13,7 +13,7 @@ from transformers import (
     TrainerCallback,
     is_wandb_available
 )
-from verifiers import RewardFunc
+from verifiers import RewardFunc, GRPOEnvConfig
 from verifiers.envs.environment import Environment
 from verifiers.utils.logging_utils import print_prompt_completions_sample
 from verifiers.imports import LLM, SamplingParams
@@ -31,11 +31,6 @@ from trl.trainer.utils import pad
 if is_wandb_available():
     import wandb
 
-# extend GRPOConfig to include delta
-class GRPOEnvConfig(GRPOConfig):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.delta = kwargs.get("delta", 2.0)
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:

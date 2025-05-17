@@ -1,7 +1,13 @@
-from peft import LoraConfig
 from typing import List, Optional
-from verifiers import GRPOEnvConfig
 
+from peft import LoraConfig
+from trl import GRPOConfig
+
+# extend GRPOConfig to include delta
+class GRPOEnvConfig(GRPOConfig):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.delta = kwargs.get("delta", 2.0)
 
 def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
     return GRPOEnvConfig(
