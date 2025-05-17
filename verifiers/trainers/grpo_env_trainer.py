@@ -81,7 +81,12 @@ class GRPOEnvTrainer(GRPOTrainer):
             raise ValueError("vLLM must be enabled for GRPOEnvTrainer")
         if not (callable(reward_funcs) or (isinstance(reward_funcs, list) and all(callable(f) for f in reward_funcs))): 
             raise ValueError("reward_funcs must be a function or a list of functions. Use vLLM to host neural reward models.")
-        
+
+        # Store delta and remove it from args before passing to super
+        delta = getattr(args, 'delta', None)
+        if hasattr(args, 'delta'):
+            delattr(args, 'delta')
+                
         super().__init__(
             model=model,
             reward_funcs=reward_funcs,
@@ -94,6 +99,8 @@ class GRPOEnvTrainer(GRPOTrainer):
             peft_config=peft_config,
             **kwargs,
         )
+        self.args.delta = delta
+
         self.env = env
         self.scale_rewards = scale_rewards
         self.sampling_params = SamplingParams(
