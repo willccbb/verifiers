@@ -9,7 +9,8 @@ from datasets import Dataset
 from pydantic import BaseModel
 from ..imports import LLM, SamplingParams  # type: ignore
 from verifiers.inference.vllm_client import VLLMClient
-
+from verifiers.parsers import Parser
+from verifiers.rubrics import Rubric
 from verifiers.envs.environment import Environment
 from verifiers.utils import format_dataset
 
@@ -48,6 +49,8 @@ class MultiTurnEnv(Environment):
                  eval_dataset: Dataset | None = None,
                  system_prompt: str = "",
                  few_shot: List[Dict[str, str]] = [],
+                 parser: Parser | None = None,
+                 rubric: Rubric | None = None,
                  sampling_args: Dict[str, Any] = {},
                  mask_env_response: bool = True,
                  max_workers: int = 10,
@@ -282,6 +285,7 @@ class MultiTurnEnv(Environment):
                 client: Any,
                 model: str,
                 max_concurrent: int = 32,
+                num_samples: int = -1,
                 timeout: int = 300,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any):
@@ -314,7 +318,9 @@ class MultiTurnEnv(Environment):
                 raise ValueError("Failed to load evaluation dataset")
             
             eval_dataset = self.eval_dataset
-            
+            if num_samples > 0:
+                eval_dataset = eval_dataset.select(range(len(eval_dataset) - num_samples, len(eval_dataset)))
+
             async def process_example(example, semaphore):
                 async with semaphore:
                     # Initialize conversation with system prompt and few-shot examples
@@ -356,7 +362,7 @@ class MultiTurnEnv(Environment):
                     
                     result = {
                         "prompt": prompt,
-                        "completions": completions,
+                        "completion": completions,
                         "answer": answer
                     }
                     if 'task' in example:
@@ -387,18 +393,22 @@ class MultiTurnEnv(Environment):
             finally:
                 loop.close()
             
-            # Calculate rewards
-            results_prompt = [result["prompt"] for result in results]
+            #  Aggregate rollouts + calculate rewards
+            results_prompts = [result["prompt"] for result in results]
+            results_completions = [result["completion"] for result in results]
             results_answer = [result["answer"] for result in results]
             if 'task' in results[0]:
                 results_task = [result["task"] for result in results]
             else:
                 results_task = None
-            results_completion = [result["completion"] for result in results]
-            results = {"prompt": results_prompt, "answer": results_answer, "completion": results_completion, "task": results_task}
+            results = {
+                "prompts": results_prompts,
+                "completions": results_completions,
+                "answer": results_answer,
+                "task": results_task
+            }
             
             reward_funcs = self.get_reward_funcs()
-
             results_rewards = {}
             rewards_avg = {}
             
@@ -407,18 +417,63 @@ class MultiTurnEnv(Environment):
                 results_rewards[func_name] = []
                 func_rewards_all = reward_func(**results) # type: ignore
                 results_rewards[func_name] = func_rewards_all
-                func_rewards = [fr for fr in func_rewards_all if fr is not None]
-                func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
+                #func_rewards = [fr for fr in func_rewards_all if fr is not None]
+                # func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
                 
-                print(f"{func_name}: {func_reward_avg}")
-                rewards_avg[func_name] = func_reward_avg
+                # print(f"{func_name}: {func_reward_avg}")
+                # rewards_avg[func_name] = func_reward_avg
+    
+            def flatten_rewards(rewards: dict, weights: list[float] | None = None) -> list[float]:
+                """
+                flatten dict of lists into a single list, summing elementwise.
+                """
+                if weights is None:
+                    return [sum(r) for r in zip(*rewards.values())]
+                else:
+                    return [sum(w * r for w, r in zip(weights, r) if r is not None) for r in zip(*rewards.values())]
+
+            if self.rubric is not None:
+                weights = self.get_reward_weights()
+                results['reward'] = flatten_rewards(results_rewards, weights)
+            else:
+                results['reward'] = flatten_rewards(results_rewards)
+            results['reward_funcs'] = results_rewards
+            results['rewards_avg'] = {func_name: sum(results_rewards[func_name]) / len(results_rewards[func_name]) for func_name in results_rewards}
+            results['rewards_avg']['total'] = sum(results['reward']) / len(results['reward'])
             
-            results['rewards'] = results_rewards
-            results['rewards_avg'] = rewards_avg
+            # rename "prompts" -> "prompt" and "completions" -> "completion" for Dataset compatibility
+            results['prompt'] = results.pop('prompts')
+            results['completion'] = results.pop('completions')
             return results
-            
+
         # Run the evaluation function
         return run_evaluation()
     
-
-    
+    def make_api_dataset(self,
+                         client: Any,
+                         model: str,
+                         max_concurrent: int = 32,
+                         num_samples: int = -1,
+                         timeout: int = 300,
+                         sampling_args: Dict[str, Any] = {"temperature": 0.6},
+                         **kwargs: Any) -> Dataset:
+        """
+        Make a dataset from the evaluation results.
+        """
+        results = self.eval_api(client, model, max_concurrent, num_samples, timeout, sampling_args)
+        if results['task'] is not None:
+            dataset = Dataset.from_dict({
+                "prompt": results['prompt'],
+                "completion": results['completion'],
+                "answer": results['answer'],
+                "reward": results['reward'],
+                "task": results['task']
+            })
+        else:
+            dataset = Dataset.from_dict({
+                "prompt": results['prompt'],
+                "completion": results['completion'],
+                "answer": results['answer'],
+                "reward": results['reward'],
+            })
+        return dataset

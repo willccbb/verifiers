@@ -2,12 +2,11 @@ import verifiers as vf
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
-
 """
 accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/sft/warmup_reverse.py
 """
 
-# convenience function for liger kernel + FA2 loading
+# convenience function for FA2 initialization
 model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct", use_liger=False)
 dataset = load_dataset('willcb/R1-reverse-wikipedia-paragraphs-v1-1000', split='train')
 

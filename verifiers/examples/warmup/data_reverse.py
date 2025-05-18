@@ -26,45 +26,25 @@ rubric = vf.Rubric(funcs=[
 	parser.get_format_reward_func(),
 ], weights=[1.0, 0.2])
 
-N = len(dataset) # last 2000 rows
+
 vf_env = vf.SingleTurnEnv(
-    eval_dataset=dataset.select(range(N - 2000, N)),
+    eval_dataset=dataset,
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric
 )
 
-# collect R1 rollouts from API
+# collect V3/R1 rollouts from API
 import os
 from openai import OpenAI
 base_url = os.getenv("DEEPSEEK_API_URL")
 api_key = os.getenv("DEEPSEEK_API_KEY")
 client = OpenAI(base_url=base_url, api_key=api_key)
-results = vf_env.eval_api(client, "deepseek-reasoner", max_concurrent=32, sampling_args={"temperature": 0.6})
 
-print(results['rewards_avg'])
-
-# make dataset from results
-# cols: prompt, completions, answer, rewards
-def flatten_rewards(rewards: dict, weights: list[float] | None = None) -> list[float]:
-    """
-    flatten dict of lists into a single list, summing elementwise.
-    """
-    if weights is None:
-        return [sum(r) for r in zip(*rewards.values())]
-    else:
-        return [sum(w * r for w, r in zip(weights, r)) for r in zip(*rewards.values())]
-
-dataset = Dataset.from_dict({
-    "prompt": results['prompt'],
-    "completion": results['completion'],
-    "answer": results['answer'],
-    "reward": flatten_rewards(results['rewards'], weights=rubric.get_reward_weights()),
-})
-
+# columns = ['prompt', 'completion', 'answer', 'reward']
+# use deepseek-chat for multiturn rollouts (V3-0324)
+dataset_r1 = vf_env.make_api_dataset(client, model="deepseek-chat", num_samples=10) 
 # filter to top half of rows by rewards
-dataset = dataset.sort("reward", reverse=True).select(range(len(dataset) // 2))
-print(dataset[0])
-
-# save to hub
-dataset.push_to_hub("R1-reverse-wikipedia-paragraphs-v1-1000")
+dataset_r1 = dataset_r1.sort("reward", reverse=True).select(range(len(dataset_r1) // 2))
+# # save to hub
+dataset_r1.push_to_hub("V3-reverse-wikipedia-paragraphs-test")

@@ -35,25 +35,28 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric
 )
 
-run_name = "rev_warmup_grpo_fft_gr=1e-2_delta=2"
+run_name = "rev_warmup_grpo_fft_gr=1e-5_delta=4_beta=1e-2"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
 args = vf.GRPOEnvConfig(
     output_dir=f"outputs/{run_name}",
     run_name=run_name,
     learning_rate=1e-6,
-    lr_scheduler_type="constant",
+    lr_scheduler_type="constant_with_warmup",
+    warmup_steps=10,
     num_train_epochs=1,
     max_steps=1000,
     bf16=True,
-    beta=0,
-    delta=2.0,
-    max_grad_norm=0.01,
+    beta=0.001,
+    sync_ref_model=True,
+    ref_model_sync_steps=100,
+    ref_model_mixup_alpha=0.5,
+    max_grad_norm=0.001,
     num_iterations=2,
     max_prompt_length=1024,
     max_completion_length=2048,
-    per_device_train_batch_size=24,
-    num_generations=12,
+    per_device_train_batch_size=16,
+    num_generations=8,
     gradient_accumulation_steps=2,
     gradient_checkpointing=True,
     save_strategy="steps",
