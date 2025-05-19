@@ -27,6 +27,7 @@ trl.extras.vllm_client.VLLMClient = VLLMClient
 from trl import GRPOTrainer, GRPOConfig
 from trl.data_utils import maybe_apply_chat_template
 from trl.import_utils import is_rich_available
+from trl.extras.profiling import profiling_context
 from trl.trainer.utils import pad
 
 if is_wandb_available():
@@ -172,6 +173,8 @@ class GRPOEnvTrainer(GRPOTrainer):
          self, inputs: dict[str, Union[torch.Tensor, Any]]   
     ) -> dict[str, Union[torch.Tensor, Any]]:
         device = self.accelerator.device
+        mode = "eval" if self.control.should_evaluate else "train"
+
         prompts = [x["prompt"] for x in inputs] # type: ignore
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs] # type: ignore
         prompt_inputs = self.processing_class(
@@ -191,11 +194,12 @@ class GRPOEnvTrainer(GRPOTrainer):
         # Gather the original prompts in message dict form, not the text form
         all_prompts = gather_object(prompts)
         if self.accelerator.is_main_process:
-            env_result = self.env.generate(
-                prompts=all_prompts,
-                llm=self.vllm_client, # type: ignore
-                sampling_params=self.sampling_params,
-            )
+            with profiling_context("env_generate"):
+                env_result = self.env.generate(
+                    prompts=all_prompts,
+                    llm=self.vllm_client, # type: ignore
+                    sampling_params=self.sampling_params,
+                )
             completion_ids = env_result['ids']
             completion_messages = env_result['messages']
             completion_mask = env_result['mask']
@@ -226,9 +230,12 @@ class GRPOEnvTrainer(GRPOTrainer):
         completion_mask = pad(completion_mask, padding_value=0)
 
         prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+
+        # Concatenate prompt_mask with completion_mask for logit computatione
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1) # (B, P+C)
         
         logits_to_keep = completion_ids.size(1)
+        batch_size = self.args.per_device_train_batch_size if mode == "train" else self.args.per_device_eval_batch_size
 
         with torch.no_grad():
             # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip it's
@@ -254,6 +261,7 @@ class GRPOEnvTrainer(GRPOTrainer):
 
         # use message dicts for reward function inputs
         completions = completion_messages
+        completions_text = [maybe_apply_chat_template(example, self.processing_class)["completion"] for example in completions] # type: ignore
         rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, reward_func in enumerate(self.reward_funcs):
             # Repeat all input columns (but "prompt" and "completion") to match the number of generations
@@ -301,22 +309,42 @@ class GRPOEnvTrainer(GRPOTrainer):
         )
         advantages = advantages[process_slice]
 
+
         # Log the metrics
-        mode = "eval" if self.control.should_evaluate else "train"
+        if mode == "train":
+            self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
+        self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
+
+        # log completion lengths, mean, min, max
+        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
+        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item())
+        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item())
+        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item())
+
+        # identify sequences that terminated with EOS and log their lengths
+        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1))
+        term_completion_mask = agg_completion_mask[agg_terminated_with_eos]
+        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
+        self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
+        if len(term_completion_mask) == 0:
+            # edge case where no completed sequences are found
+            term_completion_mask = torch.zeros(1, device=device)
+        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
+        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
+        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
+
+        # Calculate mean reward per function, but only for samples where the function was applied (non-NaN values)
+        for i, reward_func_name in enumerate(self.reward_func_names):
+            mean_rewards = torch.nanmean(rewards_per_func[:, i]).item()
+            self._metrics[mode][f"rewards/{reward_func_name}/mean"].append(mean_rewards)
+            std_rewards = nanstd(rewards_per_func[:, i]).item()
+            self._metrics[mode][f"rewards/{reward_func_name}/std"].append(std_rewards)
+        self._metrics[mode]["reward"].append(mean_grouped_rewards.mean().item())
+        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
+
 
         completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item() # type: ignore
         self._metrics[mode]["completion_length"].append(completion_length)
-
-        # Calculate mean reward per function, but only for samples where the function was applied
-        for i, reward_func in enumerate(self.reward_funcs):
-            reward_func_name = reward_func.__name__ # type: ignore  
-            # Only calculate mean for samples where this reward function was applied (non-NaN values)
-            mean_rewards = torch.nanmean(rewards_per_func[:, i]).item()
-            self._metrics[mode][f"rewards/{reward_func_name}"].append(mean_rewards)
-            std_rewards = nanstd(rewards_per_func[:, i]).item()
-            self._metrics[mode][f"rewards/{reward_func_name}/std"].append(std_rewards)
-        self._metrics[mode]["reward"].append(rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item()) # type: ignore
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:
             prompts_to_log = gather_object(prompts)
@@ -324,7 +352,7 @@ class GRPOEnvTrainer(GRPOTrainer):
             rewards_to_log = rewards.tolist()
 
             if self.accelerator.is_main_process:
-                if is_rich_available():
+                if is_rich_available() and :
                     print_prompt_completions_sample(
                         [str(prompts_to_log[0][-1]["content"])],
                         [completions_to_log[0]],
@@ -344,14 +372,20 @@ class GRPOEnvTrainer(GRPOTrainer):
                     df = pd.DataFrame(table)
                     wandb.log({"completions": wandb.Table(dataframe=df)}) # type: ignore
 
+        # Log prompt and completion texts
+        self._textual_logs["prompt"].extend(gather_object(prompts_text))
+        self._textual_logs["completion"].extend(gather_object(completions_text))
+        for i, name in enumerate(self.reward_func_names):
+            self._textual_logs["rewards"][name].extend(rewards_per_func[:, i].tolist())
+
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
             "completion_ids": completion_ids,
             "completion_mask": completion_mask,
+            "advantages": advantages,
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
-            "advantages": advantages,
         }
     
     def _compute_loss(self, model, inputs):

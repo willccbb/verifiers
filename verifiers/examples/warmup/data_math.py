@@ -51,7 +51,7 @@ vf_env = vf.ToolEnv(
     env_fields=["result"],
     few_shot=[],
     tools=[python],
-    max_steps=5
+    max_steps=3
 )
 
 # collect V3 rollouts from API
@@ -63,7 +63,7 @@ client = OpenAI(base_url=base_url, api_key=api_key)
 
 # columns = ['prompt', 'completion', 'answer', 'reward']
 # use deepseek-chat for multiturn rollouts (V3-0324)
-dataset_dsv3 = vf_env.make_api_dataset(client, model="deepseek-chat", num_samples=20) 
+dataset_dsv3 = vf_env.make_api_dataset(client, model="deepseek-chat", num_samples=10) 
 # filter to top half of rows by rewards
 dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
 # # save to hub

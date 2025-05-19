@@ -37,7 +37,7 @@ vf_env = vf.SingleTurnEnv(
 # collect V3/R1 rollouts from API
 import os
 from openai import OpenAI
-base_url = os.getenv("DEEPSEEK_API_URL")
+base_url = "https://api.deepseek.com"
 api_key = os.getenv("DEEPSEEK_API_KEY")
 client = OpenAI(base_url=base_url, api_key=api_key)
 

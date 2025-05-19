@@ -10,9 +10,6 @@ class CodeRubric(Rubric):
         self.parser = parser
         self.env_parser = env_parser
         self.reward_funcs = [
-            self.exact_answer_reward_func,
-            self.int_answer_reward_func,
-            self.code_execution_reward_func,
             self.parser.get_xml_reward_func(),
             self.parser.get_format_reward_func()
         ]

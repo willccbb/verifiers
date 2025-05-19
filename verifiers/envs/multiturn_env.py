@@ -97,6 +97,9 @@ class MultiTurnEnv(Environment):
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.eval_dataset
 
+
+
+
     @abstractmethod
     def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
         pass
@@ -168,8 +171,12 @@ class MultiTurnEnv(Environment):
             
             if self.is_completed(state["messages"]) or len(state["completion_ids"]) > sampling_params.max_tokens - 1: # type: ignore
                 state["completed"] = True
+
+                # ids and mask should be the same length
                 state["completion_ids"] = state["completion_ids"][:sampling_params.max_tokens]
                 state["completion_mask"] = state["completion_mask"][:len(state["completion_ids"])]
+
+                # calculate rewards
             else:
                 state["messages"].append(self.env_response(state["messages"]))
 
@@ -196,10 +203,60 @@ class MultiTurnEnv(Environment):
 
         return states
 
-    def generate(self, prompts: List[List[Dict[str, Any]]],
-                 llm: LLM | VLLMClient,  
+
+    def prepare_initial_state(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Prepare the initial state for rollout.
+        """
+        messages = []
+        if isinstance(input["prompt"], str):
+            messages = [{"role": "user", "content": input["prompt"]}]
+        else:
+            messages = input["prompt"]
+
+        state = {
+            "messages": messages,
+            "prompt_messages": deepcopy(messages),
+            "completion_messages": [],
+            "num_prompt_messages": len(messages),
+            "num_completion_messages": 0,
+            "prompt_ids": [],
+            "completed": False,
+            "completion_ids": [],
+            "completion_mask": [],
+            "completion_rewards": []
+        }
+        # extend state with additional kwargs, error if duplicate keys
+        state_keys = list(state.keys())
+        for k, v in input.items():
+            if k in state:
+                raise ValueError(f"Warning: duplicate key {k} in input. Prohibited keys: {state_keys}")
+            else:
+                state[k] = v
+        return state
+
+    def generate(self,
+                 inputs: Dict[str, Any],
+                 #prompts: List[List[Dict[str, Any]]] | List[str],
+                 client: VLLMClient,  
                  sampling_params: SamplingParams,
                  **kwargs: Any) -> Dict[str, List[Sequence[int]] | List[str] |  List[List[Dict[str, Any]]]]:
+        """
+        Generate rollouts for a set of inputs.
+        Input:
+        - inputs dict with keys:
+            - prompt
+            - answer
+            - task (optional)
+            - **kwargs: additional kwargs
+
+        - vLLM client object
+        - sampling_params object
+
+        output:
+        """
+        
+        
         custom_sp = sampling_params.clone()
         for k, v in self.sampling_args.items():
             setattr(custom_sp, k, v)
@@ -207,12 +264,14 @@ class MultiTurnEnv(Environment):
         # initialize state variables
         all_completed = False
         states = [{
-            "messages": m,
+            "messages": deepcopy(m),
+
             "prompt_messages": len(m),
             "prompt_ids": [],
             "completed": False,
             "completion_ids": [],
             "completion_mask": []
+            "completion_rewards": []
         } for m in prompts]
 
         # main loop
@@ -223,9 +282,13 @@ class MultiTurnEnv(Environment):
         completion_messages = [s["messages"][s["prompt_messages"]:] for s in states]
         completion_ids = [s["completion_ids"] for s in states]
         completion_mask = [s["completion_mask"] for s in states]
+        
+        completion_rewards = [s["completion_rewards"] for s in states]
+        
         output = {
             "ids": completion_ids,
             "messages": completion_messages,
+            "rewards": completion_rewards,
             "mask": completion_mask
         }
         return output

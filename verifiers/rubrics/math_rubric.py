@@ -18,3 +18,12 @@ class MathRubric(Rubric):
             0.25
         ]
 
+    def exact_answer_reward_func(self, completion, answer, **kwargs) -> List[float]:
+        """Reward function that checks if the final answer matches the expected answer."""
+        responses = [self.parser.get_final_answer(c) for c in completions]
+        return [1.0 if str(r) == str(a) else 0.0 for r, a in zip(responses, answer)]
+
+    def int_answer_reward_func(self, completion, answer, **kwargs) -> List[float]:
+        """Reward function that checks if the final answer is an integer."""
+        responses = [self.parser.get_final_answer(c) for c in completions]
+        return [1.0 if str(r).isdigit() else 0.0 for r in responses]
