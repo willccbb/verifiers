@@ -108,6 +108,13 @@ class MultiTurnEnv(Environment):
     def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
         pass
 
+    """
+    Reward logic:
+
+    Rubric has get_reward_funcs and get_reward_weights
+
+    """
+
     def step(self,
              states: List[Dict[str, Any]],
              llm: LLM | VLLMClient,
@@ -177,6 +184,7 @@ class MultiTurnEnv(Environment):
                 state["completion_mask"] = state["completion_mask"][:len(state["completion_ids"])]
 
                 # calculate rewards
+
             else:
                 state["messages"].append(self.env_response(state["messages"]))
 
@@ -202,7 +210,6 @@ class MultiTurnEnv(Environment):
             states[j] = state
 
         return states
-
 
     def prepare_initial_state(self, input: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -245,7 +252,7 @@ class MultiTurnEnv(Environment):
         Generate rollouts for a set of inputs.
         Input:
         - inputs dict with keys:
-            - prompt
+            - prompt (already duplicated for GRPO group)
             - answer
             - task (optional)
             - **kwargs: additional kwargs
@@ -255,24 +262,13 @@ class MultiTurnEnv(Environment):
 
         output:
         """
-        
-        
         custom_sp = sampling_params.clone()
         for k, v in self.sampling_args.items():
             setattr(custom_sp, k, v)
 
         # initialize state variables
         all_completed = False
-        states = [{
-            "messages": deepcopy(m),
-
-            "prompt_messages": len(m),
-            "prompt_ids": [],
-            "completed": False,
-            "completion_ids": [],
-            "completion_mask": []
-            "completion_rewards": []
-        } for m in prompts]
+        states = [self.prepare_initial_state(input) for input in inputs]
 
         # main loop
         while not all_completed:
@@ -282,7 +278,6 @@ class MultiTurnEnv(Environment):
         completion_messages = [s["messages"][s["prompt_messages"]:] for s in states]
         completion_ids = [s["completion_ids"] for s in states]
         completion_mask = [s["completion_mask"] for s in states]
-        
         completion_rewards = [s["completion_rewards"] for s in states]
         
         output = {

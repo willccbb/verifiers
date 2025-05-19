@@ -8,9 +8,9 @@ system_prompt = f"""Respond in the following format:
 
 Reverse the given text character-by-character."""
 
-def lcs_reward_func(completions, answer, **kwargs) -> list[float]:
+def lcs_reward_func(completion, answer, **kwargs) -> list[float]:
     """
-    LCS ratio of the reversed prompt and the parsed completion.
+    LCS ratio of the reversed prompt and the parsed completion.    
     """
     def lcs_ratio(x: str, y: str) -> float:
         """
@@ -18,8 +18,8 @@ def lcs_reward_func(completions, answer, **kwargs) -> list[float]:
         """
         from difflib import SequenceMatcher
         return SequenceMatcher(None, x, y).ratio()
-    responses = [parser.parse_answer(c) or '' for c in completions]
-    return [lcs_ratio(r, a) for r, a in zip(responses, answer)]
+    response = parser.parse_answer(completion) or ''
+    return lcs_ratio(response, answer)
 
 rubric = vf.Rubric(funcs=[
 	lcs_reward_func,

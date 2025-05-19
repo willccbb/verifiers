@@ -1,25 +1,8 @@
-"""
-OpenAI-compatible vLLM server with weight synchronization.
-
-Usage:
-
-```bash
-uv run python vllm_serve.py --model <model_name> --port <port>
-```
-
-Supports:
-- /v1/chat/completions
-- /v1/completions
-
-This script is adapted from trl/scripts/vllm_serve.py (huggingface/trl)
-"""
+# adapted from trl/scripts/vllm_serve.py (huggingface/trl)
 
 import argparse
 import logging
 import os
-import time # Added back time as it's used in lifespan
-import asyncio # For run_in_executor
-import threading # For Lock
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -31,19 +14,19 @@ from typing import Optional, Sequence
 import torch
 
 from trl import TrlParser
+from trl.import_utils import is_fastapi_available, is_pydantic_available, is_uvicorn_available, is_vllm_available #, is_vllm_ascend_available
 
-# FastAPI
+
+#if is_fastapi_available():
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse 
 
-# NEW – OpenAI-spec helpers
-from uuid import uuid4
-from datetime import datetime, timezone
-
+#if is_pydantic_available():
 from pydantic import BaseModel
 
+#if is_uvicorn_available():
 import uvicorn
 
+#if is_vllm_available():
 from vllm import LLM, SamplingParams
 from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 from vllm.distributed.parallel_state import get_world_group
@@ -54,22 +37,13 @@ from vllm.utils import get_open_port
     # if is_vllm_ascend_available():
     #     from vllm_ascend.distributed.device_communicators.pyhccl import PyHcclCommunicator as PyNcclCommunicator
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__) # Ensure logger is defined
+logger = logging.getLogger(__name__)
 
 # We use CUDA with multiprocessing, so we must use the 'spawn' start method. Otherwise, we will get the following
 # error: RuntimeError: Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use
 # the 'spawn' start method
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
-# At the global level, after imports and logger setup:
-pipe_lock = threading.Lock()
-
-def send_and_recv(conn: Connection, payload: dict):
-    """Helper to send a payload and receive a response over a pipe, protected by a lock."""
-    with pipe_lock:
-        conn.send(payload)
-        return conn.recv()
 
 class WeightSyncWorkerExtension:
     """
@@ -331,11 +305,29 @@ def chunk_list(lst: list, n: int) -> list[list]:
     k, r = divmod(len(lst), n)
     return [lst[i * k + min(i, r) : (i + 1) * k + min(i + 1, r)] for i in range(n)]
 
+
 def main(script_args: ScriptArguments):
+    if not is_fastapi_available():
+        raise ImportError(
+            "FastAPI is required to run the vLLM serve script. Please install it using `pip install fastapi`."
+        )
+
+    if not is_pydantic_available():
+        raise ImportError(
+            "Pydantic is required to run the vLLM serve script. Please install it using `pip install pydantic`."
+        )
+
+    if not is_uvicorn_available():
+        raise ImportError(
+            "Uvicorn is required to run the vLLM serve script. Please install it using `pip install uvicorn`."
+        )
+
+    if not is_vllm_available():
+        raise ImportError("vLLM is required to run the vLLM serve script. Please install it using `pip install vllm`.")
 
     # Spawn dp workers, and setup pipes for communication
     master_port = get_open_port()
-    connections: list[Connection] = [] # Added type hint for clarity
+    connections = []
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
@@ -346,48 +338,15 @@ def main(script_args: ScriptArguments):
 
     @asynccontextmanager 
     async def lifespan(app: FastAPI):
-        logger.info(f"Lifespan: Waiting for {script_args.data_parallel_size} LLM worker(s) to be ready...")
+        # Wait for all workers to send "ready"
         ready_connections = set()
-        
-        # Timeout for waiting for workers to get ready (e.g., 5 minutes)
-        timeout_seconds = 300 
-        start_wait_time = time.time()
-
         while len(ready_connections) < script_args.data_parallel_size:
-            if time.time() - start_wait_time > timeout_seconds:
-                logger.error(f"Lifespan: Timeout waiting for all LLM workers. Expected {script_args.data_parallel_size}, got {len(ready_connections)} ready.")
-                # Optionally, could raise an exception here to stop Uvicorn from starting in a bad state
-                # For now, just logging and proceeding might lead to Uvicorn starting but being non-functional.
-                # Consider raising RuntimeError("LLM workers failed to initialize in time")
-                break # Exit loop to allow Uvicorn to start, though it might not work well
+            for connection in connections:
+                msg = connection.recv()
+                if isinstance(msg, dict) and msg.get("status") == "ready":
+                    ready_connections.add(connection)
 
-            for i, connection in enumerate(connections):
-                if connection not in ready_connections:
-                    # Use poll() with a short timeout to avoid blocking indefinitely if a worker is stuck
-                    if connection.poll(0.1): # Check if data is available, with a 0.1s timeout
-                        try:
-                            msg = connection.recv()
-                            logger.info(f"Lifespan: Received message from worker {i}: {msg}")
-                            if isinstance(msg, dict) and msg.get("status") == "ready":
-                                logger.info(f"Lifespan: LLM worker {i} reported ready.")
-                                ready_connections.add(connection)
-                            else:
-                                logger.warning(f"Lifespan: Received unexpected message from worker {i}: {msg}")
-                        except Exception as e:
-                            logger.error(f"Lifespan: Error receiving message from worker {i}: {e}")
-                    # else: # Optional: log if a connection is polled but has no data yet
-                        # logger.debug(f"Lifespan: Polled worker {i}, no message yet.") 
-            
-            if len(ready_connections) < script_args.data_parallel_size:
-                time.sleep(0.5) # Brief sleep to avoid busy-waiting if not all workers are ready yet
-
-        if len(ready_connections) == script_args.data_parallel_size:
-            logger.info(f"Lifespan: All {script_args.data_parallel_size} LLM worker(s) are ready. Proceeding to yield.")
-        else:
-            logger.error(f"Lifespan: Not all LLM workers became ready. Expected {script_args.data_parallel_size}, got {len(ready_connections)}. Uvicorn might not function correctly.")
-        
         yield
-        logger.info("Lifespan: Uvicorn server is shutting down. Cleaning up resources.")
 
         # Wait for processes to terminate
         for process in processes:
@@ -423,213 +382,193 @@ def main(script_args: ScriptArguments):
         """
         return {"world_size": script_args.tensor_parallel_size * script_args.data_parallel_size}
 
-    # -------- OpenAI-chat ---------- #
-    class OAChatMessage(BaseModel):
-        role: str
-        content: str
+    class GenerateRequest(BaseModel):
+        prompts: list[str]
+        n: int = 1
+        repetition_penalty: float = 1.0
+        temperature: float = 1.0
+        top_p: float = 1.0
+        top_k: int = -1
+        min_p: float = 0.0
+        max_tokens: int = 16
+        guided_decoding_regex: Optional[str] = None
 
-    class OAChatCompletionRequest(BaseModel):
-        model: str
-        messages: list[OAChatMessage]
-        temperature: float | None = 1.0
-        top_p:     float | None = 1.0
-        max_tokens: int | None  = 16
-        stream: bool = False
-        # everything else is accepted but ignored for brevity
-        extra_body: dict | None = None   # <- lets callers pass vLLM-specific params
+    class GenerateResponse(BaseModel):
+        completion_ids: list[list[int]]        
 
-    class OAChatChoice(BaseModel):
-        index: int
-        message: OAChatMessage
-        finish_reason: str | None = "stop"
+    @app.post("/generate/", response_model=GenerateResponse)
+    async def generate(request: GenerateRequest):
+        """
+        Generates completions for the provided prompts.
 
-    class OAChatCompletionResponse(BaseModel):
-        id: str
-        object: str = "chat.completion"
-        created: int
-        model: str
-        choices: list[OAChatChoice]
-    
-    @app.post("/v1/chat/completions", response_model=OAChatCompletionResponse)
-    async def openai_chat(req: OAChatCompletionRequest):
-        vllm_specific_params = req.extra_body or {}
-        guided_decoding = None
-        if "guided_decoding_regex" in vllm_specific_params:
-            guided_decoding = GuidedDecodingParams(backend="outlines", regex=vllm_specific_params.pop("guided_decoding_regex"))
+        Args:
+            request (`GenerateRequest`):
+                - `prompts` (list of `str`): A list of prompts (text strings) for the model to generate completions.
 
-        sampling_params = SamplingParams(
-            n=1,
-            temperature=req.temperature if req.temperature is not None else 1.0,
-            top_p=req.top_p if req.top_p is not None else 1.0,
-            max_tokens=req.max_tokens if req.max_tokens is not None else 16,
-            guided_decoding=guided_decoding,
-            **{k: v for k, v in vllm_specific_params.items() if k in SamplingParams.__fields__} # Pass only valid SamplingParams
-        )
+        Returns:
+            `GenerateResponse`:
+                - `completion_ids` (list of list of `int`): A list of lists of token IDs for each generated completion.
 
-        chat_messages_for_vllm = [msg.model_dump() for msg in req.messages]
+        Example request:
+        ```json
+        {"prompts": ["Hello world", "What is AI?"]}
+        ```
 
-        if not connections:
-            logger.error("No LLM workers available for openai_chat")
-            return JSONResponse(status_code=503, content={"error": "No LLM workers available"})
+        Example response:
+        ```json
+        {"completion_ids": [[101, 102, 103], [201, 202, 203]]}
+        ```
+        """
 
-        payload = {
-            "type": "call", 
-            "method": "chat",
-            "kwargs": {"messages": chat_messages_for_vllm, "sampling_params": sampling_params}
-        }
-
-        loop = asyncio.get_running_loop()
-        # Send request to the first LLM worker and get response
-        # The send_and_recv helper handles locking for pipe access.
-        first_worker_result_list = await loop.run_in_executor(
-            None, send_and_recv, connections[0], payload
-        )
-        
-        final_choices = []
-        if first_worker_result_list:
-            if isinstance(first_worker_result_list[0], object): # vLLM returns a list of RequestOutput
-                request_output = first_worker_result_list[0]
-                if hasattr(request_output, 'outputs') and request_output.outputs:
-                    completion_output = request_output.outputs[0]
-                    final_choices.append(OAChatChoice(
-                        index=0,
-                        message=OAChatMessage(role="assistant", content=completion_output.text),
-                        finish_reason=completion_output.finish_reason
-                    ))
-                else:
-                    logger.warning(f"openai_chat: RequestOutput from worker missing 'outputs'. req_id: {request_output.request_id if hasattr(request_output, 'request_id') else 'N/A'}")
-            else:
-                logger.warning("openai_chat: Worker returned None or non-object for the request output item.")
+        # Guided decoding, if enabled
+        if request.guided_decoding_regex is not None:
+            guided_decoding = GuidedDecodingParams(backend="outlines", regex=request.guided_decoding_regex)
         else:
-            logger.warning("openai_chat: No results received from worker or worker returned empty list.")
+            guided_decoding = None
 
-        if not final_choices:
-            final_choices.append(OAChatChoice(
-                index=0,
-                message=OAChatMessage(role="assistant", content="Error processing LLM response."),
-                finish_reason="error"
-            ))
-
-        out = OAChatCompletionResponse(
-            id=f"chatcmpl-{uuid4().hex}",
-            created=int(datetime.now(tz=timezone.utc).timestamp()),
-            model=req.model,
-            choices=final_choices
+        # Sampling parameters
+        sampling_params = SamplingParams(
+            n=request.n,
+            repetition_penalty=request.repetition_penalty,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            min_p=request.min_p,
+            max_tokens=request.max_tokens,
+            guided_decoding=guided_decoding,
         )
-        return JSONResponse(out.model_dump())
 
-    @app.get("/v1/models")
-    async def list_models():
-        return {"data": [{"id": script_args.model, "object": "model", "owned_by": "vllm"}]}
+        # Evenly distribute prompts across DP ranks
+        chunked_prompts = chunk_list(request.prompts, script_args.data_parallel_size)
 
-    # -------- OpenAI-completions ---------- #
-    class OACompletionRequest(BaseModel):
-        model: str
-        prompt: str | list[str] # OpenAI API can take a string or list of strings for prompt
-        temperature: float | None = 1.0
-        top_p:     float | None = 1.0
-        max_tokens: int | None  = 16
-        n: int | None = 1 # Number of completions to generate for each prompt
-        # stream: bool = False # Deferring stream for now
-        # everything else is accepted but ignored for brevity
-        extra_body: dict | None = None   # <- lets callers pass vLLM-specific params
+        # Send the prompts to each worker
+        for connection, prompts in zip(connections, chunked_prompts):
+            # When the number of prompts is less than data_parallel_size, some workers will receive empty prompts.
+            # However, vLLM requires that we always send at least one prompt. So we send a placeholder prompt to comply
+            # with vLLM's requirement, and we later ignore the result.
+            if not prompts:
+                prompts = ["<placeholder>"]
+            kwargs = {"prompts": prompts, "sampling_params": sampling_params}
+            connection.send({"type": "call", "method": "generate", "kwargs": kwargs})
 
-    class OACompletionChoice(BaseModel):
-        index: int
+        # Receive results
+        all_outputs = [connection.recv() for connection in connections]
+
+        # Handle empty prompts (see above)
+        all_outputs = [output for output, prompts in zip(all_outputs, chunked_prompts) if prompts]
+
+        # Flatten and combine all results
+        all_outputs = list(chain.from_iterable(all_outputs))  # from list of list to single list
+        completion_ids = [list(output.token_ids) for outputs in all_outputs for output in outputs.outputs]
+        return {"completion_ids": completion_ids}
+
+    class ChatRequest(BaseModel):
+        messages: list[list[dict[str, str]]]
+        n: int = 1
+        repetition_penalty: float = 1.0
+        temperature: float = 1.0
+        top_p: float = 1.0
+        top_k: int = -1
+        min_p: float = 0.0
+        max_tokens: int = 16
+        guided_decoding_regex: Optional[str] = None
+        stop: Optional[list[str]] = None
+        include_stop_str_in_output: bool = False
+        skip_special_tokens: bool = True
+        spaces_between_special_tokens: bool = True
+
+    class ChatOutput(BaseModel):
+        token_ids: list[int]
         text: str
-        logprobs: dict | None = None # Not currently supported by vLLM output, but part of OpenAI spec
-        finish_reason: str | None = "length" # Assuming "length" if max_tokens reached, or "stop" if a stop token is hit (not explicitly handled here yet)
 
-    class OACompletionResponse(BaseModel):
-        id: str
-        object: str = "text_completion"
-        created: int
-        model: str
-        choices: list[OACompletionChoice]
+    class ChatResponseItem(BaseModel):
+        prompt_token_ids: list[int]
+        outputs: list[ChatOutput]
 
-    @app.post("/v1/completions", response_model=OACompletionResponse)
-    async def openai_completions(req: OACompletionRequest):
-        vllm_specific_params = req.extra_body or {}
-        guided_decoding = None
-        if "guided_decoding_regex" in vllm_specific_params:
-            guided_decoding = GuidedDecodingParams(backend="outlines", regex=vllm_specific_params.pop("guided_decoding_regex"))
+    class ChatResponse(BaseModel):
+        responses: list[ChatResponseItem]
 
-        sampling_params = SamplingParams(
-            n=req.n or 1,
-            temperature=req.temperature if req.temperature is not None else 1.0,
-            top_p=req.top_p if req.top_p is not None else 1.0,
-            max_tokens=req.max_tokens if req.max_tokens is not None else 16,
-            guided_decoding=guided_decoding,
-            **{k: v for k, v in vllm_specific_params.items() if k in SamplingParams.__fields__} # Pass only valid SamplingParams
-        )
+    @app.post("/chat/", response_model=ChatResponse)
+    async def chat(request: ChatRequest):
+        """
+        Generates completions for the provided prompts.
 
-        prompts_for_vllm = req.prompt
+        Args:
+            request (`ChatRequest`):
+                - `messages` (list of list of `dict`): A list of lists of messages.
 
-        if not connections:
-            logger.error("No LLM workers available for openai_completions")
-            return JSONResponse(status_code=503, content={"error": "No LLM workers available"})
+        Returns:
+            `ChatResponse`:
+                - `responses` (list of `ChatResponseItem`): A list of chat response items.
 
-        loop = asyncio.get_running_loop()
-        all_raw_outputs = []
+        Example request:
+        ```json
+        {"messages": [[{"role": "user", "content": "Hello, how are you?"}]]}
+        ```
 
-        if script_args.data_parallel_size > 1 and isinstance(prompts_for_vllm, list):
-            chunked_prompts = chunk_list(prompts_for_vllm, script_args.data_parallel_size)
-            tasks = []
-            for i, conn in enumerate(connections):
-                current_prompts_for_worker = chunked_prompts[i] if i < len(chunked_prompts) else []
-                if not current_prompts_for_worker: # Avoid sending empty lists if a worker gets no prompts
-                    tasks.append(loop.run_in_executor(None, lambda: [])) # Return an empty list for this worker
-                    continue
-                payload = {
-                    "type": "call",
-                    "method": "generate",
-                    "kwargs": {"prompts": current_prompts_for_worker, "sampling_params": sampling_params}
-                }
-                tasks.append(loop.run_in_executor(None, send_and_recv, conn, payload))
-            all_raw_outputs = await asyncio.gather(*tasks)
+        Example response:
+        ```json
+        {"responses": [{"prompt_token_ids": [101, 102, 103], "outputs": [{"token_ids": [201, 202, 203], "text": "Hello, how are you?"}]}]}
+        ```
+        """
+
+        # Guided decoding, if enabled
+        if request.guided_decoding_regex is not None:
+            guided_decoding = GuidedDecodingParams(backend="outlines", regex=request.guided_decoding_regex)
         else:
-            # If not data parallel or prompt is a single string, send to the first worker.
-            # chunk_list handles single string to list of list for the worker.
-            prompts_to_send = [prompts_for_vllm] if isinstance(prompts_for_vllm, str) else prompts_for_vllm
-            payload = {
-                "type": "call",
-                "method": "generate",
-                "kwargs": {"prompts": prompts_to_send, "sampling_params": sampling_params}
-            }
-            # Since send_and_recv expects a list of RequestOutput, and we get that from a single call for single/all prompts
-            result_from_worker = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
-            all_raw_outputs = [result_from_worker] # Make it a list to match the structure expected by subsequent code
+            guided_decoding = None
 
-        final_choices = []
-        overall_choice_idx = 0
-        for worker_output_list in all_raw_outputs:
-            if isinstance(worker_output_list, list):
-                for request_output in worker_output_list:
-                    if hasattr(request_output, 'outputs') and isinstance(request_output.outputs, list):
-                        for completion_output in request_output.outputs:
-                            final_choices.append(OACompletionChoice(
-                                index=overall_choice_idx,
-                                text=completion_output.text,
-                                finish_reason=completion_output.finish_reason
-                            ))
-                            overall_choice_idx += 1
-                    else:
-                        logger.warning(f"openai_completions: RequestOutput missing 'outputs'. req_id: {request_output.request_id if hasattr(request_output, 'request_id') else 'N/A'}")
-            else:
-                logger.warning(f"openai_completions: Expected list from worker, got {type(worker_output_list)}")
-
-        if not final_choices:
-            num_prompts_req = len(prompts_for_vllm) if isinstance(prompts_for_vllm, list) else 1
-            for i in range(num_prompts_req * (req.n or 1)):
-                 final_choices.append(OACompletionChoice(index=i, text="Error: No output from LLM.", finish_reason="error"))
-
-        out = OACompletionResponse(
-            id=f"cmpl-{uuid4().hex}",
-            created=int(datetime.now(tz=timezone.utc).timestamp()),
-            model=req.model,
-            choices=final_choices
+        # Sampling parameters
+        sampling_params = SamplingParams(
+            n=request.n,
+            repetition_penalty=request.repetition_penalty,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            min_p=request.min_p,
+            max_tokens=request.max_tokens,
+            guided_decoding=guided_decoding,
+            stop=request.stop,
+            include_stop_str_in_output=request.include_stop_str_in_output,
+            skip_special_tokens=request.skip_special_tokens,
+            spaces_between_special_tokens=request.spaces_between_special_tokens,
         )
-        return JSONResponse(out.model_dump())
+
+        # Evenly distribute prompts across DP ranks
+        chunked_messages = chunk_list(request.messages, script_args.data_parallel_size)
+
+        # Send the prompts to each worker
+        for connection, messages in zip(connections, chunked_messages):
+            # When the number of prompts is less than data_parallel_size, some workers will receive empty prompts.
+            # However, vLLM requires that we always send at least one prompt. So we send a placeholder prompt to comply
+            # with vLLM's requirement, and we later ignore the result.
+            if not messages:
+                messages = [{"role": "user", "content": "<placeholder>"}]
+
+            kwargs = {"messages": messages, "sampling_params": sampling_params}
+            connection.send({"type": "call", "method": "chat", "kwargs": kwargs})   
+
+        # Receive results
+        all_outputs = [connection.recv() for connection in connections]
+
+        # Handle empty prompts (see above)
+        all_outputs = [output for output, messages in zip(all_outputs, chunked_messages) if messages]
+
+        # Flatten and combine all results   
+        all_outputs = list(chain.from_iterable(all_outputs))  # from list of list to single list
+        responses = []
+        for outputs in all_outputs:
+            response = ChatResponseItem(
+                prompt_token_ids=list(outputs.prompt_token_ids),
+                outputs=[],
+            )
+            for output in outputs.outputs:
+                response.outputs.append(ChatOutput(
+                    token_ids=list(output.token_ids),
+                    text=output.text,
+                ))
+            responses.append(response)
+        return {"responses": responses}
 
     class InitCommunicatorRequest(BaseModel):
         host: str
@@ -659,18 +598,59 @@ def main(script_args: ScriptArguments):
 
         return {"message": "Request received, initializing communicator"}
 
-    # Start the server
-    # Always use 1 Uvicorn worker. vLLM handles its own worker processes and scheduling.
-    num_uvicorn_workers = 1
+    class UpdateWeightsRequest(BaseModel):
+        name: str
+        dtype: str
+        shape: list[int]
 
-    logger.info(f"Starting Uvicorn with {num_uvicorn_workers} worker(s). Data parallel size: {script_args.data_parallel_size}")
-    uvicorn.run(
-        app, 
-        host=script_args.host, 
-        port=script_args.port, 
-        log_level=script_args.log_level,
-        workers=num_uvicorn_workers
-    )
+    @app.post("/update_named_param/")
+    async def update_named_param(request: UpdateWeightsRequest):
+        """
+        Updates the model weights with the provided tensor.
+
+        Once this endpoint is called, the client process should broadcast the updated weights to all server workers.
+
+        Args:
+            request (`UpdateWeightsRequest`):
+                - `name` (`str`): Name of the weight tensor being updated.
+                - `dtype` (`str`): Data type of the weight tensor (e.g., `"torch.float32"`).
+                - `shape` (list of `int`): Shape of the weight
+
+        """
+        # The function update_named_param is called this way: update_named_param("name", torch.float32, (10, 10))
+        # So with collective_rpc we need to call it this way:
+        # llm.collective_rpc("update_named_param", args=("name", torch.float32, (10, 10)))
+        dtype = torch.__getattribute__(request.dtype.split(".")[-1]) # type: ignore
+        kwargs = {"method": "update_named_param", "args": (request.name, dtype, tuple(request.shape))}
+        for connection in connections:
+            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+
+        return {"message": "Request received, updating named parameter"}
+
+    @app.post("/reset_prefix_cache/")
+    async def reset_prefix_cache():
+        """
+        Resets the prefix cache for the model.
+        """
+        for connection in connections:
+            connection.send({"type": "call", "method": "reset_prefix_cache"})
+        # Wait for and collect all results
+        all_outputs = [connection.recv() for connection in connections]
+        success = all(output for output in all_outputs)
+        return {"message": "Request received, resetting prefix cache status: " + str(success)}
+
+    @app.post("/close_communicator/")
+    async def close_communicator():
+        """
+        Closes the weight update group and cleans up associated resources.
+        """
+        kwargs = {"method": "close_communicator"}
+        for connection in connections:
+            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+        return {"message": "Request received, closing communicator"}
+
+    # Start the server
+    uvicorn.run(app, host=script_args.host, port=script_args.port, log_level=script_args.log_level)
 
 
 def make_parser(subparsers: argparse._SubParsersAction = None):

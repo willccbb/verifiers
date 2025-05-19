@@ -1,3 +1,5 @@
+from typing import List
+
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 

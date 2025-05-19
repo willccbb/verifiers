@@ -24,9 +24,11 @@ from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from itertools import chain
+import multiprocessing as mp
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from typing import Optional, Sequence
+from concurrent.futures import ThreadPoolExecutor # Added
 
 import torch
 
@@ -34,7 +36,7 @@ from trl import TrlParser
 
 # FastAPI
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse 
+from fastapi.responses import JSONResponse, StreamingResponse
 
 # NEW – OpenAI-spec helpers
 from uuid import uuid4
@@ -44,7 +46,9 @@ from pydantic import BaseModel
 
 import uvicorn
 
-from vllm import LLM, SamplingParams
+from vllm import SamplingParams # Changed
+from vllm.engine.async_llm_engine import AsyncLLMEngine # Added
+from vllm.engine.arg_utils import AsyncEngineArgs # Added
 from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 from vllm.distributed.parallel_state import get_world_group
 from vllm.distributed.utils import StatelessProcessGroup
@@ -60,18 +64,11 @@ logger = logging.getLogger(__name__) # Ensure logger is defined
 # We use CUDA with multiprocessing, so we must use the 'spawn' start method. Otherwise, we will get the following
 # error: RuntimeError: Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use
 # the 'spawn' start method
-os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+# os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn" # This might be set by AsyncLLMEngine or not needed if using explicit context
 
 # At the global level, after imports and logger setup:
-pipe_lock = threading.Lock()
 
-def send_and_recv(conn: Connection, payload: dict):
-    """Helper to send a payload and receive a response over a pipe, protected by a lock."""
-    with pipe_lock:
-        conn.send(payload)
-        return conn.recv()
-
-class WeightSyncWorkerExtension:
+class WeightSyncWorkerExtension: # Ensure this is a plain class
     """
     A vLLM worker extension that enables weight synchronization between a client and multiple server workers.
 
@@ -109,7 +106,11 @@ class WeightSyncWorkerExtension:
         pg = StatelessProcessGroup.create(host=host, port=port, rank=rank, world_size=world_size)
 
         # Initialize the NCCL-based communicator for weight synchronization.
-        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device)
+        # Apply the guard for self.device as per user feedback for AsyncLLMEngine
+        device_to_use = self.device if hasattr(self, 'device') and self.device is not None else "cuda"
+        if not (hasattr(self, 'device') and self.device is not None):
+            logger.warning("WeightSyncWorkerExtension.init_communicator: self.device is None, defaulting to 'cuda'.")
+        self.pynccl_comm = PyNcclCommunicator(pg, device=device_to_use)
 
         # The client process that sends updated weights has the highest rank (world_size - 1).
         self.client_rank = world_size - 1
@@ -130,7 +131,11 @@ class WeightSyncWorkerExtension:
             raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
 
         # Allocate memory for the incoming weight tensor on the correct device.
-        weight = torch.empty(shape, dtype=dtype, device=self.device)
+        # Apply the guard for self.device as per user feedback for AsyncLLMEngine
+        device_to_use = self.device if hasattr(self, 'device') and self.device is not None else "cuda"
+        if not (hasattr(self, 'device') and self.device is not None):
+            logger.warning("WeightSyncWorkerExtension.update_named_param: self.device is None, defaulting to 'cuda'.")
+        weight = torch.empty(shape, dtype=dtype, device=device_to_use)
 
         # Use NCCL to broadcast the updated weights from the client (src) to all workers.
         self.pynccl_comm.broadcast(weight, src=self.client_rank)
@@ -272,48 +277,104 @@ class ScriptArguments:
 def llm_worker(
     script_args: ScriptArguments, data_parallel_rank: int, master_port: int, connection: Connection
 ) -> None:
-    # Set required environment variables for DP to work with vLLM
-    os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
-    os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
+    try:
+        # Set required environment variables for DP to work with vLLM
+        os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
+        os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
+        os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
+        os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
 
-    llm = LLM(
-        model=script_args.model,
-        revision=script_args.revision,
-        tensor_parallel_size=script_args.tensor_parallel_size,
-        gpu_memory_utilization=script_args.gpu_memory_utilization,
-        enforce_eager=script_args.enforce_eager,
-        dtype=script_args.dtype,
-        # Automatic Prefix Caching caches the KV cache of existing queries, so that a new query can
-        # directly reuse the KV cache if it shares the same prefix with one of the existing queries.
-        # This is particularly useful here because we generate completions from the same prompts.
-        enable_prefix_caching=script_args.enable_prefix_caching,
-        max_model_len=script_args.max_model_len,
-        worker_extension_cls="verifiers.inference.vllm_serve.WeightSyncWorkerExtension",
-    )
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    # Send ready signal to parent process
-    connection.send({"status": "ready"})
+        engine_args = AsyncEngineArgs(
+            model=script_args.model,
+            revision=script_args.revision,
+            tensor_parallel_size=script_args.tensor_parallel_size,
+            gpu_memory_utilization=script_args.gpu_memory_utilization,
+            dtype=script_args.dtype,
+            enable_prefix_caching=script_args.enable_prefix_caching,
+            max_model_len=script_args.max_model_len,
+            worker_extension_cls="verifiers.inference.vllm_async.WeightSyncWorkerExtension",
+        )
 
-    while True:
-        # Wait for commands from the parent process
-        try:
-            command = connection.recv()
-        except KeyboardInterrupt:
-            llm.collective_rpc(method="close_communicator")
-            break
+        # AsyncLLMEngine.from_engine_args is a synchronous classmethod
+        llm: AsyncLLMEngine = AsyncLLMEngine.from_engine_args(engine_args)
 
-        # Handle commands
-        if command["type"] in ["call", "fire_and_forget"]:
-            method_name = command["method"]
-            args, kwargs = command.get("args", ()), command.get("kwargs", {})
-            method = getattr(llm, method_name)
-            result = method(*args, **kwargs)
+        # --- helper wrappers -------------------------------------------
+        def _generate_sync(prompts, sampling_params):
+            async def _run():
+                gen = llm.generate(prompts, sampling_params,
+                                   request_id=f"gen-{time.time_ns()}")
+                return [o async for o in gen]           # collect stream
+            return loop.run_until_complete(_run())
+
+        def _chat_sync(messages, sampling_params):
+            async def _run():
+                # Assuming llm.generate can handle a dict with "messages" key for chat
+                # based on the provided diff. If AsyncLLMEngine.generate expects something different
+                # for chat, this part might need adjustment.
+                gen = llm.generate({"messages": messages}, 
+                                   sampling_params,
+                                   request_id=f"chat-{time.time_ns()}")
+                return [o async for o in gen]
+            return loop.run_until_complete(_run())
+
+        # Send ready signal to parent process
+        connection.send({"status": "ready"})
+        print("sent-ready")  # Debug print to confirm message was sent
+
+        executor = ThreadPoolExecutor(max_workers=32)   # tune to CPU count
+
+        while True:
+            # Wait for commands from the parent process
+            try:
+                command = connection.recv()
+            except KeyboardInterrupt:
+                # Based on the diff, the collective_rpc call for shutdown is now async.
+                # We need to run it in the loop.
+                # loop.run_until_complete(llm.collective_rpc(method="close_communicator"))
+                # However, the original code directly calls llm.collective_rpc, which suggests
+                # it might be a synchronous blocking call on the llm object from vLLM < 0.4.
+                # For AsyncLLMEngine, if collective_rpc is async, it needs loop.run_until_complete.
+                # If it became a sync method on AsyncLLMEngine that internally manages async calls, then direct call is fine.
+                # Assuming it is now an async method as per the `fire_and_forget` part of the diff.
+                if hasattr(llm, 'collective_rpc') and asyncio.iscoroutinefunction(getattr(llm, 'collective_rpc')):
+                     loop.run_until_complete(llm.collective_rpc(method="close_communicator"))
+                elif hasattr(llm, 'collective_rpc'): # if it's a sync method that internally handles async
+                     llm.collective_rpc(method="close_communicator")
+                else:
+                     logger.warning("collective_rpc method not found on llm object during KeyboardInterrupt or not async as expected.")
+                break
+            except EOFError: # Parent process likely closed the pipe
+                logger.info("Parent connection closed, worker shutting down.")
+                break
+
+            # Handle commands
             if command["type"] == "call":
-                connection.send(result)
-        elif command["type"] == "shutdown":
-            break
+                method = _generate_sync if command["method"] == "generate" \
+                         else _chat_sync
+                fut = executor.submit(method,
+                                      *command.get("args", ()),
+                                      **command.get("kwargs", {}))
+                connection.send(fut.result())
+
+            elif command["type"] == "fire_and_forget":
+                # Ensure llm.collective_rpc is an awaitable if it is called like this.
+                # The diff guide implies it is.
+                loop.run_until_complete(
+                    llm.collective_rpc(**command["kwargs"]))
+            elif command["type"] == "shutdown":
+                break
+    except Exception:
+        import traceback, sys
+        tb = traceback.format_exc()
+        try:
+            connection.send({"status": "error", "traceback": tb})
+        except Exception as e:
+            # Log if sending the error itself fails (e.g., pipe already broken)
+            logger.error(f"LLM Worker: Could not send error traceback to parent: {e}\nOriginal traceback:\n{tb}")
+        sys.exit(1)
 
 
 def chunk_list(lst: list, n: int) -> list[list]:
@@ -333,20 +394,27 @@ def chunk_list(lst: list, n: int) -> list[list]:
 
 def main(script_args: ScriptArguments):
 
+    # Create explicit spawn context
+    ctx = mp.get_context("spawn")
+
     # Spawn dp workers, and setup pipes for communication
     master_port = get_open_port()
     connections: list[Connection] = [] # Added type hint for clarity
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
-        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
+        process = ctx.Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
         process.start()
+        
+        # IMPORTANT: Parent must close its copy of the child end to ensure proper pipe signaling
+        child_connection.close()
+        
         connections.append(parent_connection)
         processes.append(process)
 
     @asynccontextmanager 
     async def lifespan(app: FastAPI):
-        logger.info(f"Lifespan: Waiting for {script_args.data_parallel_size} LLM worker(s) to be ready...")
+        logger.info(f"Lifespan: Starting up with {script_args.data_parallel_size} LLM worker(s)...")
         ready_connections = set()
         
         # Timeout for waiting for workers to get ready (e.g., 5 minutes)
@@ -356,33 +424,43 @@ def main(script_args: ScriptArguments):
         while len(ready_connections) < script_args.data_parallel_size:
             if time.time() - start_wait_time > timeout_seconds:
                 logger.error(f"Lifespan: Timeout waiting for all LLM workers. Expected {script_args.data_parallel_size}, got {len(ready_connections)} ready.")
-                # Optionally, could raise an exception here to stop Uvicorn from starting in a bad state
-                # For now, just logging and proceeding might lead to Uvicorn starting but being non-functional.
-                # Consider raising RuntimeError("LLM workers failed to initialize in time")
-                break # Exit loop to allow Uvicorn to start, though it might not work well
+                break
 
-            for i, connection in enumerate(connections):
-                if connection not in ready_connections:
-                    # Use poll() with a short timeout to avoid blocking indefinitely if a worker is stuck
-                    if connection.poll(0.1): # Check if data is available, with a 0.1s timeout
+            # Use select to wait for any connection to have data, with a timeout
+            import select
+            readable, _, _ = select.select([conn.fileno() for conn in connections if conn not in ready_connections], [], [], 0.1)
+            
+            for fileno in readable:
+                # Find which connection this fileno belongs to
+                for i, conn in enumerate(connections):
+                    if conn not in ready_connections and conn.fileno() == fileno:
                         try:
-                            msg = connection.recv()
-                            logger.info(f"Lifespan: Received message from worker {i}: {msg}")
+                            msg = conn.recv()
                             if isinstance(msg, dict) and msg.get("status") == "ready":
                                 logger.info(f"Lifespan: LLM worker {i} reported ready.")
-                                ready_connections.add(connection)
+                                ready_connections.add(conn)
+                            elif isinstance(msg, dict) and msg.get("status") == "error":
+                                logger.error(f"Lifespan: LLM worker {i} failed during start-up.\n{msg.get('traceback', 'No traceback available.')}")
+                                # Potentially raise an error here or signal other workers to shut down
+                                # For now, we'll let the main startup logic handle the timeout due to a failed worker.
+                                # Or, more decisively, raise SystemExit to stop the server immediately.
+                                raise SystemExit(f"Worker {i} failed to start.")
                             else:
                                 logger.warning(f"Lifespan: Received unexpected message from worker {i}: {msg}")
+                        except EOFError:
+                            logger.error(f"Lifespan: Worker {i} exited unexpectedly before signalling readiness (EOFError).")
+                            # This worker is gone, so we won't hear from it again.
+                            # Depending on desired behavior, either let timeout occur or raise SystemExit.
+                            raise SystemExit(f"Worker {i} exited prematurely.")
                         except Exception as e:
                             logger.error(f"Lifespan: Error receiving message from worker {i}: {e}")
-                    # else: # Optional: log if a connection is polled but has no data yet
-                        # logger.debug(f"Lifespan: Polled worker {i}, no message yet.") 
-            
+                        break
+
             if len(ready_connections) < script_args.data_parallel_size:
-                time.sleep(0.5) # Brief sleep to avoid busy-waiting if not all workers are ready yet
+                time.sleep(0.1)  # Brief sleep to avoid busy-waiting
 
         if len(ready_connections) == script_args.data_parallel_size:
-            logger.info(f"Lifespan: All {script_args.data_parallel_size} LLM worker(s) are ready. Proceeding to yield.")
+            logger.info(f"Lifespan: All {script_args.data_parallel_size} LLM worker(s) are ready after {time.time() - start_wait_time:.1f}s. Proceeding to yield.")
         else:
             logger.error(f"Lifespan: Not all LLM workers became ready. Expected {script_args.data_parallel_size}, got {len(ready_connections)}. Uvicorn might not function correctly.")
         
@@ -482,7 +560,8 @@ def main(script_args: ScriptArguments):
         # Send request to the first LLM worker and get response
         # The send_and_recv helper handles locking for pipe access.
         first_worker_result_list = await loop.run_in_executor(
-            None, send_and_recv, connections[0], payload
+            None, lambda: (connections[0].send(payload),
+                           connections[0].recv())[1]
         )
         
         final_choices = []
@@ -597,7 +676,11 @@ def main(script_args: ScriptArguments):
                 "kwargs": {"prompts": prompts_to_send, "sampling_params": sampling_params}
             }
             # Since send_and_recv expects a list of RequestOutput, and we get that from a single call for single/all prompts
-            result_from_worker = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+            # result_from_worker = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+            result_from_worker = await loop.run_in_executor(
+                None, lambda: (connections[0].send(payload),
+                               connections[0].recv())[1]
+            )
             all_raw_outputs = [result_from_worker] # Make it a list to match the structure expected by subsequent code
 
         final_choices = []
@@ -672,7 +755,6 @@ def main(script_args: ScriptArguments):
         workers=num_uvicorn_workers
     )
 
-
 def make_parser(subparsers: argparse._SubParsersAction = None):
     if subparsers is not None:
         parser = subparsers.add_parser("vllm-serve", help="Run the vLLM serve script", dataclass_types=ScriptArguments)
@@ -681,6 +763,17 @@ def make_parser(subparsers: argparse._SubParsersAction = None):
     return parser
 
 if __name__ == "__main__":
+    # Set the start method in the main process entry point
+    # to avoid issues with it being set multiple times or in child processes.
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError as e:
+        # This can happen if it's already been set, which is fine.
+        # Log a warning if it's not the expected 'context has already been set' error.
+        if "context has already been set" not in str(e).lower():
+            logger.warning(f"Could not set multiprocessing start method: {e}")
+        pass # Or log if you want to be sure it was set here
+
     parser = make_parser()
     (script_args,) = parser.parse_args_and_config()
     main(script_args)

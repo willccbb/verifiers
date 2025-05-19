@@ -175,6 +175,9 @@ class GRPOEnvTrainer(GRPOTrainer):
         device = self.accelerator.device
         mode = "eval" if self.control.should_evaluate else "train"
 
+
+        # prompts come as either a list of message dict lists or a list of strings
+
         prompts = [x["prompt"] for x in inputs] # type: ignore
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs] # type: ignore
         prompt_inputs = self.processing_class(
@@ -352,7 +355,7 @@ class GRPOEnvTrainer(GRPOTrainer):
             rewards_to_log = rewards.tolist()
 
             if self.accelerator.is_main_process:
-                if is_rich_available() and :
+                if is_rich_available():
                     print_prompt_completions_sample(
                         [str(prompts_to_log[0][-1]["content"])],
                         [completions_to_log[0]],
