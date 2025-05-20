@@ -51,9 +51,6 @@ from vllm.distributed.utils import StatelessProcessGroup
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
 
-    # if is_vllm_ascend_available():
-    #     from vllm_ascend.distributed.device_communicators.pyhccl import PyHcclCommunicator as PyNcclCommunicator
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__) # Ensure logger is defined
 

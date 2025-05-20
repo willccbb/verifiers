@@ -29,6 +29,8 @@ class Rubric(ABC):
             setattr(self, key, value)
         self.reward_funcs = funcs
         self.reward_weights = weights
+        if not self.reward_weights:
+            self.reward_weights = [1.0] * len(self.reward_funcs)
 
     def get_reward_funcs(self) -> List[RewardFunc]:
         return self.reward_funcs
@@ -63,7 +65,7 @@ class Rubric(ABC):
 
         # zip rewards with reward functions and weights
         weighted_rewards = {
-            func.__name__: reward * weight 
+            func.__name__: reward * weight if weight else reward
             for func, reward, weight in zip(
                 self.get_reward_funcs(),
                 rewards,
