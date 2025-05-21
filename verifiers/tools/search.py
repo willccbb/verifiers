@@ -2,8 +2,8 @@ def search_ddg(query: str, num_results: int = 5) -> str:
     """Searches DuckDuckGo and returns concise summaries of top results.
     
     Args:
-        query: The search query string
-        num_results: Number of results to return (default: 5, max: 10)
+        query (str): The search query string
+        num_results (int): Number of results to return (default: 5, max: 10)
         
     Returns:
         Formatted string with bullet points of top results, each with title and brief summary
@@ -11,9 +11,9 @@ def search_ddg(query: str, num_results: int = 5) -> str:
     Examples:
         {"query": "who invented the lightbulb", "num_results": 3}
     """
-    from duckduckgo_search import DDGS
 
     try:
+        from duckduckgo_search import DDGS # type: ignore
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=min(num_results, 10)))
             if not results:
@@ -43,10 +43,10 @@ def search(query: str) -> str:
         {"query": "what is the capital of France"} -> ["Paris is the capital of France", ...]
         {"query": "when was the Declaration of Independence signed"} -> ["The Declaration of Independence was signed on July 4, 1776", ...]
     """
-    from brave import Brave
     from typing import List, Dict, Any
 
     try:
+        from brave import Brave # type: ignore
         brave = Brave()
         results = brave.search(q=query, count=10, raw=True) # type: ignore
         web_results = results.get('web', {}).get('results', []) # type: ignore

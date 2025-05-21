@@ -1,3 +1,5 @@
+# NOTE: Helper functions for example datasets. Not intended for core functionality.
+
 import random
 import json
 from typing import List, Dict, Callable, Any
@@ -253,30 +255,3 @@ Please ensure that the dataset is formatted with 'prompt' (str) and 'answer' (st
     if "temp_answer" in dataset.column_names:
         dataset = dataset.rename_column("temp_answer", "answer")
     return dataset
-
-def format_prompt(prompt: str,
-                  system_prompt: str | None = None,
-                  few_shot: List[Dict[str, str]] | None = None) -> List[Dict[str, str]]:
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    if few_shot:
-        messages.extend(few_shot)
-    messages.append({"role": "user", "content": prompt})
-    return messages
-
-def format_dataset(dataset: Dataset,
-                   system_prompt: str | None = None,
-                   few_shot: List[Dict[str, str]] | None = None,
-                   question_key: str = "question",
-                   answer_key: str = "answer",
-                   ) -> Dataset:
-    if answer_key == "answer":
-        return dataset.map(lambda x: {
-            "prompt": format_prompt(x[question_key], system_prompt, few_shot),
-        }, num_proc=10)
-    else:
-        return dataset.map(lambda x: {
-            "prompt": format_prompt(x[question_key], system_prompt, few_shot),
-            "answer": x[answer_key]
-        }, num_proc=10)

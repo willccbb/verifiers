@@ -2,16 +2,11 @@ from abc import abstractmethod
 import asyncio
 from asyncio import Semaphore
 from copy import deepcopy
-from concurrent.futures import ThreadPoolExecutor
-import random
-import time
-from typing import List, Dict, Sequence, Any, Tuple
+from typing import List, Dict, Any, Tuple
 
 from datasets import Dataset
-from pydantic import BaseModel
 from openai import OpenAI
 
-from ..imports import SamplingParams  # type: ignore
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 from verifiers.envs.environment import Environment
@@ -197,6 +192,7 @@ class MultiTurnEnv(Environment):
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  max_concurrent: int = 32,
+                 score_rollouts: bool = True,
                  **kwargs: Any) -> Dict[str, List[Any]]:
         if client is None:
             assert self.client is not None
@@ -276,7 +272,7 @@ class MultiTurnEnv(Environment):
                 )
                 return results
 
-            # Run the async evaluation
+            # Run generation (async)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -285,16 +281,18 @@ class MultiTurnEnv(Environment):
                 loop.close()
 
             results = self.flatten(results)
-            results_rewards = self.rubric.score_rollout_group( 
-                prompts=results['prompt'],
-                completions=results['completion'],
-                answers=results['answer'],
-                tasks=results['task'],
-                max_concurrent=max_concurrent,
-                apply_weights=True
-            )       
-            results_rewards = self.flatten(results_rewards)
-            results.update(results_rewards)
+            if score_rollouts:
+                # Score rollouts (async)
+                results_rewards = self.rubric.score_rollout_group( 
+                    prompts=results['prompt'],
+                    completions=results['completion'],
+                    answers=results['answer'],
+                    tasks=results['task'],
+                    max_concurrent=max_concurrent,
+                    apply_weights=True
+                )       
+                results_rewards = self.flatten(results_rewards)
+                results.update(results_rewards)
             return results
         return run_generate()
 
@@ -341,7 +339,6 @@ class MultiTurnEnv(Environment):
         """
         Make a dataset from the evaluation results.
         """
-
         if results is None and client is None:
             raise ValueError("Either results or client must be provided")
         if push_to_hub and hub_name is None:

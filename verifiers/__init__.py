@@ -1,10 +1,8 @@
 from typing import Callable
-from transformers import PreTrainedModel # type: ignore 
 RewardFunc = Callable[..., float]
 
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True # type: ignore
-
 
 from .parsers.parser import Parser
 from .parsers.xml_parser import XMLParser

@@ -2,7 +2,7 @@ def calculator(expression: str) -> str:
     """Evaluates a single line of Python math expression. No imports or variables allowed.
 
     Args:
-        expression: A mathematical expression using only numbers and basic operators (+,-,*,/,**,())
+        expression (str): A mathematical expression using only numbers and basic operators (+,-,*,/,**,())
 
     Returns:
         The result of the calculation or an error message

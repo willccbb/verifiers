@@ -2,7 +2,7 @@ from datasets import concatenate_datasets
 from trl import GRPOConfig
 
 import verifiers as vf
-from verifiers.tools import search, python, ask
+from verifiers.tools import python
 from verifiers.utils import preprocess_dataset
 
 """

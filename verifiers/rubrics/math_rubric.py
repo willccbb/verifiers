@@ -1,31 +1,26 @@
 from typing import List
 
+from verifiers import RewardFunc
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 
 
 class MathRubric(Rubric):
-    def __init__(self, parser: XMLParser | None = None):
-        self.parser = parser if parser is not None else XMLParser(fields=["think", "answer"])
-        self.reward_funcs = [
-            self.exact_answer_reward_func,
-            self.int_answer_reward_func,
-            self.parser.get_xml_reward_func(),
-            self.parser.get_format_reward_func()
-        ]
-        self.reward_weights = [
-            1.0,
-            0.5,
-            0.25,
-            0.25
-        ]
+    def __init__(self,
+                 funcs: List[RewardFunc] = [],
+                 weights: List[float] = [],
+                 parser: XMLParser | None = None):
+        super().__init__(funcs=funcs, weights=weights, parser=parser)
+        if not isinstance(self.parser, XMLParser):
+            self.parser = XMLParser(fields=["think", "answer"])
+        self.add_reward_func(self.correct_answer_reward_func)
+        self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
 
-    def exact_answer_reward_func(self, completion, answer, **kwargs) -> List[float]:
+    def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
         """Reward function that checks if the final answer matches the expected answer."""
-        responses = [self.parser.get_final_answer(c) for c in completions]
-        return [1.0 if str(r) == str(a) else 0.0 for r, a in zip(responses, answer)]
-
-    def int_answer_reward_func(self, completion, answer, **kwargs) -> List[float]:
-        """Reward function that checks if the final answer is an integer."""
-        responses = [self.parser.get_final_answer(c) for c in completions]
-        return [1.0 if str(r).isdigit() else 0.0 for r in responses]
+        try:
+            from math_verify import parse, verify # type: ignore
+            response = self.parser.get_final_answer(completion)
+            return 1.0 if verify(parse(answer), parse(response)) else 0.0
+        except Exception:
+            return 0.0

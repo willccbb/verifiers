@@ -3,11 +3,15 @@ from trl import GRPOConfig
 
 import verifiers as vf
 from verifiers.utils import preprocess_dataset
-from verifiers.prompts.smola_templates import MATH_SMOLA_PROMPT_TEMPLATE
-from verifiers.prompts.smola_few_shots import CALCULATOR_SMOLA_FEW_SHOTS
+from verifiers.prompts.system_prompts import MATH_SMOLA_PROMPT_TEMPLATE
+from verifiers.prompts.few_shots import CALCULATOR_SMOLA_FEW_SHOTS
 from verifiers.envs.smola_tool_env import SmolaToolEnv
-from smolagents.default_tools import PythonInterpreterTool
-from verifiers.tools.smolagents import CalculatorTool
+
+try:    
+    from smolagents.default_tools import PythonInterpreterTool # type: ignore
+    from verifiers.tools.smolagents import CalculatorTool
+except ImportError:
+    raise ImportError("Please install smolagents to use SmolAgents tools.")
 
 """
 Multi-GPU training (single node, 4 training + 4 inference) using SmolaAgents tools

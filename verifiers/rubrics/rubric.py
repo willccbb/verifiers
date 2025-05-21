@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Any
 
 from verifiers import RewardFunc
-
+from verifiers.parsers import Parser
 class Rubric:
     """
     Rubric class for reward functions.
@@ -25,9 +25,10 @@ class Rubric:
     def __init__(self, 
                  funcs: List[RewardFunc] = [],
                  weights: List[float] = [],
+                 parser: Parser | None = Parser(),
                  **kwargs):
         self.logger = logging.getLogger(f"verifiers.parsers.{self.__class__.__name__}")
-        self.parser = None
+        self.parser = parser
         for key, value in kwargs.items():
             setattr(self, key, value)
         self.reward_funcs = funcs
@@ -40,6 +41,10 @@ class Rubric:
 
     def get_reward_weights(self) -> List[float]:
         return self.reward_weights # type: ignore
+
+    def add_reward_func(self, func: RewardFunc, weight: float = 1.0):
+        self.reward_funcs.append(func)
+        self.reward_weights.append(weight)
 
     def _call_reward_func(self,
                           func: RewardFunc,

@@ -1,37 +1,45 @@
+# adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
+
+import os
+import textwrap
 import warnings
+from collections import defaultdict, deque
+from collections.abc import Sized
+from contextlib import nullcontext
 from typing import Callable, Optional, Union, Any, List
 
+import datasets
+import torch
 from accelerate.utils import broadcast_object_list, gather, gather_object
 from datasets import Dataset, IterableDataset
-from peft import PeftConfig # type: ignore
-import torch
+from peft import PeftConfig, get_peft_model # type: ignore
 from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.utils.data import DataLoader
 from transformers import (
-    PreTrainedModel, # type: ignore 
-    PreTrainedTokenizerBase, # type: ignore
-    Trainer, # type: ignore
-    TrainerCallback, # type: ignore
-    is_wandb_available # type: ignore
-) 
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    GenerationConfig,
+    Trainer,
+    TrainerCallback,
+    is_wandb_available
+)
+from trl.data_utils import maybe_apply_chat_template
+from trl.import_utils import is_rich_available
+from trl.trainer.utils import pad
+
+import wandb
+
 from verifiers import RewardFunc
 from verifiers.envs.environment import Environment
 from verifiers.utils.logging_utils import print_prompt_completions_sample
-from verifiers.utils.config_utils import GRPOEnvConfig
-from verifiers.imports import SamplingParams
 from verifiers.inference.vllm_client import VLLMClient
+from verifiers.trainers.grpo_env_config import GRPOEnvConfig
+from verifiers.trainers.repeat_sampler import RepeatSampler
 
-# monkey patch vllm client
-import trl.extras.vllm_client
-trl.extras.vllm_client.VLLMClient = VLLMClient
 
-from trl import GRPOTrainer, GRPOConfig
-from trl.data_utils import maybe_apply_chat_template
-from trl.import_utils import is_rich_available
-from trl.extras.profiling import profiling_context
-from trl.trainer.utils import pad
 
-if is_wandb_available():
-    import wandb
+
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
@@ -51,70 +59,14 @@ def nanstd(tensor: torch.Tensor) -> torch.Tensor:
     variance *= count / (count - 1)  # Bessel's correction
     return torch.sqrt(variance)
 
-def split_tensor_dict(
-    tensor_dict: dict[str, Optional[torch.Tensor]], num_chunks: int
-) -> list[dict[str, Optional[torch.Tensor]]]:
-    """
-    Splits a dictionary of tensors along the first dimension into `num_chunks` equal parts.
-
-    Example:
-        >>> x = torch.arange(12).reshape(6, 2)
-        >>> y = torch.arange(6).reshape(6, 1)
-        >>> tensor_dict = {"x": x, "y": y}
-        >>> split_tensor_dict(tensor_dict, 3)
-        [
-            {"x": tensor([[0, 1], [2, 3]]), "y": tensor([[0], [1]])},
-            {"x": tensor([[4, 5], [6, 7]]), "y": tensor([[2], [3]])},
-            {"x": tensor([[ 8,  9], [10, 11]]), "y": tensor([[4], [5]])}
-        ]
-    """
-    first_tensor = next(tensor for tensor in tensor_dict.values() if tensor is not None)
-    chunk_size = first_tensor.shape[0] // num_chunks
-    return [
-        {
-            key: tensor[i * chunk_size : (i + 1) * chunk_size] if tensor is not None else None
-            for key, tensor in tensor_dict.items()
-        }
-        for i in range(num_chunks)
-    ]
-
-
-def nanmin(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the minimum value of a tensor, ignoring NaNs. This function only supports 1D tensors.
-
-    Args:
-        tensor (`torch.Tensor`): Input tensor of shape `(N,)`.
-
-    Returns:
-        `torch.Tensor`: Minimum value of the tensor, ignoring NaNs. Returns NaN if all values are NaN.
-    """
-    if torch.isnan(tensor).all():
-        return torch.tensor(float("nan"), dtype=tensor.dtype, device=tensor.device)
-    return torch.min(tensor[~torch.isnan(tensor)])
-
-def nanmax(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the maximum value of a tensor, ignoring NaNs. This function only supports 1D tensors.
-
-    Args:
-        tensor (`torch.Tensor`): Input tensor of shape `(N,)`.
-
-    Returns:
-        `torch.Tensor`: Maximum value of the tensor, ignoring NaNs. Returns NaN if all values are NaN.
-    """
-    if torch.isnan(tensor).all():
-        return torch.tensor(float("nan"), dtype=tensor.dtype, device=tensor.device)
-    return torch.max(tensor[~torch.isnan(tensor)])
-
 class GRPOEnvTrainer(GRPOTrainer):
     def __init__(
             self,
             model: Union[str, PreTrainedModel],
             env: Environment,
-            reward_funcs: Union[RewardFunc, list[RewardFunc]] | None = None,
+            reward_funcs: Union[RewardFunc, list[RewardFunc]],
             scale_rewards: bool = False,
-            args: Optional[GRPOConfig | GRPOEnvConfig] = None,
+            args: Optional[GRPOConfig] = None,
             train_dataset: Optional[Union[Dataset, IterableDataset]] = None,
             eval_dataset: Optional[Union[Dataset, IterableDataset]] = None,
             processing_class: Optional[PreTrainedTokenizerBase] = None,
@@ -123,26 +75,12 @@ class GRPOEnvTrainer(GRPOTrainer):
             peft_config: Optional["PeftConfig"] = None,
             **kwargs,
     ):
-        if train_dataset is None:
-            train_dataset = env.get_dataset()
-        if eval_dataset is None:
-            eval_dataset = env.get_eval_dataset()
-        if reward_funcs is None:
-            reward_funcs = env.get_reward_funcs()
-        if args.reward_weights is None:
-            args.reward_weights = env.get_reward_weights()
-
         self.vllm_client = None
         if not args.use_vllm: # type: ignore
             raise ValueError("vLLM must be enabled for GRPOEnvTrainer")
         if not (callable(reward_funcs) or (isinstance(reward_funcs, list) and all(callable(f) for f in reward_funcs))): 
             raise ValueError("reward_funcs must be a function or a list of functions. Use vLLM to host neural reward models.")
-
-        # Store delta and remove it from args before passing to super
-        delta = getattr(args, 'delta', None)
-        if hasattr(args, 'delta'):
-            delattr(args, 'delta')
-                
+        
         super().__init__(
             model=model,
             reward_funcs=reward_funcs,
@@ -155,8 +93,6 @@ class GRPOEnvTrainer(GRPOTrainer):
             peft_config=peft_config,
             **kwargs,
         )
-        self.args.delta = delta
-
         self.env = env
         self.scale_rewards = scale_rewards
         self.sampling_params = SamplingParams(
@@ -172,11 +108,6 @@ class GRPOEnvTrainer(GRPOTrainer):
          self, inputs: dict[str, Union[torch.Tensor, Any]]   
     ) -> dict[str, Union[torch.Tensor, Any]]:
         device = self.accelerator.device
-        mode = "eval" if self.control.should_evaluate else "train"
-
-
-        # prompts come as either a list of message dict lists or a list of strings
-
         prompts = [x["prompt"] for x in inputs] # type: ignore
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs] # type: ignore
         prompt_inputs = self.processing_class(
@@ -196,12 +127,11 @@ class GRPOEnvTrainer(GRPOTrainer):
         # Gather the original prompts in message dict form, not the text form
         all_prompts = gather_object(prompts)
         if self.accelerator.is_main_process:
-            with profiling_context("env_generate"):
-                env_result = self.env.generate(
-                    prompts=all_prompts,
-                    llm=self.vllm_client, # type: ignore
-                    sampling_params=self.sampling_params,
-                )
+            env_result = self.env.generate(
+                prompts=all_prompts,
+                llm=self.vllm_client, # type: ignore
+                sampling_params=self.sampling_params,
+            )
             completion_ids = env_result['ids']
             completion_messages = env_result['messages']
             completion_mask = env_result['mask']
@@ -232,12 +162,9 @@ class GRPOEnvTrainer(GRPOTrainer):
         completion_mask = pad(completion_mask, padding_value=0)
 
         prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-
-        # Concatenate prompt_mask with completion_mask for logit computatione
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1) # (B, P+C)
         
         logits_to_keep = completion_ids.size(1)
-        batch_size = self.args.per_device_train_batch_size if mode == "train" else self.args.per_device_eval_batch_size
 
         with torch.no_grad():
             # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip it's
@@ -263,7 +190,6 @@ class GRPOEnvTrainer(GRPOTrainer):
 
         # use message dicts for reward function inputs
         completions = completion_messages
-        completions_text = [maybe_apply_chat_template(example, self.processing_class)["completion"] for example in completions] # type: ignore
         rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, reward_func in enumerate(self.reward_funcs):
             # Repeat all input columns (but "prompt" and "completion") to match the number of generations
@@ -311,42 +237,22 @@ class GRPOEnvTrainer(GRPOTrainer):
         )
         advantages = advantages[process_slice]
 
-
         # Log the metrics
-        if mode == "train":
-            self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
-        self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
-
-        # log completion lengths, mean, min, max
-        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
-        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item())
-        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item())
-        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item())
-
-        # identify sequences that terminated with EOS and log their lengths
-        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1))
-        term_completion_mask = agg_completion_mask[agg_terminated_with_eos]
-        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
-        self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
-        if len(term_completion_mask) == 0:
-            # edge case where no completed sequences are found
-            term_completion_mask = torch.zeros(1, device=device)
-        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
-        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
-        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
-
-        # Calculate mean reward per function, but only for samples where the function was applied (non-NaN values)
-        for i, reward_func_name in enumerate(self.reward_func_names):
-            mean_rewards = torch.nanmean(rewards_per_func[:, i]).item()
-            self._metrics[mode][f"rewards/{reward_func_name}/mean"].append(mean_rewards)
-            std_rewards = nanstd(rewards_per_func[:, i]).item()
-            self._metrics[mode][f"rewards/{reward_func_name}/std"].append(std_rewards)
-        self._metrics[mode]["reward"].append(mean_grouped_rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
-
+        mode = "eval" if self.control.should_evaluate else "train"
 
         completion_length = self.accelerator.gather_for_metrics(completion_mask.sum(1)).float().mean().item() # type: ignore
         self._metrics[mode]["completion_length"].append(completion_length)
+
+        # Calculate mean reward per function, but only for samples where the function was applied
+        for i, reward_func in enumerate(self.reward_funcs):
+            reward_func_name = reward_func.__name__ # type: ignore  
+            # Only calculate mean for samples where this reward function was applied (non-NaN values)
+            mean_rewards = torch.nanmean(rewards_per_func[:, i]).item()
+            self._metrics[mode][f"rewards/{reward_func_name}"].append(mean_rewards)
+            std_rewards = nanstd(rewards_per_func[:, i]).item()
+            self._metrics[mode][f"rewards/{reward_func_name}/std"].append(std_rewards)
+        self._metrics[mode]["reward"].append(rewards.mean().item())
+        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item()) # type: ignore
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:
             prompts_to_log = gather_object(prompts)
@@ -374,89 +280,12 @@ class GRPOEnvTrainer(GRPOTrainer):
                     df = pd.DataFrame(table)
                     wandb.log({"completions": wandb.Table(dataframe=df)}) # type: ignore
 
-        # Log prompt and completion texts
-        self._textual_logs["prompt"].extend(gather_object(prompts_text))
-        self._textual_logs["completion"].extend(gather_object(completions_text))
-        for i, name in enumerate(self.reward_func_names):
-            self._textual_logs["rewards"][name].extend(rewards_per_func[:, i].tolist())
-
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
             "completion_ids": completion_ids,
             "completion_mask": completion_mask,
-            "advantages": advantages,
             "old_per_token_logps": old_per_token_logps,
             "ref_per_token_logps": ref_per_token_logps,
+            "advantages": advantages,
         }
-    
-    def _compute_loss(self, model, inputs):
-        # Compute the per-token log probabilities for the model
-        prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
-        completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
-        input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
-        logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-
-        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
-
-        # Compute the KL divergence between the model and the reference model
-        if self.beta != 0.0:
-            ref_per_token_logps = inputs["ref_per_token_logps"]
-            per_token_kl = (
-                torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
-            )
-
-        # Compute the loss
-        advantages = inputs["advantages"]
-        # When using num_iterations == 1, old_per_token_logps == per_token_logps, so we can skip it's computation (see
-        # _generate_and_score_completions) and use per_token_logps.detach() instead.
-        old_per_token_logps = inputs["old_per_token_logps"] if self.num_iterations > 1 else per_token_logps.detach()
-        coef_1 = torch.exp(per_token_logps - old_per_token_logps)
-        coef_2 = torch.clamp(coef_1, 1 - self.epsilon_low, 1 + self.epsilon_high)
-
-        if self.args.delta is not None:
-            # Use clamp instead of min to handle tensor-float comparison
-            per_token_loss1 = torch.clamp(coef_1, max=self.args.delta) * advantages.unsqueeze(1)
-        else:
-            # Original GRPO clipping (only lower bound implicitly applied by the final min)
-            per_token_loss1 = coef_1 * advantages.unsqueeze(1)
-        per_token_loss2 = coef_2 * advantages.unsqueeze(1)
-        per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
-        if self.beta != 0.0:
-            per_token_loss = per_token_loss + self.beta * per_token_kl
-
-        if self.loss_type == "grpo":
-            loss = ((per_token_loss * completion_mask).sum(-1) / completion_mask.sum(-1).clamp(min=1.0)).mean()
-        elif self.loss_type == "bnpo":
-            loss = (per_token_loss * completion_mask).sum() / completion_mask.sum().clamp(min=1.0)
-        elif self.loss_type == "dr_grpo":
-            loss = (per_token_loss * completion_mask).sum() / (per_token_loss.size(0) * self.max_completion_length)
-        else:
-            raise ValueError(f"Unknown loss type: {self.loss_type}")
-
-        # Log the metrics
-        mode = "eval" if self.control.should_evaluate else "train"
-
-        if self.beta != 0.0:
-            mean_kl = (per_token_kl * completion_mask).sum() / completion_mask.sum()
-            self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).nanmean().item())
-
-        # Compute the clipped probability ratios
-        is_low_clipped = (coef_1 < 1 - self.epsilon_low) & (advantages.unsqueeze(1) < 0)
-        is_high_clipped = (coef_1 > 1 + self.epsilon_high) & (advantages.unsqueeze(1) > 0)
-        is_region_clipped = is_low_clipped | is_high_clipped
-
-        low_clip = (is_low_clipped * completion_mask).sum() / completion_mask.sum()
-        high_clip = (is_high_clipped * completion_mask).sum() / completion_mask.sum()
-        clip_ratio = (is_region_clipped * completion_mask).sum() / completion_mask.sum()
-
-        gathered_low_clip = self.accelerator.gather_for_metrics(low_clip)
-        self._metrics[mode]["clip_ratio/low_mean"].append(gathered_low_clip.nanmean().item())
-        self._metrics[mode]["clip_ratio/low_min"].append(nanmin(gathered_low_clip).item())
-        gathered_high_clip = self.accelerator.gather_for_metrics(high_clip)
-        self._metrics[mode]["clip_ratio/high_mean"].append(gathered_high_clip.nanmean().item())
-        self._metrics[mode]["clip_ratio/high_max"].append(nanmax(gathered_high_clip).item())
-        gathered_clip_ratio = self.accelerator.gather_for_metrics(clip_ratio)
-        self._metrics[mode]["clip_ratio/region_mean"].append(gathered_clip_ratio.nanmean().item())
-        return loss
