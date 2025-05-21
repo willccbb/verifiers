@@ -3,12 +3,13 @@ from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 import random
 import time
-from typing import List, Dict, Sequence, Any, Union, Tuple
+from typing import List, Dict, Sequence, Any, Tuple
 
 from datasets import Dataset
 from pydantic import BaseModel
-from ..imports import LLM, SamplingParams  # type: ignore
-from verifiers.inference.vllm_client import VLLMClient
+from openai import OpenAI
+
+from ..imports import SamplingParams  # type: ignore
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 from verifiers.envs.environment import Environment
@@ -47,17 +48,24 @@ class MultiTurnEnv(Environment):
     def __init__(self,
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
-                 system_prompt: str = "",
-                 few_shot: List[Dict[str, str]] = [],
-                 parser: Parser | None = None,
-                 rubric: Rubric | None = None,
+                 system_prompt: str | None = None,
+                 few_shot: List[Dict[str, str]] | None = None,
+                 parser: Parser = Parser(),
+                 rubric: Rubric = Rubric(),
                  sampling_args: Dict[str, Any] = {},
                  mask_env_response: bool = True,
                  max_workers: int = 10,
                  max_steps: int = 10,
                  sleep_time: float = 1.0,
                  **kwargs):
-        super().__init__(**kwargs)
+        
+        super().__init__(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            parser=parser,
+            rubric=rubric,
+            **kwargs
+        )
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         if dataset is not None:
@@ -77,15 +85,20 @@ class MultiTurnEnv(Environment):
         else:   
             self.eval_dataset = None
         self.sampling_args = {
-            "skip_special_tokens": False,
-            "spaces_between_special_tokens": False,
-            "n": 1
+            "extra_body": {
+                "skip_special_tokens": False,
+                "spaces_between_special_tokens": False,
+            },
         }
         self.sampling_args.update(sampling_args)
         self.env_mask = 0 if mask_env_response else 1
         self.max_workers = max_workers
         self.sleep_time = sleep_time
         self.max_steps = max_steps
+        # TODO: remove these
+        self.tokenizer = None
+        self.eot_id = 151643
+        self.message_end_id = 151645
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
@@ -96,9 +109,6 @@ class MultiTurnEnv(Environment):
         if n > 0 and self.eval_dataset is not None:
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.eval_dataset
-
-
-
 
     @abstractmethod
     def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
@@ -117,30 +127,27 @@ class MultiTurnEnv(Environment):
 
     def step(self,
              states: List[Dict[str, Any]],
-             llm: LLM | VLLMClient,
+             client: OpenAI,
              sampling_params: SamplingParams) -> List[Dict[str, Any]]:
         
         live_indices = [i for i, s in enumerate(states) if not s["completed"]]
         messages_to_step = [states[i]["messages"] for i in live_indices]
 
-        if isinstance(llm, VLLMClient):
-            llm_responses = llm.chat(
-                messages_to_step,
-                n=1,
-                repetition_penalty=sampling_params.repetition_penalty,
-                temperature=sampling_params.temperature,
-                top_p=sampling_params.top_p,
-                top_k=sampling_params.top_k,
-                min_p=sampling_params.min_p,
-                max_tokens=sampling_params.max_tokens, # type: ignore
-                stop=sampling_params.stop, # type: ignore
-                include_stop_str_in_output=sampling_params.include_stop_str_in_output,
-                skip_special_tokens=sampling_params.skip_special_tokens,
-                spaces_between_special_tokens=sampling_params.spaces_between_special_tokens
-            ) # type: ignore
-            llm_responses = dict_to_chat_response(llm_responses).responses
-        else:
-            llm_responses = llm.chat(messages_to_step, sampling_params=sampling_params, use_tqdm=False) # type: ignore
+        llm_responses = client.chat.completions.create(
+            messages=messages_to_step,
+            n=1,
+            repetition_penalty=sampling_params.repetition_penalty,
+            temperature=sampling_params.temperature,
+            top_p=sampling_params.top_p,        
+            top_k=sampling_params.top_k,
+            min_p=sampling_params.min_p,
+            max_tokens=sampling_params.max_tokens, # type: ignore
+            stop=sampling_params.stop, # type: ignore
+            include_stop_str_in_output=sampling_params.include_stop_str_in_output,
+            skip_special_tokens=sampling_params.skip_special_tokens,
+            spaces_between_special_tokens=sampling_params.spaces_between_special_tokens
+        ) # type: ignore
+        llm_responses = dict_to_chat_response(llm_responses).responses
 
         def update_state(j, llm_response):
             # sleep for 0-1 seconds to avoid rate limiting
@@ -243,9 +250,9 @@ class MultiTurnEnv(Environment):
         return state
 
     def generate(self,
-                 inputs: Dict[str, Any],
-                 #prompts: List[List[Dict[str, Any]]] | List[str],
-                 client: VLLMClient,  
+                 #inputs: Dict[str, Any],
+                 prompts: List[List[Dict[str, Any]]] | List[str],
+                 client: OpenAI,  
                  sampling_params: SamplingParams,
                  **kwargs: Any) -> Dict[str, List[Sequence[int]] | List[str] |  List[List[Dict[str, Any]]]]:
         """
@@ -313,9 +320,8 @@ class MultiTurnEnv(Environment):
             response = client.chat.completions.create(
                 model=model,
                 messages=messages_copy,
-                extra_body=sampling_args
+                **sampling_args
             )
-            
             # Add assistant response to messages
             assistant_msg = {
                 "role": "assistant", 
@@ -344,14 +350,13 @@ class MultiTurnEnv(Environment):
                 model: str,
                 max_concurrent: int = 32,
                 num_samples: int = -1,
-                timeout: int = 300,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any):
         
         eval_sampling_args = deepcopy(self.sampling_args)
         eval_sampling_args.update(sampling_args)
         """
-        Evaluate model using OpenAI API with proper concurrency.
+        Evaluate model using OpenAI API with async processing.
         
         Args:
             client: OpenAI client instance
@@ -370,16 +375,18 @@ class MultiTurnEnv(Environment):
             from asyncio import Semaphore
             # Get the evaluation dataset
             if self.eval_dataset is None:
-                self.eval_dataset = self.get_eval_dataset(**kwargs)
+                self.logger.info("Eval dataset not provided, falling back to default dataset")
+                self.eval_dataset = self.get_dataset(**kwargs)
                 
             if self.eval_dataset is None:
                 raise ValueError("Failed to load evaluation dataset")
             
             eval_dataset = self.eval_dataset
             if num_samples > 0:
+                self.logger.info(f"Evaluating last {num_samples} examples")
                 eval_dataset = eval_dataset.select(range(len(eval_dataset) - num_samples, len(eval_dataset)))
 
-            async def process_example(example, semaphore):
+            async def process_example(example, semaphore) -> Dict[str, Any]:
                 async with semaphore:
                     # Initialize conversation with system prompt and few-shot examples
                     prompt = example["prompt"]
@@ -392,8 +399,7 @@ class MultiTurnEnv(Environment):
                     # Run the conversation loop until completion or max steps
                     for _ in range(self.max_steps):  # Safety limit on conversation turns
                         try:
-                            # Run step_api to get model and environment response
-                            # Note: step_api now returns a tuple (messages, is_completed)
+                            # step_api returns a tuple (messages, is_completed)
                             step_result = await asyncio.get_event_loop().run_in_executor(
                                 None,
                                 lambda: self.step_api(
@@ -416,18 +422,20 @@ class MultiTurnEnv(Environment):
                             break
                     
                     # Extract only the interaction part (not system/few-shot)
-                    completions = messages[initial_length:]
+                    completion = messages[initial_length:]
                     
                     result = {
                         "prompt": prompt,
-                        "completion": completions,
+                        "completion": completion,
                         "answer": answer
                     }
                     if 'task' in example:
                         result['task'] = example['task']
+                    else:
+                        result['task'] = None
                     return result
             
-            async def run_all_examples():
+            async def run_all_examples() -> List[Dict[str, Any]]:
                 # Create semaphore for concurrency control
                 from tqdm.asyncio import tqdm_asyncio
 
@@ -450,58 +458,23 @@ class MultiTurnEnv(Environment):
                 results = loop.run_until_complete(run_all_examples())
             finally:
                 loop.close()
-            
-            #  Aggregate rollouts + calculate rewards
-            results_prompts = [result["prompt"] for result in results]
-            results_completions = [result["completion"] for result in results]
-            results_answer = [result["answer"] for result in results]
-            if 'task' in results[0]:
-                results_task = [result["task"] for result in results]
-            else:
-                results_task = None
-            results = {
-                "prompts": results_prompts,
-                "completions": results_completions,
-                "answer": results_answer,
-                "task": results_task
-            }
-            
-            reward_funcs = self.get_reward_funcs()
-            results_rewards = {}
-            rewards_avg = {}
-            
-            for reward_func in reward_funcs:
-                func_name = reward_func.__name__ # type: ignore
-                results_rewards[func_name] = []
-                func_rewards_all = reward_func(**results) # type: ignore
-                results_rewards[func_name] = func_rewards_all
-                #func_rewards = [fr for fr in func_rewards_all if fr is not None]
-                # func_reward_avg = sum(func_rewards) / max(1, len(func_rewards))
-                
-                # print(f"{func_name}: {func_reward_avg}")
-                # rewards_avg[func_name] = func_reward_avg
-    
-            def flatten_rewards(rewards: dict, weights: list[float] | None = None) -> list[float]:
-                """
-                flatten dict of lists into a single list, summing elementwise.
-                """
-                if weights is None:
-                    return [sum(r) for r in zip(*rewards.values())]
-                else:
-                    return [sum(w * r for w, r in zip(weights, r) if r is not None) for r in zip(*rewards.values())]
 
-            if self.rubric is not None:
-                weights = self.get_reward_weights()
-                results['reward'] = flatten_rewards(results_rewards, weights)
-            else:
-                results['reward'] = flatten_rewards(results_rewards)
-            results['reward_funcs'] = results_rewards
-            results['rewards_avg'] = {func_name: sum(results_rewards[func_name]) / len(results_rewards[func_name]) for func_name in results_rewards}
-            results['rewards_avg']['total'] = sum(results['reward']) / len(results['reward'])
-            
-            # rename "prompts" -> "prompt" and "completions" -> "completion" for Dataset compatibility
-            results['prompt'] = results.pop('prompts')
-            results['completion'] = results.pop('completions')
+            def flatten(results: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
+                """
+                Flatten a list of dictionaries into a single dictionary with lists of values.
+                """
+                return {k: [item[k] for item in results] for k in results[0]}
+
+            results = flatten(results)
+            results_rewards = self.rubric.score_rollout_group( 
+                prompts=results['prompt'],
+                completions=results['completion'],
+                answers=results['answer'],
+                tasks=results['task'],
+                max_workers=self.max_workers
+            )
+            results_rewards = flatten(results_rewards)
+            results.update(results_rewards)
             return results
 
         # Run the evaluation function
@@ -512,14 +485,19 @@ class MultiTurnEnv(Environment):
                          model: str,
                          max_concurrent: int = 32,
                          num_samples: int = -1,
-                         timeout: int = 300,
                          sampling_args: Dict[str, Any] = {"temperature": 0.6},
                          **kwargs: Any) -> Dataset:
         """
         Make a dataset from the evaluation results.
         """
-        results = self.eval_api(client, model, max_concurrent, num_samples, timeout, sampling_args)
-        if results['task'] is not None:
+        results = self.eval_api(
+            client,
+            model, 
+            max_concurrent, 
+            num_samples, 
+            sampling_args
+        )
+        if results['task'][0] is not None:
             dataset = Dataset.from_dict({
                 "prompt": results['prompt'],
                 "completion": results['completion'],

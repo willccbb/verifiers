@@ -10,40 +10,31 @@ uv run python vllm_serve.py --model <model_name> --port <port>
 Supports:
 - /v1/chat/completions
 - /v1/completions
-
-This script is adapted from trl/scripts/vllm_serve.py (huggingface/trl)
 """
-
 import argparse
 import logging
 import os
-import time # Added back time as it's used in lifespan
-import asyncio # For run_in_executor
-import threading # For Lock
+import time 
+import asyncio 
+import threading 
+import inspect 
 from collections.abc import Sequence
+from collections import defaultdict 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from itertools import chain
+from typing import Any, Literal 
 from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection
 from typing import Optional, Sequence
+from uuid import uuid4
 
-import torch
-
-from trl import TrlParser
-
-# FastAPI
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse 
-
-# NEW – OpenAI-spec helpers
-from uuid import uuid4
-from datetime import datetime, timezone
-
+import torch
+from trl import TrlParser
 from pydantic import BaseModel
-
 import uvicorn
-
 from vllm import LLM, SamplingParams
 from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 from vllm.distributed.parallel_state import get_world_group
@@ -65,7 +56,7 @@ pipe_lock = threading.Lock()
 request_queue: Optional[asyncio.Queue] = None
 batch_processor_task: Optional[asyncio.Task] = None
 
-# -------- OpenAI-chat Pydantic Models (moved to global scope) ---------- #
+# -------- OpenAI /v1/chat/completions Pydantic Models ---------- #
 class OAChatMessage(BaseModel):
     role: str
     content: str
@@ -73,11 +64,19 @@ class OAChatMessage(BaseModel):
 class OAChatCompletionRequest(BaseModel):
     model: str
     messages: list[OAChatMessage]
-    temperature: float | None = 1.0
-    top_p:     float | None = 1.0
-    max_tokens: int | None  = 16
-    stream: bool = False
+    temperature: float | None = 0.7
+    top_p: float | None = 1.0
+    top_k: int | None = -1
+    max_tokens: int | None  = 1024
+    n: int | None = 1
+    stop: str | list[str] | None = None
+    presence_penalty: float | None = 0.0
+    frequency_penalty: float | None = 0.0
+    repetition_penalty: float | None = 1.0
+    stream: bool = False # not supported
     extra_body: dict | None = None 
+    # supported by vLLM:
+    # guided_decoding, include_stop_str_in_output, skip_special_tokens, spaces_between_special_tokens
 
 class OAChatChoice(BaseModel):
     index: int
@@ -90,6 +89,35 @@ class OAChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[OAChatChoice]
+
+# -------- OpenAI /v1/completions Pydantic Models ---------- #
+class OACompletionRequest(BaseModel):
+    model: str
+    prompt: str | list[str] 
+    temperature: float | None = 0.7
+    top_p: float | None = 1.0
+    top_k: int | None = -1
+    max_tokens: int | None  = 1024
+    n: int  = 1
+    stop: str | list[str] | None = None
+    presence_penalty: float | None = 0.0
+    frequency_penalty: float | None = 0.0
+    repetition_penalty: float | None = 1.0
+    stream: bool = False # not supported
+    extra_body: dict | None = None
+
+class OACompletionChoice(BaseModel):
+    index: int
+    text: str
+    logprobs: dict | None = None 
+    finish_reason: str | None = "length" 
+
+class OACompletionResponse(BaseModel):
+    id: str
+    object: str = "completion"
+    created: int
+    model: str
+    choices: list[OACompletionChoice]
 # ---------------------------------------------------------------------- #
 
 def send_and_recv(conn: Connection, payload: dict):
@@ -136,7 +164,7 @@ class WeightSyncWorkerExtension:
         pg = StatelessProcessGroup.create(host=host, port=port, rank=rank, world_size=world_size)
 
         # Initialize the NCCL-based communicator for weight synchronization.
-        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device)
+        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device) # type: ignore
 
         # The client process that sends updated weights has the highest rank (world_size - 1).
         self.client_rank = world_size - 1
@@ -157,10 +185,10 @@ class WeightSyncWorkerExtension:
             raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
 
         # Allocate memory for the incoming weight tensor on the correct device.
-        weight = torch.empty(shape, dtype=dtype, device=self.device)
+        weight = torch.empty(shape, dtype=dtype, device=self.device) # type: ignore
 
         # Use NCCL to broadcast the updated weights from the client (src) to all workers.
-        self.pynccl_comm.broadcast(weight, src=self.client_rank)
+        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore 
         self.pynccl_comm.group.barrier()
 
         # Load the received weights into the model.
@@ -220,7 +248,13 @@ class ScriptArguments:
         log_level (`str`, *optional*, defaults to `"info"`):
             Log level for uvicorn. Possible choices: `"critical"`, `"error"`, `"warning"`, `"info"`, `"debug"`,
             `"trace"`.
-    """
+        max_batch_size (int):
+            Maximum number of requests to process in one LLM call from the active pool.
+        batch_request_timeout_seconds (int):
+            Timeout in seconds for a single request waiting for its turn and completion.
+        token_chunk_size (int):
+            Number of tokens to generate per iteration per request in token-chunk dynamic batching.
+        """
 
     model: str = field(metadata={"help": "Model name or path to load the model from."})
     revision: Optional[str] = field(
@@ -295,17 +329,114 @@ class ScriptArguments:
             "'trace'."
         },
     )
-    batch_delay_ms: int = field(
-        default=100,
-        metadata={"help": "Time in milliseconds to wait for additional requests to batch for /v1/chat/completions."},
-    )
     max_batch_size: int = field(
-        default=8,
-        metadata={"help": "Maximum number of requests to batch together for /v1/chat/completions."},
+        default=32,
+        metadata={"help": "Maximum number of requests to process in one LLM call from the active pool."},
     )
     batch_request_timeout_seconds: int = field(
         default=60,
-        metadata={"help": "Timeout in seconds for a single request waiting for batch processing and completion."},
+        metadata={"help": "Timeout in seconds for a single request waiting for its turn and completion."},
+    )
+    token_chunk_size: int = field(
+        default=64,
+        metadata={"help": "Number of tokens to generate per iteration in token-chunk dynamic batching."},
+    )
+
+# Global/module-level variables for token-chunk dynamic batching
+_SAMPLING_PARAM_NAMES: Optional[frozenset[str]] = None
+
+@dataclass(frozen=True)
+class PoolSignature:
+    model_name: str
+    request_type: Literal["chat", "completion"]
+    # Excludes max_tokens and stream
+    sampling_params_tuple: tuple[tuple[str, Any], ...]
+    extra_body_params_tuple: tuple[tuple[str, Any], ...]
+
+@dataclass
+class PooledRequestState:
+    original_request: Any # OAChatCompletionRequest or OACompletionRequest
+    completion_event: asyncio.Event
+    result_container: list 
+    request_id: str 
+    request_type: Literal["chat", "completion"]
+    pool_signature: PoolSignature # Store the signature for quick checks
+    effective_max_tokens: int
+    accumulated_content: str = ""
+    generated_token_count: int = 0
+    original_chat_messages: Optional[list[OAChatMessage]] = None
+    original_prompt: Optional[str | list[str]] = None 
+    error: Optional[Exception] = None 
+    finish_reason: Optional[str] = None
+    completed_and_signaled: bool = False
+    timed_out: bool = False
+
+pending_requests_by_signature: defaultdict[PoolSignature, list[PooledRequestState]] = defaultdict(list)
+active_pool_signature: Optional[PoolSignature] = None
+active_pool_requests: list[PooledRequestState] = []
+
+
+def _get_sampling_param_names() -> frozenset[str]:
+    global _SAMPLING_PARAM_NAMES
+    if _SAMPLING_PARAM_NAMES is None:
+        _SAMPLING_PARAM_NAMES = frozenset(inspect.signature(SamplingParams).parameters.keys())
+    return _SAMPLING_PARAM_NAMES
+
+def create_pool_signature(
+    model_name: str,
+    request_type: Literal["chat", "completion"],
+    # These are params from the original OpenAI request model
+    raw_request_params: dict[str, Any], # Contains all original request fields like temp, top_p, etc.
+    extra_body: Optional[dict[str, Any]]
+) -> PoolSignature:
+    valid_sampling_keys = _get_sampling_param_names()
+    
+    sig_sampling_items = []
+    key_openai_to_vllm_map = {
+        "temperature": "temperature", "top_p": "top_p", "n": "n", 
+        "presence_penalty": "presence_penalty", "frequency_penalty": "frequency_penalty",
+        "repetition_penalty": "repetition_penalty", "stop": "stop", 
+        "seed": "seed", "ignore_eos": "ignore_eos", "min_tokens": "min_tokens",
+    }
+    
+    # Use defaults from Pydantic models if not provided in request
+    param_defaults_for_sig = {
+        "temperature": OAChatCompletionRequest.model_fields["temperature"].default,
+        "top_p": OAChatCompletionRequest.model_fields["top_p"].default,
+        "n": OAChatCompletionRequest.model_fields["n"].default,
+        "presence_penalty": OAChatCompletionRequest.model_fields["presence_penalty"].default,
+        "frequency_penalty": OAChatCompletionRequest.model_fields["frequency_penalty"].default,
+        "repetition_penalty": OAChatCompletionRequest.model_fields["repetition_penalty"].default,
+        "stop": OAChatCompletionRequest.model_fields["stop"].default,
+        # stop: None, seed: None, ignore_eos: False, min_tokens: 0
+    }
+
+    for oa_key, vllm_key in key_openai_to_vllm_map.items():
+        if vllm_key in valid_sampling_keys:
+            value = raw_request_params.get(oa_key, param_defaults_for_sig.get(oa_key)) # Use default if not in request
+            # For 'stop', ensure it's a tuple if it's a list for hashability
+            if vllm_key == "stop" and isinstance(value, list):
+                value = tuple(value)
+            if value is not None: # Only add if value is meaningfully set or defaulted for signature
+                 sig_sampling_items.append((vllm_key, value))
+    
+    # Sort for stable signature
+    sig_sampling_items.sort(key=lambda item: item[0])
+
+    filtered_extra_body_items = []
+    if extra_body:
+        for k, v in sorted(extra_body.items()):
+            # Only include extra_body items that are NOT already part of vLLM SamplingParams
+            # to avoid them influencing signature if they are just alternative ways to pass standard params.
+            # This primarily targets things like 'guided_decoding_regex'.
+            if k not in valid_sampling_keys: 
+                 filtered_extra_body_items.append((k,v))
+                 
+    return PoolSignature(
+        model_name=model_name,
+        request_type=request_type,
+        sampling_params_tuple=tuple(sig_sampling_items),
+        extra_body_params_tuple=tuple(filtered_extra_body_items)
     )
 
 def llm_worker(
@@ -324,9 +455,6 @@ def llm_worker(
         gpu_memory_utilization=script_args.gpu_memory_utilization,
         enforce_eager=script_args.enforce_eager,
         dtype=script_args.dtype,
-        # Automatic Prefix Caching caches the KV cache of existing queries, so that a new query can
-        # directly reuse the KV cache if it shares the same prefix with one of the existing queries.
-        # This is particularly useful here because we generate completions from the same prompts.
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
         worker_extension_cls="verifiers.inference.vllm_openai.WeightSyncWorkerExtension",
@@ -373,207 +501,369 @@ def chunk_list(lst: list, n: int) -> list[list]:
 async def batch_processing_loop(
     script_args: ScriptArguments, 
     connections: list[Connection], 
-    queue: asyncio.Queue,
+    queue: asyncio.Queue, # This queue now receives PooledRequestState
     logger_instance: logging.Logger
 ):
-    """Processes OpenAI chat requests in batches."""
+    global pending_requests_by_signature, active_pool_signature, active_pool_requests
+
+    if not connections:
+        logger_instance.error("Batch Processor: No LLM workers available. Shutting down loop.")
+        # We cannot process anything if connections are not there from the start.
+        # New requests added to queue will eventually timeout or error when picked by lifespan shutdown.
+        return
+
     while True:
-        current_batch_items = [] # Stores (OAChatCompletionRequest, asyncio.Event, result_container)
-        batch_fill_start_time = time.monotonic()
-
         try:
-            # Fill the batch until max_size or timeout
-            while len(current_batch_items) < script_args.max_batch_size:
-                time_elapsed_filling = time.monotonic() - batch_fill_start_time
-                remaining_time_for_batch_fill = (script_args.batch_delay_ms / 1000.0) - time_elapsed_filling
+            # 1. Ingest new requests (non-blocking or short timeout)
+            # This part tries to fill pending_requests_by_signature from the main request_queue
+            try:
+                while True: # Loop to drain current items in asyncio.Queue
+                    pooled_req_state: PooledRequestState = queue.get_nowait()
+                    pending_requests_by_signature[pooled_req_state.pool_signature].append(pooled_req_state)
+                    logger_instance.debug(f"Request {pooled_req_state.request_id} enqueued to pending pool with sig {pooled_req_state.pool_signature}")
+                    queue.task_done() # Signal that this item from main queue is taken
+            except asyncio.QueueEmpty:
+                pass # No new requests in the main queue right now
 
-                if remaining_time_for_batch_fill <= 0 and len(current_batch_items) > 0:
-                    break # Timeout for this batch, proceed with current items
-
-                try:
-                    timeout_for_get = max(0.001, remaining_time_for_batch_fill) if len(current_batch_items) > 0 else None
-                    req, event, res_container = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=timeout_for_get
-                    )
-                    current_batch_items.append((req, event, res_container))
-                    if len(current_batch_items) == 1: # First item in a new batch
-                        batch_fill_start_time = time.monotonic() # Reset timer when first item arrives
-                except asyncio.TimeoutError:
-                    if len(current_batch_items) > 0:
-                        break # Batch delay expired, process what we have
-                    # If no items and timeout (because timeout_for_get was not None), just continue waiting for the first item
+            # 2. Activate a new pool if current is empty and pending requests exist
+            if not active_pool_requests and pending_requests_by_signature:
+                # Simple strategy: pick the first signature that has pending requests
+                # More sophisticated strategies (e.g. largest batch) could be implemented here
+                # items() gives a view, convert to list to pop
+                available_signatures = list(pending_requests_by_signature.keys())
+                if available_signatures:
+                    active_pool_signature = available_signatures[0] # Pick one
+                    active_pool_requests = pending_requests_by_signature.pop(active_pool_signature)
+                    logger_instance.info(f"Activated new pool with signature: {active_pool_signature}. Size: {len(active_pool_requests)}")
             
-            if not current_batch_items:
-                # This can happen if queue.get() timed out when current_batch_items was empty.
-                # Or if the loop was cancelled while waiting.
-                await asyncio.sleep(0.01) # Small sleep to prevent tight loop if continuously timing out.
-                continue
+            # 3. Merge new matching requests into the active pool
+            if active_pool_signature and active_pool_signature in pending_requests_by_signature:
+                newly_matching_requests = pending_requests_by_signature.pop(active_pool_signature)
+                active_pool_requests.extend(newly_matching_requests)
+                logger_instance.info(f"Merged {len(newly_matching_requests)} requests into active pool. New size: {len(active_pool_requests)}")
 
-            logger_instance.info(f"Processing batch of {len(current_batch_items)} chat requests.")
-
-            if not connections:
-                logger_instance.error("Batch Processor: No LLM workers available.")
-                for _, event, res_container in current_batch_items:
-                    res_container[0] = JSONResponse(status_code=503, content={"error": "No LLM workers available for batch processing."})
-                    event.set()
-                current_batch_items.clear()
-                continue
-
-            batched_openai_requests = [item[0] for item in current_batch_items]
-            all_conversations_for_batch = [[msg.model_dump() for msg in oa_req.messages] for oa_req in batched_openai_requests]
-
-            first_req_in_batch = batched_openai_requests[0]
-            vllm_specific_params = first_req_in_batch.extra_body or {}
-            guided_decoding = None
-            if "guided_decoding_regex" in vllm_specific_params:
-                guided_decoding = GuidedDecodingParams(backend="outlines", regex=vllm_specific_params.pop("guided_decoding_regex"))
-
-            sampling_params = SamplingParams(
-                n=1, # OpenAI 'n' is per request. LLM.chat expects one 'n' for the batch.
-                     # Simplification: use n=1 for all. Log warning if original 'n' differs.
-                temperature=first_req_in_batch.temperature if first_req_in_batch.temperature is not None else 1.0,
-                top_p=first_req_in_batch.top_p if first_req_in_batch.top_p is not None else 1.0,
-                max_tokens=first_req_in_batch.max_tokens if first_req_in_batch.max_tokens is not None else 16,
-                guided_decoding=guided_decoding,
-                **{k: v for k, v in vllm_specific_params.items() if k in SamplingParams.__fields__}
-            )
-
-            if len(batched_openai_requests) > 1:
-                # Check if any request had a different n, temperature, top_p, or max_tokens
-                # For simplicity, only logging a general warning here.
-                logger_instance.warning(
-                    f"Batching {len(batched_openai_requests)} chat requests. "
-                    f"Sampling parameters (n=1, temp, top_p, max_tokens) from the first request in the batch will be applied to all. "
-                    f"VLLM specific params from first request's extra_body also applied to all."
-                )
-            
-            llm_results: list = []
-            loop = asyncio.get_running_loop()
-
-            if script_args.data_parallel_size > 1 and len(all_conversations_for_batch) > 0:
-                chunked_conversations = chunk_list(all_conversations_for_batch, script_args.data_parallel_size)
-                tasks = []
-                actual_conversations_map = {} # To map task index to metadata about the chunk
-
-                for i, conn in enumerate(connections):
-                    current_convs_for_worker = chunked_conversations[i] if i < len(chunked_conversations) else []
-                    worker_messages_payload: list # This will be list[list[dict]]
-                    is_placeholder_chunk = False
-                    if not current_convs_for_worker:
-                        worker_messages_payload = [[{"role": "user", "content": "<placeholder_batch_chat>"}]]
-                        is_placeholder_chunk = True
-                    else:
-                        worker_messages_payload = current_convs_for_worker
-                    
-                    actual_conversations_map[len(tasks)] = {"is_placeholder": is_placeholder_chunk}
-                    worker_payload = {
-                        "type": "call", 
-                        "method": "chat", 
-                        "kwargs": {"messages": worker_messages_payload, "sampling_params": sampling_params}
-                    }
-                    tasks.append(loop.run_in_executor(None, send_and_recv, conn, worker_payload))
+            # 4. Process active pool chunk
+            if active_pool_requests:
+                # Take a sub-batch from the active pool
+                # If active_pool_requests is not empty, active_pool_signature must be set.
+                assert active_pool_signature is not None, "active_pool_signature cannot be None if active_pool_requests is populated"
+                sub_batch_to_process: list[PooledRequestState] = []
+                sub_batch_size = min(len(active_pool_requests), script_args.max_batch_size)
+                sub_batch_to_process = active_pool_requests[:sub_batch_size]
                 
-                results_from_dp_workers = await asyncio.gather(*tasks)
+                if not sub_batch_to_process: # Should not happen if active_pool_requests was not empty
+                    await asyncio.sleep(0.01)
+                    continue
+
+                logger_instance.debug(f"Processing sub-batch of {len(sub_batch_to_process)} for sig: {active_pool_signature}")
+
+                # Prepare inputs for LLM
+                # All requests in sub_batch_to_process share active_pool_signature
+                # So, sampling params (except max_tokens) are the same.
                 
-                combined_llm_outputs = []
-                for task_idx, worker_output_list_or_error in enumerate(results_from_dp_workers):
-                    if actual_conversations_map[task_idx]["is_placeholder"]:
-                        logger_instance.debug("Ignoring placeholder result from DP worker in batch chat.")
-                        continue
-                    if isinstance(worker_output_list_or_error, list):
-                        combined_llm_outputs.extend(worker_output_list_or_error)
-                    else:
-                        logger_instance.warning(f"DP worker returned non-list or error for chat batch chunk: {type(worker_output_list_or_error)}. This chunk of requests will fail.")
-                        # Need to fill in errors for requests corresponding to this failed chunk.
-                        # This part is complex to map back if a chunk fails. For now, this means fewer results than expected.
-                llm_results = combined_llm_outputs
-            
-            elif len(all_conversations_for_batch) > 0: # Single worker or no DP
-                payload = {
-                    "type": "call",
-                    "method": "chat",
-                    "kwargs": {"messages": all_conversations_for_batch, "sampling_params": sampling_params}
-                }
-                try:
-                    result = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
-                    if isinstance(result, list):
-                        llm_results = result
-                    else:
-                        logger_instance.error(f"LLM worker returned non-list for chat batch: {type(result)}. All requests in batch will fail.")
-                        llm_results = [] # Ensure it's a list for consistent error handling below
-                except Exception as e:
-                    logger_instance.error(f"Error calling LLM worker for chat batch: {e}", exc_info=True)
-                    llm_results = [] # Batch call failed
-            else: # No conversations to process
-                llm_results = []
+                # Construct SamplingParams from the active_pool_signature
+                # The signature stores param tuples. Convert back to dict for SamplingParams.
+                sig_sampling_dict = dict(active_pool_signature.sampling_params_tuple)
+                sig_extra_body_dict = dict(active_pool_signature.extra_body_params_tuple)
 
-            if len(llm_results) != len(current_batch_items) and len(all_conversations_for_batch) > 0:
-                # This condition means some results are missing, potentially due to a failed DP chunk or worker error.
-                logger_instance.error(
-                    f"Mismatch in LLM results ({len(llm_results)}) and expected batch size ({len(current_batch_items)} based on {len(all_conversations_for_batch)} conversations). "
-                    f"Failing all requests in this batch as result mapping is unreliable."
+                # Override 'n' to 1 for chunked generation as per design.
+                # Log if original 'n' was different.
+                original_n = sig_sampling_dict.get('n', 1)
+                if original_n != 1:
+                    logger_instance.warning(f"Pool {active_pool_signature}: Original 'n={original_n}' overridden to n=1 for chunked generation.")
+                
+                # Create a new dict for **kwargs, excluding 'n' as it's set explicitly
+                kwargs_for_sampling_params = {k: v for k, v in sig_sampling_dict.items() if k != 'n'}
+                
+                vllm_sampling_params = SamplingParams(
+                    **kwargs_for_sampling_params,
+                    n=1, # Generate one sequence continuation per request in the chunk
+                    max_tokens=script_args.token_chunk_size, # Generate one chunk
+                    # Ensure guided_decoding is correctly set up if present in extra_body
+                    guided_decoding=GuidedDecodingParams(backend="outlines", regex=sig_extra_body_dict["guided_decoding_regex"]) if "guided_decoding_regex" in sig_extra_body_dict else None,
+                    # Remove any params from extra_body that might also be in SamplingParams if they were not filtered by create_pool_signature
+                    **{k: v for k, v in sig_extra_body_dict.items() if k in _get_sampling_param_names() and k != "guided_decoding_regex"}
                 )
-                for _, event, res_container in current_batch_items:
-                    res_container[0] = JSONResponse(status_code=500, content={"error": "Internal error: LLM result count mismatch or partial failure."})
-                    event.set()
-                current_batch_items.clear()
-                continue
 
-            for i, (original_req, event, res_container) in enumerate(current_batch_items):
-                try:
-                    if i < len(llm_results):
-                        request_output = llm_results[i] # vLLM RequestOutput object for one chat
-                        final_choices = []
-                        if hasattr(request_output, 'outputs') and request_output.outputs:
-                            completion_output = request_output.outputs[0] # CompletionOutput object
-                            final_choices.append(OAChatChoice(
-                                index=0,
-                                message=OAChatMessage(role="assistant", content=completion_output.text),
-                                finish_reason=completion_output.finish_reason
-                            ))
+                # --- Bucket chat requests by first chunk vs continuing ---
+                first_chunk_inputs = []
+                first_chunk_states = []
+                continue_chunk_states = []
+                prompts_for_vllm = []
+                is_chat_pool = active_pool_signature.request_type == "chat"
+
+                for req_state in sub_batch_to_process:
+                    if is_chat_pool:
+                        current_messages = []
+                        if req_state.original_chat_messages:
+                            current_messages.extend([m.model_dump() for m in req_state.original_chat_messages])
+                        if req_state.accumulated_content:
+                            current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
                         else:
-                            logger_instance.warning(f"Batch processor: RequestOutput missing 'outputs' for a request. Original model: {original_req.model}")
-                            final_choices.append(OAChatChoice(
-                                index=0,
-                                message=OAChatMessage(role="assistant", content="Error: No output from LLM in batch."),
-                                finish_reason="error"
-                            ))
-                        
-                        response_obj = OAChatCompletionResponse(
-                            id=f"chatcmpl-{uuid4().hex}",
+                            if not current_messages or current_messages[-1]["role"] == "assistant":
+                                logger_instance.warning(f"Request {req_state.request_id} in chat pool has no user prompt to start generation.")
+                                current_messages.append({"role": "user", "content": ""})
+                        if req_state.generated_token_count == 0:
+                            first_chunk_inputs.append(current_messages)
+                            first_chunk_states.append(req_state)
+                        else:
+                            continue_chunk_states.append(req_state)
+                    else:
+                        if isinstance(req_state.original_prompt, str):
+                            current_prompt = req_state.original_prompt
+                        elif isinstance(req_state.original_prompt, list):
+                            current_prompt = req_state.original_prompt[0] if req_state.original_prompt else ""
+                        else:
+                            current_prompt = str(req_state.original_prompt or "")
+                        prompts_for_vllm.append(current_prompt + req_state.accumulated_content)
+
+                # Only process first-chunk chat requests in this tick, then continuing if no first-chunk left
+                llm_results = []
+                processed_states = []
+                if is_chat_pool:
+                    loop = asyncio.get_running_loop()
+                    if first_chunk_inputs:
+                        flags = dict(add_generation_prompt=True, continue_final_message=False)
+                        payload = {
+                            "type": "call",
+                            "method": "chat",
+                            "kwargs": {
+                                "messages": first_chunk_inputs,
+                                "sampling_params": vllm_sampling_params,
+                                **flags,
+                            },
+                        }
+                        llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                        processed_states = first_chunk_states
+                    elif continue_chunk_states:
+                        # No first-chunk requests, process continuing requests
+                        continue_chunk_inputs = []
+                        for req_state in continue_chunk_states:
+                            current_messages = []
+                            if req_state.original_chat_messages:
+                                current_messages.extend([m.model_dump() for m in req_state.original_chat_messages])
+                            if req_state.accumulated_content:
+                                current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
+                            else:
+                                if not current_messages or current_messages[-1]["role"] == "assistant":
+                                    logger_instance.warning(f"Request {req_state.request_id} in chat pool has no user prompt to start generation.")
+                                    current_messages.append({"role": "user", "content": ""})
+                            continue_chunk_inputs.append(current_messages)
+                        flags = dict(add_generation_prompt=False, continue_final_message=True)
+                        payload = {
+                            "type": "call",
+                            "method": "chat",
+                            "kwargs": {
+                                "messages": continue_chunk_inputs,
+                                "sampling_params": vllm_sampling_params,
+                                **flags,
+                            },
+                        }
+                        llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                        processed_states = continue_chunk_states
+                    # else: nothing to process this tick
+                else:
+                    # completion – unchanged
+                    loop = asyncio.get_running_loop()
+                    payload = {
+                        "type": "call",
+                        "method": "generate",
+                        "kwargs": {"prompts": prompts_for_vllm, "sampling_params": vllm_sampling_params},
+                    }
+                    llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                    processed_states = sub_batch_to_process
+
+                # Now, update state for each request in the processed_states
+                temp_failed_requests_in_sub_batch: list[PooledRequestState] = []
+
+                if is_chat_pool:
+                    if processed_states and (len(llm_results) != len(processed_states)):
+                        logger_instance.error(f"LLM result count mismatch. Expected {len(processed_states)}, got {len(llm_results)} for sig {active_pool_signature}. Marking affected requests in sub-batch as error.")
+                        for req_state in processed_states:
+                            if not req_state.completed_and_signaled:
+                                req_state.error = RuntimeError("LLM result mismatch in batch processing.")
+                                req_state.finish_reason = "error"
+                                temp_failed_requests_in_sub_batch.append(req_state)
+                    else:
+                        real_idx = 0
+                        for req_state in processed_states:
+                            if req_state.completed_and_signaled:
+                                continue
+                            request_output = llm_results[real_idx]
+                            real_idx += 1
+                            if not request_output.outputs or len(request_output.outputs) == 0:
+                                logger_instance.warning(f"Request {req_state.request_id} (idx {real_idx-1}) received no output from vLLM in chunk.")
+                                req_state.finish_reason = request_output.outputs[0].finish_reason if request_output.outputs else "error_no_output"
+                                temp_failed_requests_in_sub_batch.append(req_state)
+                                continue
+                            completion_output = request_output.outputs[0]
+                            new_text_chunk = completion_output.text
+                            req_state.accumulated_content += new_text_chunk
+                            req_state.generated_token_count += len(completion_output.token_ids)
+                            req_state.finish_reason = completion_output.finish_reason
+                            is_finished = False
+                            if req_state.finish_reason == "stop":
+                                is_finished = True
+                            elif req_state.finish_reason == "length":
+                                if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                    is_finished = True
+                                    req_state.finish_reason = "length"
+                            elif req_state.finish_reason and req_state.finish_reason != "length":
+                                is_finished = True
+                            if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                is_finished = True
+                                if req_state.finish_reason != "stop":
+                                    req_state.finish_reason = "length"
+                            if is_finished:
+                                logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
+                            else:
+                                logger_instance.debug(f"Request {req_state.request_id} got chunk. New total tokens: {req_state.generated_token_count}. Reason: {req_state.finish_reason}")
+                else:
+                    # completion – unchanged
+                    if len(llm_results) != len(processed_states):
+                        logger_instance.error(f"LLM result count mismatch. Expected {len(processed_states)}, got {len(llm_results)} for sig {active_pool_signature}. Marking affected requests in sub-batch as error.")
+                        for req_state in processed_states:
+                            if not req_state.completed_and_signaled:
+                                req_state.error = RuntimeError("LLM result mismatch in batch processing.")
+                                req_state.finish_reason = "error"
+                                temp_failed_requests_in_sub_batch.append(req_state)
+                    else:
+                        real_idx = 0
+                        for req_state in processed_states:
+                            if req_state.completed_and_signaled:
+                                continue
+                            request_output = llm_results[real_idx]
+                            real_idx += 1
+                            if not request_output.outputs or len(request_output.outputs) == 0:
+                                logger_instance.warning(f"Request {req_state.request_id} (idx {real_idx-1}) received no output from vLLM in chunk.")
+                                req_state.finish_reason = request_output.outputs[0].finish_reason if request_output.outputs else "error_no_output"
+                                temp_failed_requests_in_sub_batch.append(req_state)
+                                continue
+                            completion_output = request_output.outputs[0]
+                            new_text_chunk = completion_output.text
+                            req_state.accumulated_content += new_text_chunk
+                            req_state.generated_token_count += len(completion_output.token_ids)
+                            req_state.finish_reason = completion_output.finish_reason
+                            is_finished = False
+                            if req_state.finish_reason == "stop":
+                                is_finished = True
+                            elif req_state.finish_reason == "length":
+                                if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                    is_finished = True
+                                    req_state.finish_reason = "length"
+                            elif req_state.finish_reason and req_state.finish_reason != "length":
+                                is_finished = True
+                            if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                is_finished = True
+                                if req_state.finish_reason != "stop":
+                                    req_state.finish_reason = "length"
+                            if is_finished:
+                                logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
+                            else:
+                                logger_instance.debug(f"Request {req_state.request_id} got chunk. New total tokens: {req_state.generated_token_count}. Reason: {req_state.finish_reason}")
+                
+                # Now, handle all finished or errored requests from this sub_batch
+                # These need to be removed from active_pool_requests and have their events set.
+                completed_in_sub_batch: list[PooledRequestState] = []
+                remaining_in_sub_batch: list[PooledRequestState] = []
+
+                # Iterate over sub_batch_to_process to decide their fate
+                updated_active_pool = []
+                
+                # Create a set of request_ids from sub_batch_to_process for quick lookup
+                sub_batch_ids = {r.request_id for r in sub_batch_to_process}
+
+                for req_state in active_pool_requests: # Iterate main active pool
+                    if req_state.request_id not in sub_batch_ids:
+                        updated_active_pool.append(req_state) # Keep if not in current sub-batch
+                        continue
+
+                    # req_state is from the current sub_batch. Check its status.
+                    is_definitely_finished = (req_state.finish_reason is not None and req_state.finish_reason != "length") or \
+                                             (req_state.finish_reason == "length" and req_state.generated_token_count >= req_state.effective_max_tokens) or \
+                                             (req_state.error is not None)
+                    
+                    if is_definitely_finished and not req_state.completed_and_signaled:
+                        completed_in_sub_batch.append(req_state)
+                    elif not req_state.completed_and_signaled: # Not finished, and not yet signaled
+                        updated_active_pool.append(req_state) # Keep for next chunk
+                    # If already signaled (completed_and_signaled is True), it means it was handled (e.g. timeout), so don't re-add or re-signal.
+                
+                active_pool_requests = updated_active_pool
+                if not active_pool_requests:
+                    active_pool_signature = None # Deactivate pool if empty
+                    logger_instance.info(f"Deactivated pool {active_pool_signature} as it is now empty.")
+
+
+                for req_state in completed_in_sub_batch:
+                    if req_state.completed_and_signaled: continue # Already handled
+
+                    response_content: OAChatCompletionResponse | OACompletionResponse | JSONResponse
+                    if req_state.error:
+                        logger_instance.error(f"Request {req_state.request_id} failed with error: {req_state.error}")
+                        response_content = JSONResponse(status_code=500, content={"error": f"Processing error: {str(req_state.error)}", "request_id": req_state.request_id})
+                    elif req_state.request_type == "chat":
+                        final_choices = [OAChatChoice(
+                            index=0,
+                            message=OAChatMessage(role="assistant", content=req_state.accumulated_content),
+                            finish_reason=req_state.finish_reason
+                        )]
+                        response_content = OAChatCompletionResponse(
+                            id=f"chatcmpl-{uuid4().hex}", # Use original request_id if available? For now, new UUID.
                             created=int(datetime.now(tz=timezone.utc).timestamp()),
-                            model=original_req.model,
+                            model=req_state.original_request.model,
                             choices=final_choices
                         )
-                        res_container[0] = response_obj
-                    else:
-                        # This case is reached if llm_results was shorter than current_batch_items but not caught by the mismatch check (e.g. if all_conversations_for_batch was 0)
-                        # or if the mismatch check decided to fail all (this loop wouldn't run then). This is a safeguard.
-                        logger_instance.error(f"Batch processor: Missing LLM result for request index {i}. Original model: {original_req.model}")
-                        res_container[0] = JSONResponse(status_code=500, content={"error": "Internal error: Missing LLM result for this request in batch."})
-                
-                except Exception as e:
-                    logger_instance.error(f"Error processing result for a request in batch: {e}", exc_info=True)
-                    res_container[0] = JSONResponse(status_code=500, content={"error": "Internal error processing batched LLM response."})
-                finally:
-                    event.set()
-            current_batch_items.clear()
-        
+                    else: # Completion
+                        final_choices = [OACompletionChoice(
+                            index=0, 
+                            text=req_state.accumulated_content, 
+                            finish_reason=req_state.finish_reason
+                        )]
+                        response_content = OACompletionResponse(
+                            id=f"cmpl-{uuid4().hex}",
+                            created=int(datetime.now(tz=timezone.utc).timestamp()),
+                            model=req_state.original_request.model,
+                            choices=final_choices
+                        )
+                    
+                    req_state.result_container[0] = response_content
+                    req_state.completion_event.set()
+                    req_state.completed_and_signaled = True
+            
+            else: # No active pool
+                await asyncio.sleep(0.01) # Small sleep if no active pool and pending queue was empty
+
         except asyncio.CancelledError:
             logger_instance.info("Batch processing loop cancelled.")
-            for _, event, res_container in current_batch_items:
-                if not event.is_set():
-                    res_container[0] = JSONResponse(status_code=503, content={"error": "Server shutting down, request cancelled."})
-                    event.set()
+            all_requests_to_cancel = list(active_pool_requests)
+            active_pool_requests.clear()
+            active_pool_signature = None
+            for sig_list in pending_requests_by_signature.values():
+                all_requests_to_cancel.extend(sig_list)
+            pending_requests_by_signature.clear()
+            
+            for req_state in all_requests_to_cancel:
+                if not req_state.completed_and_signaled:
+                    req_state.result_container[0] = JSONResponse(status_code=503, content={"error": "Server shutting down, request cancelled."})
+                    req_state.completion_event.set()
+                    req_state.completed_and_signaled = True
             break
         except Exception as e:
-            logger_instance.error(f"Unexpected error in batch processing loop: {e}", exc_info=True)
-            for _, event, res_container in current_batch_items:
-                if not event.is_set():
-                    res_container[0] = JSONResponse(status_code=500, content={"error": "Critical error in batch processor."})
-                    event.set()
-            await asyncio.sleep(1) # Brief pause before retrying the loop
+            logger_instance.error(f"Critical error in batch processing loop: {e}", exc_info=True)
+            all_requests_to_fail = list(active_pool_requests)
+            active_pool_requests.clear()
+            active_pool_signature = None
+            for sig_list in pending_requests_by_signature.values():
+                all_requests_to_fail.extend(sig_list)
+            pending_requests_by_signature.clear()
+
+            for req_state in all_requests_to_fail:
+                 if not req_state.completed_and_signaled:
+                    req_state.result_container[0] = JSONResponse(status_code=500, content={"error": f"Critical batch processor error: {str(e)}"})
+                    req_state.completion_event.set()
+                    req_state.completed_and_signaled = True
+            await asyncio.sleep(1) # Pause before retrying loop
 
 def main(script_args: ScriptArguments):
     global request_queue, batch_processor_task # Allow lifespan to assign to these
@@ -604,10 +894,7 @@ def main(script_args: ScriptArguments):
         while len(ready_connections) < script_args.data_parallel_size:
             if time.time() - start_wait_time > timeout_seconds:
                 logger.error(f"Lifespan: Timeout waiting for all LLM workers. Expected {script_args.data_parallel_size}, got {len(ready_connections)} ready.")
-                # Optionally, could raise an exception here to stop Uvicorn from starting in a bad state
-                # For now, just logging and proceeding might lead to Uvicorn starting but being non-functional.
-                # Consider raising RuntimeError("LLM workers failed to initialize in time")
-                break # Exit loop to allow Uvicorn to start, though it might not work well
+                raise RuntimeError("LLM workers failed to initialize in time")
 
             for i, connection in enumerate(connections):
                 if connection not in ready_connections:
@@ -623,9 +910,7 @@ def main(script_args: ScriptArguments):
                                 logger.warning(f"Lifespan: Received unexpected message from worker {i}: {msg}")
                         except Exception as e:
                             logger.error(f"Lifespan: Error receiving message from worker {i}: {e}")
-                    # else: # Optional: log if a connection is polled but has no data yet
-                        # logger.debug(f"Lifespan: Polled worker {i}, no message yet.") 
-            
+
             if len(ready_connections) < script_args.data_parallel_size:
                 time.sleep(0.5) # Brief sleep to avoid busy-waiting if not all workers are ready yet
 
@@ -692,160 +977,189 @@ def main(script_args: ScriptArguments):
     # -------- OpenAI-chat ---------- #
     @app.post("/v1/chat/completions", response_model=OAChatCompletionResponse)
     async def openai_chat(req: OAChatCompletionRequest):
-        global request_queue # Use the global request queue
+        global request_queue 
 
         if request_queue is None:
-            logger.error("/v1/chat/completions: Request queue not initialized. Batch processing may not be active.")
+            logger.error("/v1/chat/completions: Request queue not initialized.")
             return JSONResponse(status_code=503, content={"error": "Server not ready, batch processing queue not initialized."})
 
+        request_id = f"chatcmpl-{uuid4().hex}"
+        logger.debug(f"Received chat request {request_id}, model: {req.model}")
+
+        # Create signature for pooling
+        # The OAChatCompletionRequest fields are: model, messages, temperature, top_p, max_tokens, stream, extra_body
+        # We need to pass the relevant ones to create_pool_signature
+        raw_params_for_sig = {
+            "temperature": req.temperature,
+            "top_p": req.top_p,
+            # "n" is not in OAChatCompletionRequest, defaults to 1 for chat in OpenAI spec
+            "n": 1, 
+        }
+        # Add other SamplingParams-mappable fields if they were part of OAChatCompletionRequest
+        # For example, if we added 'stop', 'presence_penalty' etc. to OAChatCompletionRequest.
+        # For now, the above are the main ones.
+
+        default_max = OAChatCompletionRequest.model_fields["max_tokens"].default
+        effective_max_tokens = req.max_tokens or default_max
+
+        pool_sig = create_pool_signature(
+            model_name=req.model,
+            request_type="chat",
+            raw_request_params=raw_params_for_sig,
+            extra_body=req.extra_body
+        )
+        
         completion_event = asyncio.Event()
-        result_container = [None]  # Using a list to pass mutable container for the result
+        result_container = [None] 
+        
+        pooled_state = PooledRequestState(
+            original_request=req,
+            completion_event=completion_event,
+            result_container=result_container,
+            request_id=request_id,
+            request_type="chat",
+            pool_signature=pool_sig,
+            effective_max_tokens=effective_max_tokens,
+            original_chat_messages=req.messages, # Store original messages
+        )
 
         try:
-            await request_queue.put((req, completion_event, result_container))
+            # No longer putting directly to pending_requests_by_signature here.
+            # The batch_processing_loop will pick it up from the request_queue.
+            await request_queue.put(pooled_state)
         except Exception as e:
-            logger.error(f"/v1/chat/completions: Error enqueuing request: {e}", exc_info=True)
+            logger.error(f"Enqueueing error for {request_id}: {e}", exc_info=True)
             return JSONResponse(status_code=500, content={"error": "Internal server error while queueing request."})
         
         try:
             await asyncio.wait_for(completion_event.wait(), timeout=script_args.batch_request_timeout_seconds)
         except asyncio.TimeoutError:
-            logger.error(f"/v1/chat/completions: Timeout waiting for chat completion for request model {req.model}. Request might still be processed if batch started.")
-            # The request is in the queue and might eventually be processed.
-            # However, this client has timed out.
-            return JSONResponse(status_code=504, content={"error": "Request timed out waiting for batch processing and completion."})
+            logger.error(f"Timeout for chat request {request_id} (model {req.model}).")
+            pooled_state.timed_out = True
+            pooled_state.completed_and_signaled = True
+            pooled_state.completion_event.set()
+            return JSONResponse(status_code=504, content={"error": "Request timed out."})
         except Exception as e:
-            logger.error(f"/v1/chat/completions: Error waiting for completion event: {e}", exc_info=True)
+            logger.error(f"Error waiting for completion event for {request_id}: {e}", exc_info=True)
             return JSONResponse(status_code=500, content={"error": "Internal server error while waiting for completion."})
 
         response_data = result_container[0]
-        if response_data is None:
-            logger.error(f"/v1/chat/completions: Batch processing finished but no result provided for request model {req.model}. This may indicate an error in the batch processor.")
-            return JSONResponse(status_code=500, content={"error": "Internal server error: No result from batch processor."})
+        if response_data is None: # Should ideally be set to an error by processor if timeout internally
+            logger.error(f"No result for {request_id} (model {req.model}) after event set. Internal error.")
+            return JSONResponse(status_code=500, content={"error": "Internal error: No result from processor."})
 
         if isinstance(response_data, JSONResponse):
-            # If the batch processor decided to return a JSONResponse directly (e.g. for specific errors)
             return response_data
         
-        # Assuming response_data is an OAChatCompletionResponse object if not a JSONResponse
         if isinstance(response_data, OAChatCompletionResponse):
+             # Must return JSONResponse for FastAPI
             return JSONResponse(response_data.model_dump())
         else:
-            logger.error(f"/v1/chat/completions: Unexpected result type from batch processor: {type(response_data)}. Expected OAChatCompletionResponse or JSONResponse.")
-            return JSONResponse(status_code=500, content={"error": "Internal server error: Unexpected result format from batch processor."})
+            logger.error(f"Unexpected result type {type(response_data)} for {request_id}.")
+            return JSONResponse(status_code=500, content={"error": "Internal error: Unexpected result format."})
 
     @app.get("/v1/models")
     async def list_models():
         return {"data": [{"id": script_args.model, "object": "model", "owned_by": "vllm"}]}
 
-    # -------- OpenAI-completions ---------- #
-    class OACompletionRequest(BaseModel):
-        model: str
-        prompt: str | list[str] # OpenAI API can take a string or list of strings for prompt
-        temperature: float | None = 1.0
-        top_p:     float | None = 1.0
-        max_tokens: int | None  = 16
-        n: int | None = 1 # Number of completions to generate for each prompt
-        # stream: bool = False # Deferring stream for now
-        # everything else is accepted but ignored for brevity
-        extra_body: dict | None = None   # <- lets callers pass vLLM-specific params
 
-    class OACompletionChoice(BaseModel):
-        index: int
-        text: str
-        logprobs: dict | None = None # Not currently supported by vLLM output, but part of OpenAI spec
-        finish_reason: str | None = "length" # Assuming "length" if max_tokens reached, or "stop" if a stop token is hit (not explicitly handled here yet)
-
-    class OACompletionResponse(BaseModel):
-        id: str
-        object: str = "text_completion"
-        created: int
-        model: str
-        choices: list[OACompletionChoice]
 
     @app.post("/v1/completions", response_model=OACompletionResponse)
     async def openai_completions(req: OACompletionRequest):
-        vllm_specific_params = req.extra_body or {}
-        guided_decoding = None
-        if "guided_decoding_regex" in vllm_specific_params:
-            guided_decoding = GuidedDecodingParams(backend="outlines", regex=vllm_specific_params.pop("guided_decoding_regex"))
+        global request_queue
 
-        sampling_params = SamplingParams(
-            n=req.n or 1,
-            temperature=req.temperature if req.temperature is not None else 1.0,
-            top_p=req.top_p if req.top_p is not None else 1.0,
-            max_tokens=req.max_tokens if req.max_tokens is not None else 16,
-            guided_decoding=guided_decoding,
-            **{k: v for k, v in vllm_specific_params.items() if k in SamplingParams.__fields__} # Pass only valid SamplingParams
+        if request_queue is None:
+            logger.error("/v1/completions: Request queue not initialized.")
+            return JSONResponse(status_code=503, content={"error": "Server not ready, batch processing queue not initialized."})
+
+        request_id = f"cmpl-{uuid4().hex}"
+        logger.debug(f"Received completion request {request_id}, model: {req.model}")
+
+        # OACompletionRequest fields: model, prompt, temperature, top_p, max_tokens, n, extra_body
+        raw_params_for_sig = {
+            "temperature": req.temperature,
+            "top_p": req.top_p,
+            "n": req.n, # Pass 'n' from the request
+        }
+        # Add other SamplingParams-mappable fields from OACompletionRequest if they exist
+        # e.g., req.stop, req.presence_penalty etc. if we add them to OACompletionRequest model
+        # For now, the above are the main ones.
+        # We need to get ALL fields of OACompletionRequest that are also valid for SamplingParams
+        # This is safer:
+        valid_sp_keys = _get_sampling_param_names()
+        for field_name, field_value in req.model_dump().items():
+            if field_name in valid_sp_keys and field_name not in raw_params_for_sig:
+                raw_params_for_sig[field_name] = field_value
+
+        default_max = OACompletionRequest.model_fields["max_tokens"].default
+        effective_max_tokens = req.max_tokens or default_max
+
+        pool_sig = create_pool_signature(
+            model_name=req.model,
+            request_type="completion",
+            raw_request_params=raw_params_for_sig,
+            extra_body=req.extra_body
         )
 
-        prompts_for_vllm = req.prompt
+        completion_event = asyncio.Event()
+        result_container = [None]
 
-        if not connections:
-            logger.error("No LLM workers available for openai_completions")
-            return JSONResponse(status_code=503, content={"error": "No LLM workers available"})
+        # Check for list prompts for completion, which is problematic for current chunking.
+        # vLLM's generate can take list of prompts, but our chunking logic (appending to prompt) assumes single string.
+        if isinstance(req.prompt, list):
+            if len(req.prompt) > 1:
+                 logger.warning(f"Request {request_id} for completion has a list of prompts. Only the first prompt will be used for chunked generation.")
+                 current_prompt = req.prompt[0] if req.prompt else ""
+            elif not req.prompt: # empty list (simplified condition)
+                current_prompt = ""
+            else: # list with one element
+                current_prompt = req.prompt[0]
+        else: #string
+            current_prompt = req.prompt
 
-        loop = asyncio.get_running_loop()
-        all_raw_outputs = []
 
-        if script_args.data_parallel_size > 1 and isinstance(prompts_for_vllm, list):
-            chunked_prompts = chunk_list(prompts_for_vllm, script_args.data_parallel_size)
-            tasks = []
-            for i, conn in enumerate(connections):
-                current_prompts_for_worker = chunked_prompts[i] if i < len(chunked_prompts) else []
-                if not current_prompts_for_worker: # Avoid sending empty lists if a worker gets no prompts
-                    tasks.append(loop.run_in_executor(None, lambda: [])) # Return an empty list for this worker
-                    continue
-                payload = {
-                    "type": "call",
-                    "method": "generate",
-                    "kwargs": {"prompts": current_prompts_for_worker, "sampling_params": sampling_params}
-                }
-                tasks.append(loop.run_in_executor(None, send_and_recv, conn, payload))
-            all_raw_outputs = await asyncio.gather(*tasks)
+        pooled_state = PooledRequestState(
+            original_request=req,
+            completion_event=completion_event,
+            result_container=result_container,
+            request_id=request_id,
+            request_type="completion",
+            pool_signature=pool_sig,
+            effective_max_tokens=effective_max_tokens,
+            original_prompt=current_prompt, # Store single prompt for chunking
+        )
+
+        try:
+            await request_queue.put(pooled_state)
+        except Exception as e:
+            logger.error(f"Enqueueing error for completion {request_id}: {e}", exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "Internal server error while queueing request."})
+
+        try:
+            await asyncio.wait_for(completion_event.wait(), timeout=script_args.batch_request_timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout for completion request {request_id} (model {req.model}).")
+            pooled_state.timed_out = True
+            pooled_state.completed_and_signaled = True
+            pooled_state.completion_event.set()
+            return JSONResponse(status_code=504, content={"error": "Request timed out."})
+        except Exception as e:
+            logger.error(f"Error waiting for completion event for {request_id}: {e}", exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "Internal server error while waiting for completion."})
+
+        response_data = result_container[0]
+        if response_data is None:
+            logger.error(f"No result for completion {request_id} (model {req.model}) after event set. Internal error.")
+            return JSONResponse(status_code=500, content={"error": "Internal error: No result from processor."})
+
+        if isinstance(response_data, JSONResponse):
+            return response_data
+        
+        if isinstance(response_data, OACompletionResponse):
+            return JSONResponse(response_data.model_dump()) # Must return JSONResponse for FastAPI
         else:
-            # If not data parallel or prompt is a single string, send to the first worker.
-            # chunk_list handles single string to list of list for the worker.
-            prompts_to_send = [prompts_for_vllm] if isinstance(prompts_for_vllm, str) else prompts_for_vllm
-            payload = {
-                "type": "call",
-                "method": "generate",
-                "kwargs": {"prompts": prompts_to_send, "sampling_params": sampling_params}
-            }
-            # Since send_and_recv expects a list of RequestOutput, and we get that from a single call for single/all prompts
-            result_from_worker = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
-            all_raw_outputs = [result_from_worker] # Make it a list to match the structure expected by subsequent code
-
-        final_choices = []
-        overall_choice_idx = 0
-        for worker_output_list in all_raw_outputs:
-            if isinstance(worker_output_list, list):
-                for request_output in worker_output_list:
-                    if hasattr(request_output, 'outputs') and isinstance(request_output.outputs, list):
-                        for completion_output in request_output.outputs:
-                            final_choices.append(OACompletionChoice(
-                                index=overall_choice_idx,
-                                text=completion_output.text,
-                                finish_reason=completion_output.finish_reason
-                            ))
-                            overall_choice_idx += 1
-                    else:
-                        logger.warning(f"openai_completions: RequestOutput missing 'outputs'. req_id: {request_output.request_id if hasattr(request_output, 'request_id') else 'N/A'}")
-            else:
-                logger.warning(f"openai_completions: Expected list from worker, got {type(worker_output_list)}")
-
-        if not final_choices:
-            num_prompts_req = len(prompts_for_vllm) if isinstance(prompts_for_vllm, list) else 1
-            for i in range(num_prompts_req * (req.n or 1)):
-                 final_choices.append(OACompletionChoice(index=i, text="Error: No output from LLM.", finish_reason="error"))
-
-        out = OACompletionResponse(
-            id=f"cmpl-{uuid4().hex}",
-            created=int(datetime.now(tz=timezone.utc).timestamp()),
-            model=req.model,
-            choices=final_choices
-        )
-        return JSONResponse(out.model_dump())
+            logger.error(f"Unexpected result type {type(response_data)} for completion {request_id}.")
+            return JSONResponse(status_code=500, content={"error": "Internal error: Unexpected result format."})
 
     class InitCommunicatorRequest(BaseModel):
         host: str

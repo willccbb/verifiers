@@ -3,7 +3,9 @@ import json
 from typing import List, Dict, Any, Union, Tuple, Optional, Callable
 from types import SimpleNamespace
 
-class SmolaParser:
+from verifiers.parsers import Parser
+
+class SmolaParser(Parser):
     def __init__(self, fields: List[Union[str, Tuple[str, ...]]]):
         """
         Initialize the parser with field definitions.
@@ -35,66 +37,6 @@ class SmolaParser:
                 raise ValueError(f"Duplicate field name: {canonical}")
             seen.add(canonical)
             self._fields.append((canonical, alternatives))
-
-    def get_xml_reward_func(self) -> Callable:
-        """
-        Return a reward function that checks for proper XML tag usage.
-        
-        The returned function evaluates if messages in trajectories properly use 
-        the expected XML tags defined in this parser's fields configuration.
-        """
-        def xml_reward_func(completion, **kwargs) -> float:
-            """
-            Reward function that checks for proper XML tag usage in completions.
-
-            Args:
-                completion: List[Dict[str, str]] | str
-                **kwargs: additional kwargs
-
-            Returns:
-                float: Score between 0 and 1.
-            """
-            model_messages = self.get_assistant_messages(completion)
-            if not model_messages:
-                return 0.0
-
-            # Calculate XML tag usage scores for each message
-            xml_scores = []
-            for msg in model_messages:
-                content = msg['content']
-                score = 0
-                total_checks = 0
-                
-                # For each canonical field with its alternatives
-                for canonical, alternatives in self._fields:
-                    # Track if at least one alternative was used for this field
-                    field_used = False
-                    
-                    # Check all alternatives for this field
-                    for alt in alternatives:
-                        # If this alternative is used, check it has proper tags
-                        if content.count(f"<{alt}>") > 0 or content.count(f"</{alt}>") > 0:
-                            field_used = True
-                            score += 1 - abs(content.count(f"<{alt}>") - 1)
-                            score += 1 - abs(content.count(f"</{alt}>") - 1)
-                            total_checks += 2
-                    
-                    # If no alternatives for this field were used, we don't add to total_checks
-                    # because we're not requiring any specific field to be present
-                
-                # Calculate normalized score for this message
-                if total_checks > 0:
-                    xml_scores.append(score / total_checks)
-                else:
-                    # If no tags used at all, give a zero score
-                    xml_scores.append(0.0)
-            
-            # Return average XML score across all messages
-            if not xml_scores:
-                return 0.0
-            return (sum(xml_scores) / len(xml_scores))
-
-        return xml_reward_func
 
     def get_format_reward_func(self) -> Callable:
         """

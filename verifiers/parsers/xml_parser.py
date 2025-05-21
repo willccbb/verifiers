@@ -65,9 +65,9 @@ class XMLParser(Parser):
                     results[alt] = None
         return SimpleNamespace(**results)
 
-    def parse_answer(self, trajectory: List[Dict[str, str]]) -> str | None:
-        """Extract the last answer from a trajectory."""
-        for msg in reversed(self.get_assistant_messages(trajectory)):
+    def parse_answer(self, completion: List[Dict[str, str]]) -> str | None:
+        """Extract the last answer from a completion."""
+        for msg in reversed(self.get_assistant_messages(completion)):
             parsed = self.parse(msg['content'])
             if hasattr(parsed, self.answer_field) and parsed.answer is not None:
                 return parsed.answer
@@ -86,66 +86,6 @@ class XMLParser(Parser):
                 format_str += f"<{field[0]}>\n...\n</{field[0]}>\n"
         return format_str.strip()
 
-    def get_xml_reward_func(self) -> Callable:
-        """
-        Return a reward function that checks for proper XML tag usage.
-        
-        The returned function evaluates if messages in trajectories properly use 
-        the expected XML tags defined in this parser's fields configuration.
-        """
-        def xml_reward_func(completion, **kwargs) -> float:
-            """
-            Reward function that checks for proper XML tag usage in completions.
-
-            Args:
-                completion: List[Dict[str, str]] | str
-                **kwargs: additional kwargs
-
-            Returns:
-                float: Score between 0 and 1.
-            """
-            model_messages = self.get_assistant_messages(trajectory)
-            if not model_messages:
-                return 0.0
-            
-            # Calculate XML tag usage scores for each message
-            xml_scores = []
-            for msg in model_messages:
-                content = msg['content']
-                score = 0
-                total_checks = 0
-                
-                # For each canonical field with its alternatives
-                for canonical, alternatives in self._fields:
-                    # Track if at least one alternative was used for this field
-                    field_used = False
-                    
-                    # Check all alternatives for this field
-                    for alt in alternatives:
-                        # If this alternative is used, check it has proper tags
-                        if content.count(f"<{alt}>") > 0 or content.count(f"</{alt}>") > 0:
-                            field_used = True
-                            score += 1 - abs(content.count(f"<{alt}>") - 1)
-                            score += 1 - abs(content.count(f"</{alt}>") - 1)
-                            total_checks += 2
-                    
-                    # If no alternatives for this field were used, we don't add to total_checks
-                    # because we're not requiring any specific field to be present
-                
-                # Calculate normalized score for this message
-                if total_checks > 0:
-                    xml_scores.append(score / total_checks)
-                else:
-                    # If no tags used at all, give a zero score
-                    xml_scores.append(0.0)
-            
-            # Return average XML score across all messages
-            if not xml_scores:
-                return 0.0
-            return (sum(xml_scores) / len(xml_scores))
-
-        return xml_reward_func
-
     def get_format_reward_func(self) -> Callable:
         """
         Return a reward function that checks if messages follow the expected format.
@@ -155,9 +95,9 @@ class XMLParser(Parser):
         - At least one field from the schema is present in each message
         - Fields have proper content and spacing
         """
-        def format_reward_func(trajectory):
+        def format_reward_func(completion):
             """Reward function that checks if each step follows the expected format."""
-            model_messages = self.get_assistant_messages(trajectory)
+            model_messages = self.get_assistant_messages(completion)
             if not model_messages:
                 return 0.0
             
@@ -278,4 +218,3 @@ class XMLParser(Parser):
             # Use the canonical name as the tag for formatting.
             parts.append(f"<{canonical}>\n{value}\n</{canonical}>")
         return "\n".join(parts)
-    

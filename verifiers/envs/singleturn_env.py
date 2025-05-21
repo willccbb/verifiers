@@ -10,14 +10,21 @@ from verifiers.rubrics import Rubric
 class SingleTurnEnv(MultiTurnEnv):
     def __init__(self, 
                  dataset: Dataset | None = None,
+                 eval_dataset: Dataset | None = None,
                  system_prompt: str | None = None,
                  few_shot: List[Dict[str, str]] = [],
-                 parser: Parser | None = None,
-                 rubric: Rubric | None = None,
+                 parser: Parser = Parser(),
+                 rubric: Rubric = Rubric(),
                  **kwargs):
-        super().__init__(dataset=dataset, system_prompt=system_prompt, few_shot=few_shot, **kwargs)
-        self.parser = parser
-        self.rubric = rubric
+        super().__init__(
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            system_prompt=system_prompt,
+            few_shot=few_shot,
+            parser=parser,
+            rubric=rubric,
+            **kwargs
+        )
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()

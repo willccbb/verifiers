@@ -7,17 +7,17 @@ from peft import PeftConfig # type: ignore
 import torch
 from torch import nn
 from transformers import (
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-    Trainer,
-    TrainerCallback,
-    is_wandb_available
-)
+    PreTrainedModel, # type: ignore 
+    PreTrainedTokenizerBase, # type: ignore
+    Trainer, # type: ignore
+    TrainerCallback, # type: ignore
+    is_wandb_available # type: ignore
+) 
 from verifiers import RewardFunc
 from verifiers.envs.environment import Environment
 from verifiers.utils.logging_utils import print_prompt_completions_sample
 from verifiers.utils.config_utils import GRPOEnvConfig
-from verifiers.imports import LLM, SamplingParams
+from verifiers.imports import SamplingParams
 from verifiers.inference.vllm_client import VLLMClient
 
 # monkey patch vllm client
@@ -32,7 +32,6 @@ from trl.trainer.utils import pad
 
 if is_wandb_available():
     import wandb
-
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:

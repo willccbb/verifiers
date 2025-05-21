@@ -1,18 +1,23 @@
-from typing import Callable, Union
-from transformers import PreTrainedModel 
-RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
+from typing import Callable
+from transformers import PreTrainedModel # type: ignore 
+RewardFunc = Callable[..., float]
 
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True # type: ignore
 
+
+from .parsers.parser import Parser
+from .parsers.xml_parser import XMLParser
+from .rubrics.rubric import Rubric
+
 from .envs.environment import Environment
+from .envs.multiturn_env import MultiTurnEnv
+
 from .envs.code_env import CodeEnv
 from .envs.doublecheck_env import DoubleCheckEnv
 from .envs.singleturn_env import SingleTurnEnv
 from .envs.simple_env import SimpleEnv
 from .envs.tool_env import ToolEnv
-from .parsers.xml_parser import XMLParser
-from .rubrics.rubric import Rubric
 from .trainers.grpo_env_trainer import GRPOEnvTrainer
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, preprocess_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
@@ -25,16 +30,18 @@ __version__ = "0.1.0"
 setup_logging()
 
 __all__ = [
+    "Parser",
+    "XMLParser",
+    "Rubric",
     "Environment",
+    "MultiTurnEnv",
     "CodeEnv",
     "DoubleCheckEnv",
     "SingleTurnEnv",
     "SimpleEnv",
     "ToolEnv",
-    "Rubric",
     "GRPOEnvTrainer",
     "GRPOEnvConfig",
-    "XMLParser",
     "get_model",
     "get_tokenizer",
     "get_model_and_tokenizer",

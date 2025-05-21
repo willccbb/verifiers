@@ -2,8 +2,8 @@ from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor
 import time
 
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"  # Or your specific model
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="local")
+#MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"  # Or your specific model
+MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
 
 print("--- Testing /v1/models ---")
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="local")
@@ -54,15 +54,20 @@ messages = [
 
 def test_throughput(max_workers=20):
     start_time = time.time()
+    results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(client.chat.completions.create, model=MODEL_NAME, messages=messages, max_tokens=100) for i in range(20)]
+        futures = [executor.submit(client.chat.completions.create, model=MODEL_NAME, messages=messages[i:i+1]) for i in range(20)]
         for i, future in enumerate(futures):
             completion = future.result()
-            #print(f"Completion {i}: {completion.choices[0].message.content}")   
+            results.append(completion.choices[0].message.content)
     end_time = time.time()
-    print(f"Time taken: {end_time - start_time} seconds for {max_workers} workers")
+    print(f"Time taken: {end_time - start_time} seconds for {max_workers} workers with {len(prompts)} prompts")
+    return results
 
-test_throughput(max_workers=1)
+#test_throughput(max_workers=1)
+test_throughput(max_workers=2)
 test_throughput(max_workers=4)
 test_throughput(max_workers=8)
 test_throughput(max_workers=16)
+results = test_throughput(max_workers=20)
+
