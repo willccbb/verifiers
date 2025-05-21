@@ -11,13 +11,15 @@ from ..imports import SamplingParams  # type: ignore
 class Environment(ABC):
 
     def __init__(self,
+                 client: OpenAI | None = None,
+                 model: str | None = None,
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
                  **kwargs: Any):
-        #self.client = None
-        #self.model = None
+        self.client = client
+        self.model = model
         self.dataset = dataset
         self.eval_dataset = eval_dataset
         self.parser = parser
@@ -29,7 +31,6 @@ class Environment(ABC):
         if self.dataset is None and self.eval_dataset is None:
             raise ValueError("Either dataset or eval_dataset must be provided")
         
-
     def get_dataset(self, **kwargs: Any) -> Dataset | None:
         return self.dataset
 
@@ -38,8 +39,10 @@ class Environment(ABC):
  
     @abstractmethod
     def generate(self,
-                 prompts: List[List[Dict[str, Any]]],
+                 inputs: List[Dict[str, Any]] | Dataset,
                  client: OpenAI,
-                 sampling_params: SamplingParams,
+                 model: str,
+                 sampling_args: Dict[str, Any],
+                 max_concurrent: int = 32,
                  **kwargs: Any) -> Dict[str, Any]:
         pass

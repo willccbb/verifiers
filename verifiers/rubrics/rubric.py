@@ -119,52 +119,12 @@ class Rubric:
         weighted_rewards['reward'] = total_reward
         return weighted_rewards 
 
-    # async def _evaluate_group_async(self,
-    #                                 prompts: List[List[Dict[str, str]] | str],
-    #                                 completions: List[List[Dict[str, str]] | str],
-    #                                 answers: List[Any],
-    #                                 tasks: List[str],
-    #                                 max_conc: int = 32,
-    #                                 apply_weights: bool = True,
-    #                                 **kwargs) -> List[Dict[str, float]]:
-        
-        
-
-    #     """
-
-    #     pattern to use
-    #                     semaphore = Semaphore(max_concurrent)
-                
-    #             # Process all examples concurrently
-    #             tasks = [process_example(example, semaphore) for example in eval_dataset]
-    #             results = await tqdm_asyncio.gather(
-    #                 *tasks,
-    #                 total=len(eval_dataset),
-    #                 desc=f"Evaluating {len(eval_dataset)} examples"
-    #             )
-                
-        
-    #     """
-
-    #     sem = asyncio.Semaphore(max_conc)
-    #     async def _one(prompt, completion, answer, task):
-    #         async with sem:     
-    #             return await self._evaluate_rollout(
-    #                 prompt, completion, answer, task, 
-    #                 apply_weights=apply_weights, **kwargs)
-            
-    #     eval_tasks = [
-    #         _one(p, c, a, t)
-    #         for p, c, a, t in zip(prompts, completions, answers, tasks)
-    #     ]
-    #     return await asyncio.gather(*eval_tasks)
-
     def score_rollout_group(self,
                             prompts: List[List[Dict[str, str]] | str],
                             completions: List[List[Dict[str, str]] | str],
                             answers: List[Any],
                             tasks: List[str | None],
-                            max_conc: int = 32,
+                            max_concurrent: int = 32,
                             apply_weights: bool = True,
                             **kwargs) -> List[Dict[str, float]]:
         """
@@ -192,7 +152,7 @@ class Rubric:
 
         async def score_all():
             from tqdm.asyncio import tqdm_asyncio
-            semaphore = Semaphore(max_conc)
+            semaphore = Semaphore(max_concurrent)
             rollout_tasks = [
                 score_rollout(p, c, a, t, semaphore, **kwargs)
                 for p, c, a, t in zip(prompts, completions, answers, tasks)
@@ -203,7 +163,6 @@ class Rubric:
                 desc=f"Evaluating {len(prompts)} rollouts"
             )
 
-        # Run the async evaluation
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:

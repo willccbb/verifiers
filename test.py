@@ -70,4 +70,3 @@ test_throughput(max_workers=4)
 test_throughput(max_workers=8)
 test_throughput(max_workers=16)
 results = test_throughput(max_workers=20)
-

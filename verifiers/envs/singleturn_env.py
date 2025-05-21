@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 from datasets import Dataset
 
@@ -32,8 +32,14 @@ class SingleTurnEnv(MultiTurnEnv):
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
 
-    def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
+    def is_completed(self,
+                     messages: List[Dict[str, str]],
+                     state: Dict[str, Any],
+                     **kwargs: Any) -> bool:
         return True
     
-    def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
-        return {'role': 'user', 'content': 'ERROR'}
+    def env_response(self,
+                     messages: List[Dict[str, str]],
+                     state: Dict[str, Any],
+                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        return {'role': 'user', 'content': 'ERROR'}, state

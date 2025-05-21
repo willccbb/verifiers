@@ -353,7 +353,7 @@ class PoolSignature:
     sampling_params_tuple: tuple[tuple[str, Any], ...]
     extra_body_params_tuple: tuple[tuple[str, Any], ...]
 
-@dataclass
+@dataclass 
 class PooledRequestState:
     original_request: Any # OAChatCompletionRequest or OACompletionRequest
     completion_event: asyncio.Event
@@ -385,7 +385,6 @@ def _get_sampling_param_names() -> frozenset[str]:
 def create_pool_signature(
     model_name: str,
     request_type: Literal["chat", "completion"],
-    # These are params from the original OpenAI request model
     raw_request_params: dict[str, Any], # Contains all original request fields like temp, top_p, etc.
     extra_body: Optional[dict[str, Any]]
 ) -> PoolSignature:
@@ -1024,8 +1023,6 @@ def main(script_args: ScriptArguments):
         )
 
         try:
-            # No longer putting directly to pending_requests_by_signature here.
-            # The batch_processing_loop will pick it up from the request_queue.
             await request_queue.put(pooled_state)
         except Exception as e:
             logger.error(f"Enqueueing error for {request_id}: {e}", exc_info=True)
@@ -1061,8 +1058,6 @@ def main(script_args: ScriptArguments):
     @app.get("/v1/models")
     async def list_models():
         return {"data": [{"id": script_args.model, "object": "model", "owned_by": "vllm"}]}
-
-
 
     @app.post("/v1/completions", response_model=OACompletionResponse)
     async def openai_completions(req: OACompletionRequest):
