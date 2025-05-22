@@ -2,7 +2,7 @@ def python(code: str) -> str:
     """Evaluates a block of Python code and returns output of print() statements. Allowed libraries: astropy, biopython, networkx, numpy, scipy, sympy.
     
     Args:
-        code: A block of Python code
+        code (str): A block of Python code
 
     Returns:
         The output of the code (truncated to 1000 chars) or an error message
