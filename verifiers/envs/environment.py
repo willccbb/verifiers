@@ -119,18 +119,34 @@ class Environment(ABC):
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
     
+    def sanitize_sampling_args(self, client: OpenAI, sampling_args: Dict[str, Any]) -> Dict[str, Any]:
+        from urllib.parse import urlparse
+        url = urlparse(str(client.base_url))
+        # check if url is not localhost/127.0.0.1/0.0.0.0
+        if url.netloc not in ["localhost", "127.0.0.1", "0.0.0.0"]:
+            sanitized_args = deepcopy(sampling_args)
+            # remove extra_body
+            sanitized_args.pop('extra_body', None)
+            return sanitized_args
+        return sampling_args
+
     def get_model_response(self,
                            prompt: str | List[Dict[str, str]],
                            client: OpenAI,
                            model: str,
                            sampling_args: Dict[str, Any] = {},
                            message_type: Literal['chat', 'completion'] | None = None,
+                           sanitize_sampling_args: bool = True,
                            **kwargs: Any) -> str:
         """
         Get model response for a given prompt (chat or completion).
         
         Convenience function for wrapping (chat, completion) API calls.
         """
+        if sanitize_sampling_args:
+            sanitized_args = self.sanitize_sampling_args(client, sampling_args)
+        else:
+            sanitized_args = sampling_args
         if message_type is None:
             message_type = self.message_type #
 
@@ -139,7 +155,7 @@ class Environment(ABC):
             response = client.chat.completions.create(
                 model=model,
                 messages=prompt, # type: ignore
-                **sampling_args
+                **sanitized_args
             )
             return response.choices[0].message.content # type: ignore
         elif message_type == 'completion':
@@ -147,7 +163,7 @@ class Environment(ABC):
             response: str = client.completions.create(
                 model=model,
                 prompt=prompt,
-                **sampling_args
+                **sanitized_args
             )
             return response.choices[0].text # type: ignore
   

@@ -57,9 +57,17 @@ vf_env = vf.ToolEnv(
 # collect V3 rollouts from API
 import os
 from openai import OpenAI
-base_url = "https://api.deepseek.com"
-api_key = os.getenv("DEEPSEEK_API_KEY")
-client = OpenAI(base_url=base_url, api_key=api_key)
+api = "openai"
+if api == "deepseek":
+    base_url = "https://api.deepseek.com"
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    client = OpenAI(base_url=base_url, api_key=api_key)
+elif api == "openai":
+    api_key = os.getenv("OPENAI_API_KEY")
+    model_name = "gpt-4.1-mini" 
+    client = OpenAI(api_key=api_key)
+else:
+    raise ValueError(f"Invalid API: {api}")
 
 # columns = ['prompt', 'completion', 'answer', 'reward']
 # use deepseek-chat for multiturn rollouts (V3-0324)
