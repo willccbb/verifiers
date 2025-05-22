@@ -51,6 +51,7 @@ class Rubric:
                           prompt: List[Dict[str, str]] | str,
                           completion: List[Dict[str, str]] | str,
                           answer: Any,
+                          state: Dict[str, Any],
                           task: str | None,
                           **kwargs) -> float:
         """
@@ -68,6 +69,7 @@ class Rubric:
             prompt=prompt,
             completion=completion,
             answer=answer,
+            state=state,
             task=task,
         )
         merged = {**common, **kwargs}
@@ -80,6 +82,7 @@ class Rubric:
                             prompt: List[Dict[str, str]] | str,
                             completion: List[Dict[str, str]] | str,
                             answer: Any,
+                            state: Dict[str, Any],
                             task: str | None = None,
                             **kwargs) -> Dict[str, float]:
         """
@@ -92,6 +95,7 @@ class Rubric:
                 prompt,
                 completion,
                 answer,
+                state,
                 task=task,
                 **kwargs
             )
@@ -102,19 +106,19 @@ class Rubric:
         rewards['reward'] = sum([reward * weight for reward, weight in zip(reward_scores, self.get_reward_weights())])
         return rewards
 
-    async def _score_single(self, semaphore, *pcat, **kw):
+    async def _score_single(self, semaphore, *pcast, **kw):
         async with semaphore:
-            return await self.score_rollout(*pcat, **kw)
+            return await self.score_rollout(*pcast, **kw)
 
     async def _score_all(
-            self, prompts, completions, answers, tasks,
+            self, prompts, completions, answers, states, tasks,
             max_concurrent: int = 32,
             **kwargs) -> Dict[str, List[float]]:
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
         rollout_tasks = [
-            self._score_single(semaphore, *pcat, **kwargs)
-            for pcat in zip(prompts, completions, answers, tasks)
+            self._score_single(semaphore, *pcast, **kwargs)
+            for pcast in zip(prompts, completions, answers, states, tasks)
         ]
         rewards = await tqdm_asyncio.gather(
             *rollout_tasks,
@@ -127,7 +131,8 @@ class Rubric:
                        prompts: List[List[Dict[str, str]] | str],
                        completions: List[List[Dict[str, str]] | str],
                        answers: List[Any],
-                       tasks: List[str | None],
+                       states: List[Dict[str, Any]],
+                       tasks: List[str],
                        max_concurrent: int = 32,
                        **kwargs) -> Dict[str, List[float]]:
         """
@@ -141,24 +146,16 @@ class Rubric:
         - inter-group comparisons (voting, ranking, Elo, etc.)
         - scores computed using global state stored in Rubric class
         """
+        coro = self._score_all(
+            prompts, completions, answers, states, tasks,
+            max_concurrent=max_concurrent,
+            **kwargs
+        )
         try:
-            loop = asyncio.get_running_loop()
+            return asyncio.run(coro)
         except RuntimeError:
-            return asyncio.run(
-                self._score_all(
-                    prompts, completions, answers, tasks,
-                    max_concurrent=max_concurrent,
-                    **kwargs
-                )
-            )
-        else:
             # Jupyter notebook
             import nest_asyncio
             nest_asyncio.apply()
-            return loop.run_until_complete(
-                self._score_all(
-                    prompts, completions, answers, tasks,
-                    max_concurrent=max_concurrent,
-                    **kwargs
-                )
-            )
+            loop = asyncio.get_running_loop()
+            return loop.run_until_complete(coro)

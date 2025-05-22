@@ -2,7 +2,7 @@ import asyncio
 from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Tuple
 import logging
 
 from datasets import Dataset
@@ -157,9 +157,10 @@ class Environment(ABC):
                 model: str,
                 prompt: str | List[Dict[str, str]],
                 sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> str | List[Dict[str, str]]:
+                **kwargs: Any) -> Tuple[str, Dict[str, Any]] | Tuple[List[Dict[str, str]], Dict[str, Any]]:
         """
-        Run a rollout for a given prompt and return the completion.
+        Run a rollout for a given prompt.
+        Returns a tuple of (completion, state).
         """
         pass
 
@@ -169,12 +170,13 @@ class Environment(ABC):
                           model: str,
                           prompt: str | List[Dict[str, str]],
                           sampling_args: Dict[str, Any] = {},
-                          **kwargs: Any) -> str | List[Dict[str, str]]:
+                          **kwargs: Any) -> Tuple[str, Dict[str, Any]] | Tuple[List[Dict[str, str]], Dict[str, Any]]:
         """
-        Run a rollout for a given prompt and return the completion.
+        Run a rollout for a given prompt.
+        Returns a tuple of (completion, state).
         """
         async with semaphore:
-            return self.rollout(client, model, prompt, sampling_args, **kwargs)
+            return await asyncio.to_thread(self.rollout, client, model, prompt, sampling_args, **kwargs)
 
     async def _run_all(self,
                        client: OpenAI,
@@ -182,7 +184,7 @@ class Environment(ABC):
                        prompts: List[str | List[Dict[str, str]]],
                        sampling_args: Dict[str, Any] = {},
                        max_concurrent: int = 32,
-                       **kwargs: Any) -> List[str | List[Dict[str, str]]]:
+                       **kwargs: Any) -> List[Tuple[str, Dict[str, Any]]] | List[Tuple[List[Dict[str, str]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -204,32 +206,23 @@ class Environment(ABC):
                      model: str,
                      sampling_args: Dict[str, Any] = {},
                      max_concurrent: int = 32,
-                     **kwargs: Any) -> List[str | List[Dict[str, str]]]:
+                     **kwargs: Any) -> List[Tuple[str, Dict[str, Any]]] | List[Tuple[List[Dict[str, str]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
-
+        coro = self._run_all(
+            prompts=prompts, client=client, model=model,
+            sampling_args=sampling_args, max_concurrent=max_concurrent, 
+            **kwargs
+        )
         try:
-            loop = asyncio.get_running_loop()
+            return asyncio.run(coro)
         except RuntimeError:
-            return asyncio.run(
-                self._run_all(
-                    prompts=prompts, client=client, model=model,
-                    sampling_args=sampling_args, max_concurrent=max_concurrent, 
-                    **kwargs
-                )
-            )
-        else:
             # Jupyter notebook
             import nest_asyncio
             nest_asyncio.apply()
-            return loop.run_until_complete(
-                self._run_all(
-                    prompts=prompts, client=client, model=model, 
-                    sampling_args=sampling_args, max_concurrent=max_concurrent, 
-                    **kwargs
-                )
-            )
+            loop = asyncio.get_running_loop()
+            return loop.run_until_complete(coro)
 
     def generate(self,
                  inputs: Dict[str, List[Any]] | Dataset,
@@ -260,7 +253,8 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
-        results['completion'] = self.run_rollouts(
+        print("Running rollouts")
+        rollouts = self.run_rollouts(
             prompts=results['prompt'],
             client=client,
             model=model,
@@ -268,11 +262,17 @@ class Environment(ABC):
             max_concurrent=max_concurrent,
             **kwargs
         )
+        print(f"Rollouts done: {len(rollouts)}")
+        results['completion'] = [rollout[0] for rollout in rollouts]
+        results['state'] = [rollout[1] for rollout in rollouts]
+        if 'task' not in results:
+            results['task'] = ['default'] * len(results['prompt'])
         if score_rollouts:
             results_rewards = self.rubric.score_rollouts( 
                 prompts=results['prompt'],
                 completions=results['completion'],
                 answers=results['answer'],
+                states=results['state'],
                 tasks=results['task'],
                 max_concurrent=max_concurrent,
                 apply_weights=True
@@ -302,11 +302,11 @@ class Environment(ABC):
         if self.eval_dataset is None:
             self.logger.info('eval_dataset is not set, falling back to train dataset')
             assert self.dataset is not None
-            num_rows = len(self.dataset)
-            inputs = self.dataset.select(range(num_rows - num_samples, num_rows))
+            inputs = self.dataset
         else:
-            num_rows = len(self.eval_dataset)
             inputs = self.eval_dataset
+        if num_samples > 0:
+            inputs = inputs.select(range(num_samples))
 
         results = self.generate(
             inputs, client, model, sampling_args, max_concurrent, **kwargs
@@ -322,6 +322,8 @@ class Environment(ABC):
                      max_concurrent: int | None = None,
                      num_samples: int = -1,
                      sampling_args: Dict[str, Any] = {'temperature': 0.6},
+                     state_columns: List[str] = [],
+                     extra_columns: List[str] = [],
                      **kwargs: Any) -> Dataset:
         """
         Make a dataset from the evaluation results.
@@ -331,16 +333,16 @@ class Environment(ABC):
         if push_to_hub and hub_name is None:
             raise ValueError('hub_name must be provided if push_to_hub is True')
         
-        # use class-level client and model if not provided
-        if client is None:
-            assert self.client is not None
-            client = self.client
-        if model is None:
-            assert self.model is not None
-            model = self.model
-        if max_concurrent is None:
-            max_concurrent = self.max_concurrent
         if results is None:
+            # use class-level client and model if not provided
+            if client is None:
+                assert self.client is not None
+                client = self.client
+            if model is None:
+                assert self.model is not None
+                model = self.model
+            if max_concurrent is None:
+                max_concurrent = self.max_concurrent
             results = self.evaluate(
                 client,
                 model, 
@@ -349,21 +351,24 @@ class Environment(ABC):
                 max_concurrent, 
                 **kwargs
             )
+        cols = ['prompt', 'completion', 'answer', 'reward']
         if results['task'][0] is not None:
-            dataset = Dataset.from_dict({
-                'prompt': results['prompt'],
-                'completion': results['completion'],
-                'answer': results['answer'],
-                'reward': results['reward'],
-                'task': results['task']
-            })
-        else:
-            dataset = Dataset.from_dict({
-                'prompt': results['prompt'],
-                'completion': results['completion'],
-                'answer': results['answer'],
-                'reward': results['reward'],
-            })
+            cols.append('task')
+        if 'state' in results:
+            for col in state_columns:
+                if col in results['state'][0]:
+                    results[col] = [state[col] for state in results['state']]
+                    cols.append(col)
+                else:
+                    self.logger.warning(f'Column {col} not found in state, skipping from dataset.')
+        for col in extra_columns:
+            if col in results:
+                cols.append(col)
+            else:
+                self.logger.warning(f'Column {col} not found in results, skipping from dataset.')
+        dataset = Dataset.from_dict({
+            col: results[col] for col in cols
+        })
         if push_to_hub:
             assert hub_name is not None
             dataset.push_to_hub(hub_name)

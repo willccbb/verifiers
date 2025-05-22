@@ -7,23 +7,23 @@ from openai import OpenAI
 from verifiers.envs.environment import Environment
 
 
-class MultiTurnEnv(Environment):
+class MultiTurnCompletionEnv(Environment):
     def __init__(self, max_turns: int = 10, **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
 
     @abstractmethod
     def is_completed(self,
-                     messages: List[Dict[str, str]],
+                     prompt: str,
                      state: Dict[str, Any],
                      **kwargs: Any) -> bool:
         pass
 
     @abstractmethod
     def env_response(self,
-                     messages: List[Dict[str, str]],
+                     prompt: str,
                      state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+                     **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
         """
         Generate a response from the environment (message, state).
         """
@@ -34,28 +34,28 @@ class MultiTurnEnv(Environment):
                 model: str,
                 prompt: str | List[Dict[str, str]],
                 sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+                **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
         is_completed = False
         state = {}
-        assert isinstance(prompt, list)
-        messages = deepcopy(prompt) 
-        completion = []
+        assert isinstance(prompt, str)
+        input = deepcopy(prompt) 
+        completion = ""
         turn = 0
         while not is_completed:
             response = self.get_model_response(
-                prompt=messages,
+                prompt=input,
                 client=client,
                 model=model,
                 sampling_args=sampling_args,
                 message_type=self.message_type
             )
-            messages.append({"role": "assistant", "content": response})
-            completion.append({"role": "assistant", "content": response})
+            input = input + response
+            completion += response
             turn += 1
-            if self.is_completed(messages, state, **kwargs) or turn >= self.max_turns:
+            if self.is_completed(input, state, **kwargs) or turn >= self.max_turns:
                 is_completed = True
             else:
-                env_msg, state = self.env_response(messages, state, **kwargs)
-                messages.append(env_msg)
-                completion.append(env_msg)
+                env_msg, state = self.env_response(input, state, **kwargs)
+                input = input + env_msg
+                completion += env_msg
         return completion, state
