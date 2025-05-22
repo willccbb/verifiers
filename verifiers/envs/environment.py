@@ -309,7 +309,7 @@ class Environment(ABC):
             inputs = self.eval_dataset
 
         results = self.generate(
-            inputs, client, model, sampling_args, **kwargs
+            inputs, client, model, sampling_args, max_concurrent, **kwargs
         )
         return results
 
@@ -345,8 +345,8 @@ class Environment(ABC):
                 client,
                 model, 
                 sampling_args,
-                max_concurrent, 
                 num_samples, 
+                max_concurrent, 
                 **kwargs
             )
         if results['task'][0] is not None:
