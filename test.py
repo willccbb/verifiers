@@ -15,7 +15,7 @@ messages = [
 ]
 print("input:", messages)
 chat_completion = client.chat.completions.create(
-    model=MODEL_NAME, messages=messages
+    model=MODEL_NAME, messages=messages # type: ignore
 )
 print(chat_completion)
 print(f"Chat: {chat_completion.choices[0].message.content}")

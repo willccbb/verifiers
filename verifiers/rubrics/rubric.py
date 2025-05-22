@@ -76,26 +76,14 @@ class Rubric:
         allowed = {k: v for k, v in merged.items() if k in sig.parameters}
         return func(**allowed)
     
-    async def _score_rollout(self,
-                             prompt,
-                             completion,
-                             answer,
-                             task: str | None = None,
-                             apply_weights: bool = True,
-                             **kwargs) -> Dict[str, float]:
+    async def score_rollout(self,
+                            prompt: List[Dict[str, str]] | str,
+                            completion: List[Dict[str, str]] | str,
+                            answer: Any,
+                            task: str | None = None,
+                            **kwargs) -> Dict[str, float]:
         """
-        Evaluate all reward functions asynchronously.
-
-        Args:
-            prompt: List[Dict[str, str]] | str
-            completion: List[Dict[str, str]] | str
-            answer: Any
-            task: str
-            max_workers: int
-            **kwargs: additional kwargs
-
-        Returns:
-            Dict[str, float]: Dictionary of reward function names and their scores.
+        Evaluate all reward functions asynchronously for a single rollout.
         """
         futures = [
             asyncio.to_thread(
@@ -109,31 +97,41 @@ class Rubric:
             )
             for func in self.get_reward_funcs()
         ]
-        rewards = await asyncio.gather(*futures)
-        # zip rewards with reward functions and weights
-        weighted_rewards = {
-            func.__name__: reward * weight if weight and apply_weights else reward
-            for func, reward, weight in zip(
-                self.get_reward_funcs(),
-                rewards,
-                self.get_reward_weights()
-            )
-        }
-        # add total reward
-        total_reward = sum([r for r in weighted_rewards.values()])
-        weighted_rewards['reward'] = total_reward
-        return weighted_rewards 
+        reward_scores = await asyncio.gather(*futures)
+        rewards = {func.__name__: reward for func, reward in zip(self.get_reward_funcs(), reward_scores)}
+        rewards['reward'] = sum([reward * weight for reward, weight in zip(reward_scores, self.get_reward_weights())])
+        return rewards
 
-    def score_rollout_group(self,
-                            prompts: List[List[Dict[str, str]] | str],
-                            completions: List[List[Dict[str, str]] | str],
-                            answers: List[Any],
-                            tasks: List[str | None],
-                            max_concurrent: int = 32,
-                            apply_weights: bool = True,
-                            **kwargs) -> List[Dict[str, float]]:
+    async def _score_single(self, semaphore, *pcat, **kw):
+        async with semaphore:
+            return await self.score_rollout(*pcat, **kw)
+
+    async def _score_all(
+            self, prompts, completions, answers, tasks,
+            max_concurrent: int = 32,
+            **kwargs) -> Dict[str, List[float]]:
+        from tqdm.asyncio import tqdm_asyncio
+        semaphore = Semaphore(max_concurrent)
+        rollout_tasks = [
+            self._score_single(semaphore, *pcat, **kwargs)
+            for pcat in zip(prompts, completions, answers, tasks)
+        ]
+        rewards = await tqdm_asyncio.gather(
+            *rollout_tasks,
+            total=len(prompts),
+            desc=f"Evaluating {len(prompts)} rollouts"
+        )
+        return {k: [item[k] for item in rewards] for k in rewards[0]}
+    
+    def score_rollouts(self,
+                       prompts: List[List[Dict[str, str]] | str],
+                       completions: List[List[Dict[str, str]] | str],
+                       answers: List[Any],
+                       tasks: List[str | None],
+                       max_concurrent: int = 32,
+                       **kwargs) -> Dict[str, List[float]]:
         """
-        Evaluate a group of rollouts.
+        Compute reward scores for a group of rollouts.
         
         Default behavior:
         - evaluate each rollout asynchronously 
@@ -143,36 +141,24 @@ class Rubric:
         - inter-group comparisons (voting, ranking, Elo, etc.)
         - scores computed using global state stored in Rubric class
         """
-
-        async def score_rollout(prompt,     
-                                completion,
-                                answer,
-                                task,
-                                semaphore,
-                                **kwargs):
-            async with semaphore:
-                return await self._score_rollout(
-                    prompt, completion, answer, task,
-                    apply_weights=apply_weights, **kwargs)
-
-        async def score_all():
-            from tqdm.asyncio import tqdm_asyncio
-            semaphore = Semaphore(max_concurrent)
-            rollout_tasks = [
-                score_rollout(p, c, a, t, semaphore, **kwargs)
-                for p, c, a, t in zip(prompts, completions, answers, tasks)
-            ]
-            return await tqdm_asyncio.gather(
-                *rollout_tasks,
-                total=len(prompts),
-                desc=f"Evaluating {len(prompts)} rollouts"
-            )
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            results = loop.run_until_complete(score_all())
-        finally:
-            loop.close()
-
-        return results  
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                self._score_all(
+                    prompts, completions, answers, tasks,
+                    max_concurrent=max_concurrent,
+                    **kwargs
+                )
+            )
+        else:
+            # Jupyter notebook
+            import nest_asyncio
+            nest_asyncio.apply()
+            return loop.run_until_complete(
+                self._score_all(
+                    prompts, completions, answers, tasks,
+                    max_concurrent=max_concurrent,
+                    **kwargs
+                )
+            )

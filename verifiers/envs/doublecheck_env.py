@@ -1,19 +1,30 @@
 from typing import List, Dict, Any, Tuple
 
 from datasets import Dataset
-
+from openai import OpenAI
 from verifiers import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics import MathRubric
 
 class DoubleCheckEnv(MultiTurnEnv):
-    def __init__(self, 
+    def __init__(self,
+                 client: OpenAI | None = None,
+                 model: str | None = None,
                  dataset: Dataset | None = None,
+                 eval_dataset: Dataset | None = None,
                  system_prompt: str = SIMPLE_PROMPT,
                  few_shot: List[Dict[str, str]] = [],
                  **kwargs):
-        super().__init__(dataset=dataset, system_prompt=system_prompt, few_shot=few_shot, **kwargs)
+        super().__init__(
+            client=client,
+            model=model,
+            dataset=dataset,
+            eval_dataset=eval_dataset,
+            system_prompt=system_prompt,
+            few_shot=few_shot,
+            **kwargs
+        )
         self.rubric = MathRubric()
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:

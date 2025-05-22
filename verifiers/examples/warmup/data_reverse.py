@@ -1,4 +1,4 @@
-from datasets import load_dataset, Dataset
+from datasets import load_dataset
 import verifiers as vf
 
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
@@ -8,7 +8,7 @@ system_prompt = f"""Respond in the following format:
 
 Reverse the given text character-by-character."""
 
-def lcs_reward_func(completion, answer, **kwargs) -> list[float]:
+def lcs_reward_func(completion, answer, **kwargs) -> float:
     """
     LCS ratio of the reversed prompt and the parsed completion.    
     """
@@ -43,8 +43,8 @@ client = OpenAI(base_url=base_url, api_key=api_key)
 
 # columns = ['prompt', 'completion', 'answer', 'reward']
 # use deepseek-chat for multiturn rollouts (V3-0324)
-dataset_r1 = vf_env.make_api_dataset(client, model="deepseek-chat", num_samples=10) 
+dataset_r1 = vf_env.make_dataset(client=client, model="deepseek-chat", num_samples=10) 
 # filter to top half of rows by rewards
 dataset_r1 = dataset_r1.sort("reward", reverse=True).select(range(len(dataset_r1) // 2))
 # # save to hub
-dataset_r1.push_to_hub("V3-reverse-wikipedia-paragraphs-test")
+#dataset_r1.push_to_hub("V3-reverse-wikipedia-paragraphs-test")

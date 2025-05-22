@@ -2,7 +2,7 @@ from typing import List, Dict
 
 from verifiers import RewardFunc
 from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric, MathRubric
+from verifiers.rubrics import MathRubric
 
 
 class CodeMathRubric(MathRubric):

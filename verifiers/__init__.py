@@ -10,12 +10,13 @@ from .rubrics.rubric import Rubric
 
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
-
-from .envs.code_env import CodeEnv
-from .envs.doublecheck_env import DoubleCheckEnv
 from .envs.singleturn_env import SingleTurnEnv
-from .envs.simple_env import SimpleEnv
+
+from .envs.codemath_env import CodeMathEnv
+from .envs.doublecheck_env import DoubleCheckEnv
+from .envs.reasoninggym_env import ReasoningGymEnv
 from .envs.tool_env import ToolEnv
+from .envs.smola_tool_env import SmolaToolEnv
 from .trainers.grpo_env_trainer import GRPOEnvTrainer
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, preprocess_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
@@ -33,11 +34,12 @@ __all__ = [
     "Rubric",
     "Environment",
     "MultiTurnEnv",
-    "CodeEnv",
-    "DoubleCheckEnv",
     "SingleTurnEnv",
-    "SimpleEnv",
+    "CodeMathEnv",
+    "DoubleCheckEnv",
+    "ReasoningGymEnv",
     "ToolEnv",
+    "SmolaToolEnv",
     "GRPOEnvTrainer",
     "GRPOEnvConfig",
     "get_model",

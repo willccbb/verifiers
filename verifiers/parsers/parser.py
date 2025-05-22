@@ -1,5 +1,5 @@
 import logging
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Callable
 
 class Parser:
     """
@@ -18,12 +18,20 @@ class Parser:
     def parse(self, text: str) -> Any:
         return text
     
-    def get_assistant_messages(self, trajectory: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        """Helper function to extract assistant messages from a trajectory."""
-        return [msg for msg in trajectory if msg['role'] == 'assistant']
+    def get_assistant_messages(self, completion: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Helper function to extract assistant messages from a completion."""
+        return [msg for msg in completion if msg['role'] == 'assistant']
     
-    def get_final_answer(self, trajectory: List[Dict[str, str]] | str) -> str | None:
-        if isinstance(trajectory, str):
-            return self.parse(trajectory)
+    def parse_answer(self, completion: List[Dict[str, str]] | str) -> str | None:
+        if isinstance(completion, str):
+            return self.parse(completion)
         else:
-            return self.parse(trajectory[-1]["content"])
+            return self.parse(completion[-1]["content"])
+ 
+    def get_format_reward_func(self) -> Callable:
+        """
+        Reward function that checks if the final answer is formatted correctly.
+        """
+        def format_reward_func(completion: List[Dict[str, str]], **kwargs) -> float:
+            return 1.0
+        return format_reward_func

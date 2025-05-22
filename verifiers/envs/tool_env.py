@@ -1,8 +1,6 @@
 import inspect
 import json
-from typing import List, Dict, Any, Callable
-
-from datasets import Dataset
+from typing import List, Dict, Any, Callable, Tuple
 
 from verifiers import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
@@ -81,21 +79,13 @@ def format_tool_descriptions(schemas: List[Dict[str, Any]]) -> str:
 
 class ToolEnv(MultiTurnEnv):
     def __init__(self,
-                 dataset: Dataset | None = None,
-                 eval_dataset: Dataset | None = None,
                  tools: List[Callable] = [],
                  system_prompt: str = DEFAULT_TOOL_PROMPT_TEMPLATE,
-                 few_shot: List[Dict[str, str]] = [],
-                 llm_fields: List[str | tuple[str, str]] = ["reasoning", ("tool", "answer")],
-                 env_fields: List[str | tuple[str, str]] = ["result"],
-                 sampling_args={
-                     "stop": ["</tool>\n", "</answer>\n"],
-                     #"stop": [],
-                     "include_stop_str_in_output": True
-                 },
-                 mask_env_response: bool = True,
-                 max_steps: int = 10, **kwargs):
+                 parser: XMLParser = XMLParser(fields=["think", ("tool", "answer")]),
+                 env_parser: XMLParser = XMLParser(fields=["result"]),
+                 max_turns: int = 10, **kwargs):
         # Infer schemas from tool functions
+        rubric = ToolRubric(tools=tools, parser=parser, env_parser=env_parser)
         self.tool_schemas = [infer_schema_from_function(tool) for tool in tools]
         self.tools = {tool.__name__: tool for tool in tools}
         
@@ -103,57 +93,25 @@ class ToolEnv(MultiTurnEnv):
         tool_descriptions = format_tool_descriptions(self.tool_schemas)
         formatted_prompt = system_prompt.format(tool_descriptions=tool_descriptions)
         super().__init__(
-            dataset=dataset,
-            eval_dataset=eval_dataset,
             system_prompt=formatted_prompt,
-            few_shot=few_shot,
-            mask_env_response=mask_env_response,
-            max_steps=max_steps,
-            sampling_args=sampling_args,
+            parser=parser,
+            rubric=rubric,
+            max_turns=max_turns,
             **kwargs
         )
-        self.dataset_name = dataset
-        self.max_steps = max_steps
-        self.llm_parser = XMLParser(fields=llm_fields)
-        self.env_parser = XMLParser(fields=env_fields)
-        self.rubric = ToolRubric(tools=tools, parser=self.llm_parser, env_parser=self.env_parser)
+        self.env_parser = env_parser
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
     
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
-
-    def _get_step_count(self, messages: List[Dict[str, str]]) -> int:
-        """Count the number of tool uses in the message history, excluding few-shot examples."""
-        step_count = 0
-        
-        # Skip messages that are part of few-shot examples
-        # We need to determine where the actual conversation starts
-        # System message + few-shot examples + user query = start of actual conversation
-        conversation_start = 1  # Start after system message
-        if self.few_shot:
-            # Account for all few-shot messages
-            conversation_start += len(self.few_shot)
-        
-        # Only count tool uses from the actual conversation
-        for message in messages[conversation_start:]:
-            if message.get("role") == "assistant":
-                step_count += 1
-        return step_count
-    
-    def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
-        try:
-            # Check if we've hit max steps by counting tool uses in the message history
-            step_count = self._get_step_count(messages)
-            if step_count > self.max_steps:
-                return True
-            
-            parsed = self.llm_parser.parse(messages[-1]["content"])
-            # Check if we got a valid answer field (not just None from failed parsing)
-            return hasattr(parsed, 'answer') and parsed.answer is not None
-        except Exception:
-            return False
+ 
+    def is_completed(self,
+                     messages: List[Dict[str, str]],
+                     state: Dict[str, Any],
+                     **kwargs: Any) -> bool:
+        return self.parser.parse_answer(messages) is not None
 
     def call_tool(self, tool_json: str, **kwargs: Any) -> str:
         """Call a tool based on JSON command."""
@@ -178,21 +136,22 @@ class ToolEnv(MultiTurnEnv):
             # Call the tool function with arguments
             result = tool_func(**tool_args)
             return str(result)
-        except json.JSONDecodeError:
-            return "Error: Invalid JSON format. Please format your tool call as '{\"name\": \"tool_name\", \"args\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}'"
         except Exception as e:
-            return f"Error: {str(e)}. " + "Please format your tool call as '{\"name\": \"tool_name\", \"args\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}'"
+            return f"Error: {str(e)}. " + "Please format your tool call as '{{\"name\": \"tool_name\", \"args\": {{\"arg1\": \"value1\", \"arg2\": \"value2\"}}}}'"
 
-    def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
+    def env_response(self,
+                     messages: List[Dict[str, str]], 
+                     state: Dict[str, Any],
+                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         try:
-            parsed = self.llm_parser.parse(messages[-1]["content"])
+            parsed = self.parser.parse(messages[-1]['content'])
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, 'tool') and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
                 if len(result.strip()) > 0:
-                    return {"role": "user", "content": self.env_parser.format(result=result)}
+                    return {'role': 'user', 'content': self.env_parser.format(result=result)}, {}
                 else:
-                    return {"role": "user", "content": "Error: Tool execution returned empty output."}
+                    return {'role': 'user', 'content': "Error: Tool execution returned empty output."}, {}
         except Exception:
             pass
-        return {"role": "user", "content": "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}
+        return {'role': 'user', 'content': "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}, {}

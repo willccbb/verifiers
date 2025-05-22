@@ -65,12 +65,15 @@ class XMLParser(Parser):
                     results[alt] = None
         return SimpleNamespace(**results)
 
-    def parse_answer(self, completion: List[Dict[str, str]]) -> str | None:
+    def parse_answer(self, completion: List[Dict[str, str]] | str) -> str | None:
         """Extract the last answer from a completion."""
-        for msg in reversed(self.get_assistant_messages(completion)):
-            parsed = self.parse(msg['content'])
-            if hasattr(parsed, self.answer_field) and parsed.answer is not None:
-                return parsed.answer
+        if isinstance(completion, str):
+            return self.parse(completion)
+        else:
+            for msg in reversed(self.get_assistant_messages(completion)):
+                parsed = self.parse(msg['content'])
+                if parsed and hasattr(parsed, self.answer_field) and parsed.answer is not None:
+                    return parsed.answer
         return None
 
     def get_format_str(self) -> str:

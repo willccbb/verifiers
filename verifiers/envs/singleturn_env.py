@@ -1,45 +1,32 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Literal
 
 from datasets import Dataset
+from openai import OpenAI
 
-from verifiers import RewardFunc
-from verifiers.envs.multiturn_env import MultiTurnEnv
+from verifiers.envs.environment import Environment
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 
-class SingleTurnEnv(MultiTurnEnv):
-    def __init__(self, 
-                 dataset: Dataset | None = None,
-                 eval_dataset: Dataset | None = None,
-                 system_prompt: str | None = None,
-                 few_shot: List[Dict[str, str]] = [],
-                 parser: Parser = Parser(),
-                 rubric: Rubric = Rubric(),
-                 **kwargs):
-        super().__init__(
-            dataset=dataset,
-            eval_dataset=eval_dataset,
-            system_prompt=system_prompt,
-            few_shot=few_shot,
-            parser=parser,
-            rubric=rubric,
-            **kwargs
+class SingleTurnEnv(Environment):
+    """
+    Environment for single-turn tasks (chat or completion).
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def rollout(self,
+                client: OpenAI,
+                model: str,
+                prompt: str | List[Dict[str, str]],
+                sampling_args: Dict[str, Any] = {},
+                **kwargs: Any) -> str | List[Dict[str, str]]:
+        completion = self.get_model_response(
+            client=client,
+            model=model,
+            prompt=prompt,
+            sampling_args=sampling_args,
+            message_type=self.message_type
         )
-
-    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
-        return self.rubric.get_reward_funcs()
-    
-    def get_reward_weights(self, **kwargs: Any) -> List[float]:
-        return self.rubric.get_reward_weights()
-
-    def is_completed(self,
-                     messages: List[Dict[str, str]],
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> bool:
-        return True
-    
-    def env_response(self,
-                     messages: List[Dict[str, str]],
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
-        return {'role': 'user', 'content': 'ERROR'}, state
+        if self.message_type == 'chat': 
+            return [{'role': 'assistant', 'content': completion}]
+        return completion

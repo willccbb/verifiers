@@ -20,7 +20,7 @@ class MathRubric(Rubric):
         """Reward function that checks if the final answer matches the expected answer."""
         try:
             from math_verify import parse, verify # type: ignore
-            response = self.parser.get_final_answer(completion)
+            response = self.parser.parse_answer(completion)
             return 1.0 if verify(parse(answer), parse(response)) else 0.0
         except Exception:
             return 0.0

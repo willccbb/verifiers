@@ -22,24 +22,22 @@ from transformers import (
     GenerationConfig,
     Trainer,
     TrainerCallback,
-    is_wandb_available
-)
+    is_wandb_available,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+) # type: ignore
 from trl.data_utils import maybe_apply_chat_template
 from trl.import_utils import is_rich_available
 from trl.trainer.utils import pad
+from trl import GRPOTrainer, GRPOConfig
 
 import wandb
 
 from verifiers import RewardFunc
 from verifiers.envs.environment import Environment
 from verifiers.utils.logging_utils import print_prompt_completions_sample
-from verifiers.inference.vllm_client import VLLMClient
-from verifiers.trainers.grpo_env_config import GRPOEnvConfig
-from verifiers.trainers.repeat_sampler import RepeatSampler
 
-
-
-
+from vllm import SamplingParams
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:

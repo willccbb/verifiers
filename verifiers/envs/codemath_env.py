@@ -1,41 +1,24 @@
 import subprocess
 from typing import List, Dict, Any, Tuple
 
-from datasets import Dataset
-from openai import OpenAI
-
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.prompts import CODE_PROMPT
-from verifiers.rubrics import CodeRubric
+from verifiers.rubrics import CodeMathRubric
 
-class CodeEnv(MultiTurnEnv):
+class CodeMathEnv(MultiTurnEnv):
     def __init__(self,
-                 client: OpenAI | None = None,
-                 model: str | None = None,
-                 dataset: Dataset | None = None,
-                 eval_dataset: Dataset | None = None,
                  system_prompt: str = CODE_PROMPT,
-                 few_shot: List[Dict[str, str]] = [],
-                 sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = 32,
-                 max_steps: int = 5,
+                 max_turns: int = 5,
                  **kwargs):
         parser = XMLParser(fields=["think", ("code", "answer")])
         self.env_parser = XMLParser(fields=["output"])
-        rubric = CodeRubric(parser=parser, env_parser=self.env_parser)
+        rubric = CodeMathRubric(parser=parser, env_parser=self.env_parser)
         super().__init__(
-            client=client,
-            model=model,
-            dataset=dataset,
-            eval_dataset=eval_dataset,
             system_prompt=system_prompt,
-            few_shot=few_shot,
             parser=parser,
             rubric=rubric,
-            max_steps=max_steps,
-            sampling_args=sampling_args,
-            max_concurrent=max_concurrent,
+            max_turns=max_turns,
             **kwargs
         )
     
