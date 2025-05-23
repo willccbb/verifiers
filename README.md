@@ -125,7 +125,7 @@ print(results['rewards_avg'])
 
 # datasets
 # columns = ['prompt', 'completion', 'answer', 'reward']
-dataset_dsv3 = vf_env.make_api_dataset(client, model="deepseek-chat", num_samples=100)
+dataset_dsv3 = vf_env.make_dataset(results)
 dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(50))
 dataset_dsv3.push_to_hub("...")
 ```

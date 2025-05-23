@@ -6,6 +6,7 @@ env/
 .env.local
 uv.lock
 CLAUDE.md
+TRAINER_PLAN.md
 .cursorrules
 
 # artifacts
