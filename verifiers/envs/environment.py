@@ -93,13 +93,23 @@ class Environment(ABC):
                        few_shot: List[Dict[str, str]] | None = None,
                        question_key: str = "question",
                        answer_key: str = "answer") -> Dataset:
+        # Extract format_prompt as a standalone function to avoid capturing self
+        def format_prompt_fn(prompt: str) -> List[Dict[str, str]]:
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            if few_shot:
+                messages.extend(few_shot)
+            messages.append({'role': 'user', 'content': prompt})
+            return messages
+        
         if answer_key == "answer":
             return dataset.map(lambda x: {
-                "prompt": self.format_prompt(x[question_key], system_prompt, few_shot),
+                "prompt": format_prompt_fn(x[question_key]),
             }, num_proc=self.max_concurrent)
         else:
             return dataset.map(lambda x: {
-                "prompt": self.format_prompt(x[question_key], system_prompt, few_shot),
+                "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
             }, num_proc=self.max_concurrent)
 

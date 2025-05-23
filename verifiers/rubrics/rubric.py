@@ -7,6 +7,8 @@ from typing import List, Dict, Any
 
 from verifiers import RewardFunc
 from verifiers.parsers import Parser
+
+
 class Rubric:
     """
     Rubric class for reward functions.
@@ -27,7 +29,7 @@ class Rubric:
                  weights: List[float] = [],
                  parser: Parser | None = Parser(),
                  **kwargs):
-        self.logger = logging.getLogger(f"verifiers.parsers.{self.__class__.__name__}")
+        self.logger = logging.getLogger(f"verifiers.rubrics.{self.__class__.__name__}")
         self.parser = parser
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -72,11 +74,22 @@ class Rubric:
             state=state,
             task=task,
         )
+        ans = 0.0
         merged = {**common, **kwargs}
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
-            return func(**merged)
-        allowed = {k: v for k, v in merged.items() if k in sig.parameters}
-        return func(**allowed)
+            try:
+                ans = func(**merged)
+            except Exception as e:
+                self.logger.error(f"Error calling reward function {func.__name__}: {e}")
+                ans = 0.0
+        else:
+            allowed = {k: v for k, v in merged.items() if k in sig.parameters}
+            try:
+                ans = func(**allowed)
+            except Exception as e:
+                self.logger.error(f"Error calling reward function {func.__name__}: {e}")
+                ans = 0.0
+        return ans
     
     async def score_rollout(self,
                             prompt: List[Dict[str, str]] | str,

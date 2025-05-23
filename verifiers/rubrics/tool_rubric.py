@@ -18,13 +18,9 @@ class ToolRubric(Rubric):
             self.parser.get_format_reward_func(),
         ]
         self.reward_weights = [
-            0.0,
-            0.0,
-            0.0,
             1.0,
-            0.5,
-            0.25,
-            0.25,
+            0.2,
+            0.2,
         ]
         for tool_name in self.tools.keys():
             self.reward_funcs.append(self.get_named_tool_reward_func(tool_name))
@@ -97,12 +93,8 @@ class ToolRubric(Rubric):
             response = str(self.parser.parse_answer(completion))
             reward = 1.0 if response == answer.strip() else 0.0
         elif task == "math":
-            try:
-                from math_verify import parse, verify # type: ignore
-                response = str(self.parser.parse_answer(completion))
-                reward = 1.0 if verify(parse(answer), parse(response)) else 0.0
-            except:
-                reward = 0.0
+            response = str(self.parser.parse_answer(completion))
+            reward = 1.0 if answer == response else 0.0
         elif task == "code":
             response = str(self.parser.parse_answer(completion))
             reward = self.evaluate_code(response, answer, **kwargs)
@@ -129,15 +121,9 @@ class ToolRubric(Rubric):
                     if i + 1 < len(completion) and completion[i + 1]['role'] == 'user':
                         tool_attempts += 1
                         # Check response with env_parser
-                        multiplier = 1.0 
-                        response = str(parsed.tool)
-                        if (("sympy" in response) or ("numpy" in response)) and len(response) > 100:
-                            multiplier = 1.5
-                        else:
-                            multiplier = 0.5
                         parsed_response = self.env_parser.parse(completion[i + 1]['content'])
                         if hasattr(parsed_response, 'result') and parsed_response.result is not None and not parsed_response.result.startswith("Error:"):
-                            successful_executions += 1 * multiplier
+                            successful_executions += 1
         
         # Calculate reward
         if tool_attempts == 0:

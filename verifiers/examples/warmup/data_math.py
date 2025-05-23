@@ -2,7 +2,7 @@ from openai import OpenAI
 
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils import preprocess_dataset
+from verifiers.utils import load_example_dataset
 
 """
 Evaluating multi-turn reasoning before/after training.

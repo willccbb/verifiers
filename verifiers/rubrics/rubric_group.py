@@ -1,0 +1,37 @@
+from typing import List, Dict, Any
+from verifiers.rubrics.rubric import Rubric
+
+class RubricGroup(Rubric):
+    """
+    Class for aggregating multiple rubrics.
+    """
+    def __init__(self, rubrics: List[Rubric], **kwargs):
+        self.rubrics = rubrics
+        super().__init__(**kwargs)
+        self.logger.info(f"Initialized RubricGroup with {len(rubrics)} rubrics")
+
+    def score_rollouts(self,
+                       prompts: List[List[Dict[str, str]] | str],
+                       completions: List[List[Dict[str, str]] | str],
+                       answers: List[Any],
+                       states: List[Dict[str, Any]],
+                       tasks: List[str],
+                       max_concurrent: int = 32,
+                       **kwargs) -> Dict[str, List[float]]:
+        """
+        Run all rubrics sequentially and return the aggregated scores.
+
+        Reward functions with the same name are summed up.
+        """
+        all_scores = {} 
+        for rubric in self.rubrics:
+            rubric_scores = rubric.score_rollouts(
+                prompts, completions, answers, states, tasks,
+                max_concurrent=max_concurrent, **kwargs)
+            for key, value in rubric_scores.items():
+                if key in all_scores:
+                    # element-wise sum
+                    all_scores[key] = [a + b for a, b in zip(all_scores[key], value)]
+                else:
+                    all_scores[key] = value
+        return all_scores

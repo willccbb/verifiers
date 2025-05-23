@@ -7,7 +7,7 @@ accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/e
 """
 
 # convenience function for FA2 initialization
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct", use_liger=False)
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-0.5B-Instruct", use_liger=False)
 dataset = load_dataset('willcb/R1-reverse-wikipedia-paragraphs-v1-1000', split='train')
 
 tok_counts = []
@@ -29,13 +29,13 @@ print(f"Median tokens: {sorted(tok_counts)[len(tok_counts) // 2]}")
 
 args = SFTConfig(
     max_length=4096,
-    output_dir="outputs/sft-warmup-reverse",
-    per_device_train_batch_size=1,
+    output_dir="sft-warmup-reverse",
+    per_device_train_batch_size=3,
     gradient_accumulation_steps=2,
     gradient_checkpointing=True,
     bf16=True,
     learning_rate=2e-5,
-    num_train_epochs=1,
+    num_train_epochs=3,
     weight_decay=0.01,
     max_grad_norm=1.0,
     report_to="wandb",
@@ -45,7 +45,7 @@ args = SFTConfig(
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen2.5-7B-Reverse-SFT",
+    hub_model_id="Qwen2.5-0.5B-Reverse-SFT-v2",
 )
 
 trainer = SFTTrainer(

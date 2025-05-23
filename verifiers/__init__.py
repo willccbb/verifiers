@@ -6,7 +6,10 @@ torch._dynamo.config.suppress_errors = True # type: ignore
 
 from .parsers.parser import Parser
 from .parsers.xml_parser import XMLParser
+
 from .rubrics.rubric import Rubric
+from .rubrics.judge_rubric import JudgeRubric
+from .rubrics.rubric_group import RubricGroup
 
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
@@ -18,7 +21,7 @@ from .envs.reasoninggym_env import ReasoningGymEnv
 from .envs.tool_env import ToolEnv
 from .envs.smola_tool_env import SmolaToolEnv
 from .trainers.grpo_env_trainer import GRPOEnvTrainer
-from .utils.data_utils import extract_boxed_answer, extract_hash_answer, preprocess_dataset
+from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
 from .utils.config_utils import grpo_defaults, lora_defaults, GRPOEnvConfig
 from .utils.logging_utils import setup_logging, print_prompt_completions_sample
@@ -32,6 +35,8 @@ __all__ = [
     "Parser",
     "XMLParser",
     "Rubric",
+    "JudgeRubric",
+    "RubricGroup",
     "Environment",
     "MultiTurnEnv",
     "SingleTurnEnv",
@@ -49,7 +54,7 @@ __all__ = [
     "lora_defaults",
     "extract_boxed_answer",
     "extract_hash_answer",
-    "preprocess_dataset",
+    "load_example_dataset",
     "setup_logging",
     "print_prompt_completions_sample",
 ]

@@ -1,10 +1,9 @@
 import os
 
 from openai import OpenAI
-from datasets import load_dataset
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils import preprocess_dataset
+from verifiers.utils import load_example_dataset 
 
 """
 Evaluating multi-turn reasoning before/after training.
@@ -17,7 +16,7 @@ uv run verifiers/examples/math_eval.py
 """
 
 TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
+Think step-by-step inside <think>...</think> tags in each message, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
 
 You have access to the following tools to help solve problems:
 
@@ -32,20 +31,24 @@ Example usage:
 {{"name": "python", "args": {{"code": "import sympy\nx = sympy.symbols('x')\nprint(sympy.solve(x**2 - 4, x))"}}}}
 </tool>
 
-You will then see the tool's output inside <result> tags. \
+After concluding your message with a tool call,
+you will then see the tool's output inside <result> tags as a new message. \
 You may call tools multiple times if needed. \
 Tool state does not persist between calls. \
 Always use tools to solve problems whenever possible.
 
-The <answer>...</answer> tags should contain only your final answer.
+The <answer>...</answer> tags should contain only your final answer as a numeric expression.
 
 Example:
+<think>
+Let's submit the answer.
+</think>
 <answer>
 \\frac{{1}}{{2}}
 </answer>
 """
 
-dataset = preprocess_dataset("math", split="train")
+dataset = load_example_dataset("math", split="train")
 vf_env = vf.ToolEnv(
     eval_dataset=dataset,
     system_prompt=TOOL_PROMPT,
@@ -56,8 +59,7 @@ vf_env = vf.ToolEnv(
     max_steps=3
 )
 
-
-def main(api: str, num_samples: int, max_tokens: int):
+def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
@@ -79,8 +81,14 @@ def main(api: str, num_samples: int, max_tokens: int):
     # use deepseek-chat for multiturn rollouts (V3-0324)
     results = vf_env.evaluate(
         client=client, model=model_name, 
-        sampling_args=sampling_args, num_samples=num_samples) 
-    print(results)
+        sampling_args=sampling_args, num_samples=num_samples)
+    print("Rewards:")
+    for k, v in results.items():
+        if 'reward' in k:
+            print(k, '-', v) 
+    if save_dataset:
+        dataset_dsv3 = vf_env.make_dataset(results)
+        dataset_dsv3.push_to_hub("V3-math-python-test")
     #dataset_dsv3 = vf_env.make_dataset(results)
     # filter to top half of rows by rewards
     #dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
@@ -93,5 +101,6 @@ if __name__ == "__main__":
     argparser.add_argument("--api", "-a", type=str, default="openai")
     argparser.add_argument("--num-samples", "-n", type=int, default=10)
     argparser.add_argument("--max-tokens", "-t", type=int, default=1000)
+    argparser.add_argument("--save-dataset", "-s", action="store_true")
     args = argparser.parse_args()
-    main(args.api, args.num_samples, args.max_tokens)
+    main(args.api, args.num_samples, args.max_tokens, args.save_dataset)

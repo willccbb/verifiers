@@ -175,10 +175,10 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
     else:
         raise ValueError(f"Dataset {name} not supported for preprocess_dataset.")
 
-def preprocess_dataset(name: str = "gsm8k",
-                       split: str | None = None,
-                       n: int | None = None,
-                       seed: int = 0) -> Dataset:
+def load_example_dataset(name: str = "gsm8k",
+                         split: str | None = None,
+                         n: int | None = None,
+                         seed: int = 0) -> Dataset:
     if name == "aime2024":
         if split is None:
             split = "train"

@@ -20,16 +20,22 @@ dependencies = [
     "pylatexenc>=2.10",
     "requests>=2.32.3",
     "vllm>=0.8.5.post1",
+    "openai>=1.81.0",
+    "datasets>=3.6.0",
 ]
 
 [project.optional-dependencies]
-math = [
-    "math-verify[antlr4-13-2]>=0.1.0"
+jupyter = [
+    "ipykernel",
+    "ipywidgets"
 ]
 tools = [
     "duckduckgo-search",
     "brave-search",
     "smolagents>=1.15.0",
+]
+extras = [
+    "reasoning-gym"
 ]
 
 [tool.setuptools]
