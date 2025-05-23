@@ -61,9 +61,10 @@ If you use this code in your research, please cite:
 `verifiers` is available via PyPI (TODO), and we recommend installation with `uv`:
 
 ```
-uv add verifiers
+uv add verifiers # optionally, "verifiers[math,tools]"
 uv pip install flash-attn --no-build-isolation
 ```
+
 
 To use the latest `main` branch, do:
 ```bash
@@ -71,7 +72,7 @@ git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync
 uv pip install flash-attn --no-build-isolation
-uv pip install -e .
+uv pip install -e ".[math,tools]"
 ```
 
 **Troubleshooting:**
@@ -119,7 +120,7 @@ from openai import OpenAI
 client = OpenAI(base_url="https://api.deepseek.com", api_key=os.getenv('DEEPSEEK_API_KEY'))
 
 # evaluation
-results = vf_env.eval_api(client, model="deepseek-chat", num_samples=100)
+results = vf_env.evaluate(client, model="deepseek-chat", num_samples=100)
 print(results['rewards_avg'])
 
 # datasets

@@ -38,6 +38,9 @@ class Rubric:
         if not self.reward_weights:
             self.reward_weights = [1.0] * len(self.reward_funcs)
 
+    def get_reward_func_names(self) -> List[str]:
+        return [func.__name__ for func in self.reward_funcs]
+
     def get_reward_funcs(self) -> List[RewardFunc]:
         return self.reward_funcs # type: ignore
 

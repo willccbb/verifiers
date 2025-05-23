@@ -1,5 +1,8 @@
 from typing import List, Dict, Any
+
+from verifiers import RewardFunc
 from verifiers.rubrics.rubric import Rubric
+
 
 class RubricGroup(Rubric):
     """
@@ -7,8 +10,32 @@ class RubricGroup(Rubric):
     """
     def __init__(self, rubrics: List[Rubric], **kwargs):
         self.rubrics = rubrics
+        assert len(rubrics) > 0, "RubricGroup must have at least one rubric"
         super().__init__(**kwargs)
         self.logger.info(f"Initialized RubricGroup with {len(rubrics)} rubrics")
+
+    def get_reward_func_names(self) -> List[str]:
+        names = []
+        for rubric in self.rubrics:
+            names.extend(rubric.get_reward_func_names())
+        return names
+
+    def get_reward_funcs(self) -> List[RewardFunc]:
+        funcs = []
+        for rubric in self.rubrics:
+            funcs.extend(rubric.get_reward_funcs())
+        return funcs
+
+    def get_reward_weights(self) -> List[float]:
+        weights = []
+        for rubric in self.rubrics:
+            weights.extend(rubric.get_reward_weights())
+        return weights
+    
+    def add_reward_func(self, func: RewardFunc, weight: float = 1.0):
+        assert len(self.rubrics) > 0, "RubricGroup must have at least one rubric"
+        self.logger.warning("Adding reward function to the first rubric in the group.")
+        self.rubrics[0].add_reward_func(func, weight)
 
     def score_rollouts(self,
                        prompts: List[List[Dict[str, str]] | str],

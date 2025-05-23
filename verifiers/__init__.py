@@ -20,6 +20,9 @@ from .envs.doublecheck_env import DoubleCheckEnv
 from .envs.reasoninggym_env import ReasoningGymEnv
 from .envs.tool_env import ToolEnv
 from .envs.smola_tool_env import SmolaToolEnv
+
+from .inference.vllm_client import VLLMClient
+
 from .trainers.grpo_env_trainer import GRPOEnvTrainer
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
@@ -47,6 +50,7 @@ __all__ = [
     "SmolaToolEnv",
     "GRPOEnvTrainer",
     "GRPOEnvConfig",
+    "VLLMClient",
     "get_model",
     "get_tokenizer",
     "get_model_and_tokenizer",

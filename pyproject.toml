@@ -15,13 +15,13 @@ dependencies = [
     "peft",
     "wandb",
     "rich",
-    "trl>=0.17",
+    "trl>=0.17.0",
     "liger-kernel",
-    "pylatexenc>=2.10",
     "requests>=2.32.3",
     "vllm>=0.8.5.post1",
     "openai>=1.81.0",
     "datasets>=3.6.0",
+    "transformers>=4.52.2",
 ]
 
 [project.optional-dependencies]

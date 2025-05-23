@@ -1,25 +1,11 @@
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_config.py
 
-# Copyright 2020-2025 The HuggingFace Team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import transformers
 from packaging import version
-from transformers import TrainingArguments
+from transformers import TrainingArguments # type: ignore
 
 
 @dataclass
@@ -36,7 +22,7 @@ class GRPOEnvConfig(TrainingArguments):
     """
 
     if version.parse(transformers.__version__) <= version.parse("4.50.3"):
-        from transformers.training_args import _VALID_DICT_FIELDS
+        from transformers.training_args import _VALID_DICT_FIELDS # type: ignore
 
         _VALID_DICT_FIELDS.append("model_init_kwargs")
     else:
@@ -146,35 +132,13 @@ class GRPOEnvConfig(TrainingArguments):
             "to repeat tokens."
         },
     )
-    cache_implementation: Optional[str] = field(
-        default=None,
-        metadata={"help": "Implementation of the cache method for faster generation when use_vllm is set to False."},
-    )
 
-    # Parameters that control generation acceleration powered by vLLM
-    use_vllm: bool = field(
-        default=False,
-        metadata={
-            "help": "Whether to use vLLM for generating completions. If set to `True`, the trainer will use vLLM for "
-            "generation instead of the default model.generate(). Requires `vllm` to be installed."
-        },
-    )
-    vllm_mode: str = field(
-        default="server",
-        metadata={
-            "help": "Mode to use for vLLM integration when `use_vllm` is set to `True`. Must be one of `server` or "
-            "`'colocate'`. `'server'`: The trainer will send generation requests to a separate vLLM server. Make sure a "
-            "TRL vLLM server is running (start with `trl vllm-serve`). `'colocate'`: vLLM will run in the same "
-            "process and share the training GPUs. This avoids the need for a separate server but may cause resource "
-            "contention with training."
-        },
-    )
     vllm_guided_decoding_regex: Optional[str] = field(
         default=None,
         metadata={"help": "Regex for vLLM guided decoding. If `None` (default), guided decoding is disabled."},
     )
 
-    # Parameters that control the vLLM server (only used when `vllm_mode` is `"server"`)
+    # Parameters that control the vLLM server
     vllm_server_host: str = field(
         default="0.0.0.0",
         metadata={"help": "Host of the vLLM server to connect to."},
@@ -188,24 +152,6 @@ class GRPOEnvConfig(TrainingArguments):
         metadata={
             "help": "Total timeout duration in seconds to wait for the vLLM server to be up. If the server is not up "
             "after the timeout, a `ConnectionError` is raised."
-        },
-    )
-
-    # Parameters that control colocated vLLM execution (only used when `vllm_mode` is `"colocate"`)
-    vllm_gpu_memory_utilization: float = field(
-        default=0.3,
-        metadata={
-            "help": "Control the GPU memory utilization for vLLM. This setting only applies when `vllm_mode` is set "
-            "to `'colocate'`. If you are using `vllm_mode='server'`, this parameter must be passed separately when "
-            "launching the vLLM server via the `--vllm_gpu_memory_utilization` flag."
-        },
-    )
-    vllm_tensor_parallel_size: int = field(
-        default=1,
-        metadata={
-            "help": "Control the tensor parallel size for vLLM. This setting only applies when `vllm_mode` is set "
-            "to `'colocate'`. If you are using `vllm_mode='server'`, this parameter must be passed separately when "
-            "launching the vLLM server via the `--vllm_tensor_parallel_size` flag."
         },
     )
 

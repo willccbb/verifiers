@@ -24,7 +24,15 @@ class ReasoningGymEnv(SingleTurnEnv):
         total_samples = num_samples + num_eval_samples
         self.rg_dataset = rg.create_dataset(gym, size=total_samples, seed=seed)
         dataset, eval_dataset = self.rg_to_hf(self.rg_dataset)
-        # <think>...</think><answer>...</answer>
+        parser = XMLParser(fields=['think', 'answer'])
+        rubric = Rubric(parser=parser) 
+        def check_answer_reward_func(completion, answer, **kwargs) -> float:
+            entry = self.rg_dataset[answer]
+            response = str(parser.parse_answer(completion)).strip()
+            reward = self.rg_dataset.score_answer(answer=response, entry=entry)
+            return reward
+        rubric.add_reward_func(check_answer_reward_func)
+        rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
         system_prompt = rg.utils.SYSTEM_PROMPTS["DeepSeekZero"] # type: ignore
         super().__init__(
             client=client,
@@ -32,17 +40,13 @@ class ReasoningGymEnv(SingleTurnEnv):
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=system_prompt,
+            parser=parser,
+            rubric=rubric,
             message_type='chat',
             **kwargs
         )
-        self.parser = XMLParser(fields=['think', 'answer'])
-        self.rubric = Rubric(parser=self.parser)
-        def check_answer_reward_func(prompt, completion, answer, **kwargs) -> float:
-            entry = self.rg_dataset[answer]
-            response = str(self.parser.parse_answer(completion)).strip()
-            reward = self.rg_dataset.score_answer(answer=response, entry=entry)
-            return reward
-        self.rubric.add_reward_func(check_answer_reward_func)
+        self.parser = parser
+        self.rubric = rubric
 
     def rg_to_hf(self, rg_dataset) -> Tuple[Dataset, Dataset]:
         dataset_rows = []
