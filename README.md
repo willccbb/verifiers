@@ -2,6 +2,18 @@
 
 TODO: GitHub header stuff
 
+## Roadmap for v0.1 Release
+
+- 
+
+### Design Philosophy 
+
+Modularity:
+- W
+
+There are a number of features which we'd love to support eventually
+
+
 ## Overview
 
 `verifiers` is a set of tools and abstractions for training LLMs with reinforcement learning in **verifiable multi-turn environments** via Group-Relative Policy Optimization ([GRPO](https://huggingface.co/docs/trl/main/en/grpo_trainer)). In addition, `verifiers` includes support for synthetic data generation, SFT warmup on filtered traces, and offline evaluation with API clients.
@@ -15,7 +27,7 @@ TODO: GitHub header stuff
 - environments = synthetic data engines = RL trainers = eval harnesses
 
 **Key features:**
-- First-class support for multi-turn tool use ("agentic") RL via `GRPOEnvTrainer`, built on top of TRL.
+- First-class support for multi-turn tool use ("agentic") RL via `GRPOEnvTrainer`, built on top of Transformers.
 - Direct compatibility with API clients for synthetic data generation and evaluation, in addition to RL training with vLLM clients.
 - Utilities for SFT warmup/"cold start" data (see `examples/warmup` scripts)
 - Emphasis on OpenAI/`chat`-compatible messages rather than plaintext.

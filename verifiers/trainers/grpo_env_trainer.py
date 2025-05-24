@@ -47,7 +47,7 @@ from verifiers import (
     Environment, print_prompt_completions_sample
 )
 from verifiers.utils.model_utils import _ForwardRedirection # borrowed from trl==0.18.dev0
-
+from verifiers.utils.trainer_utils import RepeatSampler
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
@@ -418,14 +418,6 @@ class GRPOEnvTrainer(Trainer):
             batch_size=self.args.generation_batch_size // self.num_generations,
             repeat_count=self.num_iterations * self.args.steps_per_generation,
             shuffle=self.shuffle_dataset,
-            seed=self.args.seed,
-        )
-
-    def _get_eval_sampler(self, eval_dataset) -> Sampler:
-        # See _get_train_sampler for an explanation of the sampler.
-        return RepeatSampler(
-            data_source=eval_dataset,
-            mini_repeat_count=self.num_generations,
             seed=self.args.seed,
         )
 
