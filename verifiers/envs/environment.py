@@ -517,13 +517,13 @@ class Environment(ABC):
         completions: List[Union[str, List[Dict[str, str]]]],
         states: List[Dict[str, Any]],
         processing_class: PreTrainedTokenizerBase,
-        mask_intermediate_responses: bool = False,
+        mask_env_responses: bool = False,
         max_prompt_length: Optional[int] = None,
         max_completion_length: Optional[int] = None,
         device: Optional[torch.device] = None
     ) -> Dict[str, torch.Tensor]:
         """
-        Main tokenization pipeline that handles both formats.
+        Main tokenization pipeline that handles both chat and completion formats.
         
         Data Flow:
         1. Determine format (chat vs completion) from first prompt
@@ -559,11 +559,13 @@ class Environment(ABC):
                 
                 # For state tokens, we need to determine prompt boundary
                 if is_chat_format:
-                    # Apply chat template to get prompt length
+                    assert isinstance(prompt, list) and isinstance(completion, list)
                     prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+                    assert isinstance(prompt_text, str)
                     prompt_ids = processing_class.encode(prompt_text, add_special_tokens=False)
                     prompt_mask = [1] * len(prompt_ids)
                 else:
+                    assert isinstance(prompt, str) and isinstance(completion, str)
                     prompt_ids = processing_class.encode(prompt, add_special_tokens=False)
                     prompt_mask = [1] * len(prompt_ids)
                 
@@ -574,10 +576,12 @@ class Environment(ABC):
             else:
                 # Fallback to format-specific processing
                 if is_chat_format:
+                    assert isinstance(prompt, list) and isinstance(completion, list)
                     prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_chat_format(
-                        prompt, completion, processing_class, mask_intermediate_responses
+                        prompt, completion, processing_class, mask_env_responses
                     )
                 else:
+                    assert isinstance(prompt, str) and isinstance(completion, str)
                     prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
                         prompt, completion, processing_class
                     )

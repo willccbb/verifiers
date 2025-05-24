@@ -9,8 +9,15 @@ class SingleTurnEnv(Environment):
     """
     Environment for single-turn tasks (chat or completion).
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self,
+                 client: OpenAI,
+                 model: str,
+                 message_type: Literal['chat', 'completion'] = 'chat',
+                 **kwargs):
+        super().__init__(client=client, model=model, message_type=message_type, **kwargs)
+        self.client = client
+        self.model = model
+        self.message_type = message_type
 
     def rollout(self,
                 client: OpenAI,
@@ -18,6 +25,9 @@ class SingleTurnEnv(Environment):
                 prompt: str | List[Dict[str, str]],
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[str, Dict[str, Any]] | Tuple[List[Dict[str, str]], Dict[str, Any]]:
+        """
+        Returns completion and null state.
+        """
         completion = self.get_model_response(
             client=client,
             model=model,
@@ -28,3 +38,4 @@ class SingleTurnEnv(Environment):
         if self.message_type == 'chat': 
             return [{'role': 'assistant', 'content': completion}], {}
         return completion, {}
+    
