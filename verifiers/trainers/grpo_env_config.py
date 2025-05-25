@@ -22,7 +22,7 @@ class GRPOEnvConfig(TrainingArguments):
     """
 
     if version.parse(transformers.__version__) <= version.parse("4.50.3"):
-        from transformers.training_args import _VALID_DICT_FIELDS # type: ignore
+        from transformers.training_args import _VALID_DICT_FIELDS
 
         _VALID_DICT_FIELDS.append("model_init_kwargs")
     else:

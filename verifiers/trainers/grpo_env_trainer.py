@@ -500,11 +500,8 @@ class GRPOEnvTrainer(Trainer):
                         continue  # skip FSDP subtrees already traversed
                     visited.add(full_name)
 
-                    if self.vllm_mode == "server" and self.accelerator.is_main_process:
+                    if self.accelerator.is_main_process:
                         self.vllm_client.update_named_param(full_name, param.data)
-                    elif self.vllm_mode == "colocate":
-                        llm_model = self.llm.llm_engine.model_executor.driver_worker.model_runner.model
-                        llm_model.load_weights([(full_name, param.data)])
 
     @profiling_decorator
     def _move_model_to_vllm(self):
@@ -542,11 +539,8 @@ class GRPOEnvTrainer(Trainer):
                             continue
                         name = name.replace("modules_to_save.default.", "")
 
-                        if self.vllm_mode == "server" and self.accelerator.is_main_process:
+                        if self.accelerator.is_main_process:
                             self.vllm_client.update_named_param(name, param.data)
-                        elif self.vllm_mode == "colocate":
-                            llm_model = self.llm.llm_engine.model_executor.driver_worker.model_runner.model
-                            llm_model.load_weights([(name, param.data)])
                 # Unmerge adapters while parameters are still gathered
                 self.model.unmerge_adapter()
                 # Parameters will automatically be repartitioned when exiting the context

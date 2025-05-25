@@ -180,7 +180,7 @@ class Environment(ABC):
                 **sanitized_args
             )
             return response.choices[0].text # type: ignore
-  
+
     @abstractmethod
     def rollout(self,
                 client: OpenAI,
@@ -283,7 +283,6 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
-        print("Running rollouts")
         rollouts = self.run_rollouts(
             prompts=results['prompt'],
             client=client,
@@ -292,7 +291,6 @@ class Environment(ABC):
             max_concurrent=max_concurrent,
             **kwargs
         )
-        print(f"Rollouts done: {len(rollouts)}")
         results['completion'] = [rollout[0] for rollout in rollouts]
         results['state'] = [rollout[1] for rollout in rollouts]
         if 'task' not in results:
@@ -310,10 +308,11 @@ class Environment(ABC):
             results.update(results_rewards)
         return results
     
-    # Processing functions for GRPOEnvTrainer
+    # Processing functions for trainers
     def process_state_tokens(
         self,
         state: Dict[str, Any],
+        reward: float,
         completion_text: str,
         processing_class: PreTrainedTokenizerBase
     ) -> Tuple[List[int], List[float]]:
@@ -333,21 +332,22 @@ class Environment(ABC):
                     # Repeat last reward
                     if len(token_rewards) > 0:
                         token_rewards = token_rewards + [token_rewards[-1]] * (len(token_ids) - len(token_rewards))
+                        self.logger.warning(f"token_rewards found but shorter than token_ids, repeating last reward.")
                     else:
                         # Fallback to zero rewards if empty
-                        token_rewards = [0.0] * len(token_ids)
+                        self.logger.warning("token_rewards found but empty, falling back to outcome rewards.") 
                 elif len(token_rewards) > len(token_ids):
                     # Truncate rewards
+                    self.logger.warning(f"token_rewards found but longer than token_ids, truncating rewards.")
                     token_rewards = token_rewards[:len(token_ids)]
             else:
                 # Use sequence-level reward for all tokens
-                sequence_reward = state.get("reward", 0.0)
-                token_rewards = [sequence_reward] * len(token_ids)
+                token_rewards = [reward] * len(token_ids)
                 
             return token_ids, token_rewards
         else:
             # Fallback to retokenization
-            token_ids = processing_class.encode(completion_text, add_special_tokens=False)
+            token_ids = processing_class.encode(completion_text, add_special_tokens=True)
             sequence_reward = state.get("reward", 0.0)
             token_rewards = [sequence_reward] * len(token_ids)
             return token_ids, token_rewards
@@ -357,63 +357,74 @@ class Environment(ABC):
         prompt: List[Dict[str, str]],
         completion: List[Dict[str, str]],
         processing_class: PreTrainedTokenizerBase,
-        mask_intermediate_responses: bool = False
+        mask_env_responses: bool = False
     ) -> Tuple[List[int], List[int], List[int], List[int]]:
         """
-        Process chat format conversations.
+        Process chat format conversations using incremental prefixes.
         
         Logic:
-        1. Apply chat template to prompt messages
-        2. Extract assistant responses from completion
-        3. If mask_intermediate_responses:
-        - Identify tool calls and intermediate user messages
-        - Create mask to exclude them from loss computation
-        4. Tokenize prompt and completion separately
+        1. Combine prompt + completion into full conversation
+        2. For each step, tokenize conversation prefix (prompt + completion[:i])
+        3. Calculate token differences between steps to get individual message tokens
+        4. Apply masking for intermediate responses if needed
         
         Returns:
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
-        # Apply chat template to prompt
+        # Combine into full conversation
+        full_conversation = prompt + completion
+        
+        # Step 0: Tokenize just the prompt
         prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+        assert isinstance(prompt_text, str)
         prompt_ids = processing_class.encode(prompt_text, add_special_tokens=False)
         prompt_mask = [1] * len(prompt_ids)
         
-        # Extract completion text from messages
-        completion_texts = []
-        completion_mask_parts = []
+        # Track completion tokens and masks by processing incrementally
+        completion_ids = []
+        completion_mask = []
         
-        for msg in completion:
+        # Previous tokenization (starts with just prompt)
+        prev_ids = prompt_ids
+        
+        # Process each completion message incrementally
+        for i, msg in enumerate(completion):
+            # Create conversation prefix: prompt + completion[:i+1]
+            conversation_prefix = prompt + completion[:i+1]
+            
+            # Tokenize the full prefix
+            prefix_text = processing_class.apply_chat_template(
+                conversation_prefix, 
+                tokenize=False, 
+                add_generation_prompt=False,
+            )
+            # Ensure prefix_text is a string
+            if not isinstance(prefix_text, str):
+                raise ValueError(f"Expected string from apply_chat_template, got {type(prefix_text)}")
+            current_ids = processing_class.encode(prefix_text, add_special_tokens=False)
+            assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
+            # Calculate the new tokens (difference from previous step)
+            if len(current_ids) > len(prev_ids):
+                new_tokens = current_ids[len(prev_ids):]
+            else:
+                # Handle edge case where tokenization might differ
+                raise ValueError(f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}")
+            # Add to completion tokens
+            completion_ids.extend(new_tokens)
+
+            # Create mask for this message
             if msg["role"] == "assistant":
-                msg_text = processing_class.apply_chat_template([msg], tokenize=False, add_generation_prompt=False)
-                # Remove any chat template prefix/suffix, keep just content
-                content = msg["content"]
-                completion_texts.append(content)
-                
-                # Create mask - mask out tool calls if needed
-                if mask_intermediate_responses and ("tool_calls" in msg or content.strip().startswith("<")):
-                    # This is a tool call or system message, mask it
-                    msg_ids = processing_class.encode(content, add_special_tokens=False)
-                    completion_mask_parts.extend([0] * len(msg_ids))
-                else:
-                    msg_ids = processing_class.encode(content, add_special_tokens=False)
-                    completion_mask_parts.extend([1] * len(msg_ids))
-            elif msg["role"] == "user" and mask_intermediate_responses:
-                # Mask intermediate user messages (like tool results)
-                content = msg["content"]
-                completion_texts.append(content)
-                msg_ids = processing_class.encode(content, add_special_tokens=False)
-                completion_mask_parts.extend([0] * len(msg_ids))
-        
-        # Combine completion texts and tokenize
-        full_completion_text = "".join(completion_texts)
-        completion_ids = processing_class.encode(full_completion_text, add_special_tokens=False)
-        
-        # Adjust mask length to match tokenized length
-        if len(completion_mask_parts) != len(completion_ids):
-            # Fallback: create mask based on actual tokenization
-            completion_mask = [1] * len(completion_ids)
-        else:
-            completion_mask = completion_mask_parts
+                msg_mask = [1] * len(new_tokens)
+            elif msg["role"] != "assistant" and mask_env_responses:
+                # Mask intermediate 'user' and/or 'tool' messages 
+                msg_mask = [0] * len(new_tokens)
+            else:
+                # Default to not masking
+                msg_mask = [1] * len(new_tokens)
+            
+            completion_mask.extend(msg_mask)
+            # Update previous tokenization for next iteration
+            prev_ids = current_ids
         
         return prompt_ids, prompt_mask, completion_ids, completion_mask
 
@@ -435,11 +446,11 @@ class Environment(ABC):
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
         # Tokenize prompt
-        prompt_ids = processing_class.encode(prompt, add_special_tokens=False)
-        prompt_mask = [1] * len(prompt_ids)
+        prompt_ids = processing_class.encode(prompt, add_special_tokens=True)
+        prompt_mask = [0] * len(prompt_ids)
         
         # Tokenize completion
-        completion_ids = processing_class.encode(completion, add_special_tokens=False)
+        completion_ids = processing_class.encode(completion, add_special_tokens=True)
         completion_mask = [1] * len(completion_ids)
         
         return prompt_ids, prompt_mask, completion_ids, completion_mask
@@ -516,6 +527,7 @@ class Environment(ABC):
         prompts: List[Union[str, List[Dict[str, str]]]],
         completions: List[Union[str, List[Dict[str, str]]]],
         states: List[Dict[str, Any]],
+        rewards: List[float],
         processing_class: PreTrainedTokenizerBase,
         mask_env_responses: bool = False,
         max_prompt_length: Optional[int] = None,
@@ -524,18 +536,6 @@ class Environment(ABC):
     ) -> Dict[str, torch.Tensor]:
         """
         Main tokenization pipeline that handles both chat and completion formats.
-        
-        Data Flow:
-        1. Determine format (chat vs completion) from first prompt
-        2. For each prompt/completion pair:
-        a. Check state for token_ids (priority)
-        b. If not found, tokenize from text
-        c. Extract token rewards from state
-        d. Apply format-specific processing
-        e. Create appropriate masks
-        3. Pad sequences to max lengths
-        4. Handle EOS token masking
-        5. Apply truncation if needed
         
         Returns:
             Dict with prompt_ids, prompt_mask, completion_ids, completion_mask tensors
@@ -551,11 +551,11 @@ class Environment(ABC):
         all_completion_ids = []
         all_completion_masks = []
         
-        for i, (prompt, completion, state) in enumerate(zip(prompts, completions, states)):
+        for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
             # Check if state has token_ids (priority)
             if "token_ids" in state:
                 completion_text = completion if isinstance(completion, str) else str(completion)
-                token_ids, token_rewards = self.process_state_tokens(state, completion_text, processing_class)
+                token_ids, token_rewards = self.process_state_tokens(state, reward, completion_text, processing_class)
                 
                 # For state tokens, we need to determine prompt boundary
                 if is_chat_format:
