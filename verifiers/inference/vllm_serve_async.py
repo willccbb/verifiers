@@ -150,26 +150,6 @@ def add_vllm_client_endpoints(app: FastAPI, llm: AsyncLLM):
 
 
 async def run_server(args, **uvicorn_kwargs):
-    if not is_fastapi_available():
-        raise ImportError(
-            "FastAPI is required to run the vLLM serve script. Please install it using `pip install fastapi`."
-        )
-
-    if not is_pydantic_available():
-        raise ImportError(
-            "Pydantic is required to run the vLLM serve script. Please install it using `pip install pydantic`."
-        )
-        
-    if not is_uvicorn_available():
-        raise ImportError(
-            "Uvicorn is required to run the vLLM serve script. Please install it using `pip install uvicorn`."
-        )
-    
-    if not is_uvloop_available():
-        raise ImportError(
-            "Uvloop is required to run the vLLM serve script. Please install it using `pip install uvloop`."
-        )
-
     logger.info("vLLM API server version %s", VLLM_VERSION)
     logger.info("args: %s", args)
 
