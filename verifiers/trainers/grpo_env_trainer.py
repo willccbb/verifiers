@@ -480,6 +480,8 @@ class GRPOEnvTrainer(Trainer):
         # Only the main process updates weights to vLLM
         # This is because only the main process has initialized the NCCL communicator
         if not self.accelerator.is_main_process:
+            # Non-main processes wait here while main process updates weights
+            self.accelerator.wait_for_everyone()
             return
 
         if is_peft_model(self.model):
@@ -509,6 +511,9 @@ class GRPOEnvTrainer(Trainer):
 
         # Reset cache on vLLM
         self.vllm_client.reset_prefix_cache()
+        
+        # Ensure all processes wait for the main process to finish updating weights
+        self.accelerator.wait_for_everyone()
 
     def _prepare_inputs(
         self, inputs: Union[dict[str, Union[torch.Tensor, Any]], list[dict[str, Union[torch.Tensor, Any]]]]
