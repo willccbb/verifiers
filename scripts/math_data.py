@@ -35,7 +35,7 @@ After concluding your message with a tool call,
 you will then see the tool's output inside <result> tags as a new message. \
 You may call tools multiple times if needed. \
 Tool state does not persist between calls. \
-Always use tools to solve problems whenever possible.
+Always use tools to solve problems whenever possible, rather than using your own knowledge.
 
 The <answer>...</answer> tags should contain only your final answer as a numeric expression.
 
@@ -48,7 +48,7 @@ Let's submit the answer.
 </answer>
 """
 
-dataset = load_example_dataset("math", split="train")
+dataset = load_example_dataset("gsm8k", split="train")
 vf_env = vf.ToolEnv(
     eval_dataset=dataset,
     system_prompt=TOOL_PROMPT,
@@ -85,16 +85,14 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
     print("Rewards:")
     for k, v in results.items():
         if 'reward' in k:
-            print(k, '-', v) 
+            print(k, '-', v)
     if save_dataset:
         dataset_dsv3 = vf_env.make_dataset(results)
+        # filter to top half of rows by rewards
+        dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
+        # save to hub
         dataset_dsv3.push_to_hub("V3-math-python-test")
-    #dataset_dsv3 = vf_env.make_dataset(results)
-    # filter to top half of rows by rewards
-    #dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
-    # save to hub
-    #dataset_dsv3.push_to_hub("V3-math-python-test")
-    
+
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
