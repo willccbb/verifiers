@@ -484,6 +484,20 @@ class GRPOEnvTrainer(Trainer):
             self.accelerator.wait_for_everyone()
             return
 
+        # Count parameters to update
+        param_count = 0
+        if is_peft_model(self.model):
+            for name, param in self.model.named_parameters(): # type: ignore
+                name = name.removeprefix("base_model.model.").replace(".base_layer", "")
+                if self.model.prefix in name or "original_module" in name: # type: ignore
+                    continue
+                param_count += 1
+        else:
+            param_count = sum(1 for _ in self.model.named_parameters())
+        
+        print(f"[TRAINER] Starting weight update for {param_count} parameters")
+        update_start_time = time.time()
+        
         if is_peft_model(self.model):
             # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging, as
             # merging adapters in a sharded manner is not supported.
@@ -491,6 +505,7 @@ class GRPOEnvTrainer(Trainer):
                 self.model.merge_adapter() # type: ignore
 
                 # DeepSpeed ZeRO-3 with PEFT
+                param_idx = 0
                 for name, param in self.model.named_parameters(): # type: ignore
                     # When using PEFT, we need to recover the original parameter name and discard some parameters
                     name = name.removeprefix("base_model.model.").replace(".base_layer", "")
@@ -501,16 +516,33 @@ class GRPOEnvTrainer(Trainer):
                         continue
                     name = name.replace("modules_to_save.default.", "")
 
+                    param_idx += 1
+                    if param_idx % 50 == 0:
+                        print(f"[TRAINER] Updated {param_idx}/{param_count} parameters ({param_idx/param_count*100:.1f}%)")
                     self.vllm_client.update_named_param(name, param.data)
+                    # Small delay to prevent overwhelming the synchronization mechanism
+                    if param_idx % 10 == 0:
+                        time.sleep(0.01)
                 self.model.unmerge_adapter() # type: ignore
         else:
             # For non-PEFT models, simply gather (if needed) and update each parameter individually.
+            param_idx = 0
             for name, param in self.model.named_parameters(): # type: ignore
+                param_idx += 1
+                if param_idx % 50 == 0:
+                    print(f"[TRAINER] Updated {param_idx}/{param_count} parameters ({param_idx/param_count*100:.1f}%)")
                 with gather_if_zero3([param]):
                     self.vllm_client.update_named_param(name, param.data)
+                # Small delay to prevent overwhelming the synchronization mechanism
+                if param_idx % 10 == 0:
+                    time.sleep(0.01)
 
         # Reset cache on vLLM
+        print(f"[TRAINER] Resetting vLLM prefix cache")
         self.vllm_client.reset_prefix_cache()
+        
+        update_duration = time.time() - update_start_time
+        print(f"[TRAINER] Weight update complete. Updated {param_count} parameters in {update_duration:.1f}s ({param_count/update_duration:.1f} params/sec)")
         
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
