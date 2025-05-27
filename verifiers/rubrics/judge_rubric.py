@@ -1,3 +1,4 @@
+import os
 from openai import OpenAI
 
 from verifiers.parsers import Parser
@@ -20,8 +21,8 @@ Respond either "yes" or "no" only."""
 
 class JudgeRubric(Rubric):
     def __init__(self,
-                 judge_client: OpenAI = OpenAI(),
-                 judge_model: str = "gpt-4.1-mini",
+                 judge_client: OpenAI = OpenAI(base_url="https://???.com/v1", api_key=os.getenv("FREE_100RPM_API_KEY")),
+                 judge_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
                  judge_prompt: str = DEFAULT_JUDGE_PROMPT,
                  parser: Parser = Parser(),
                  **kwargs):
@@ -48,3 +49,7 @@ class JudgeRubric(Rubric):
         )
         judge_response = str(judge_response.choices[0].message.content)
         return 1.0 if 'yes' in judge_response.lower() else 0.0
+    
+
+
+    

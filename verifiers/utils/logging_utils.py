@@ -41,8 +41,9 @@ def setup_logging(
 def print_prompt_completions_sample(
     prompts: list[str],
     completions: list[dict],
-    rewards: list[float],
+    rewards: dict[str, list[float]],
     step: int,
+    num_samples: int = 1,  # Number of samples to display
 ) -> None:
 
     console = Console()
@@ -53,7 +54,37 @@ def print_prompt_completions_sample(
     table.add_column("Completion", style="bright_green")
     table.add_column("Reward", style="bold cyan", justify="right")
 
-    for prompt, completion, reward in zip(prompts, completions, rewards, strict=True):
+    # Get the reward values from the dictionary
+    reward_values = rewards.get("reward", [])
+    
+    # Ensure we have rewards for all prompts/completions
+    if len(reward_values) < len(prompts):
+        # Pad with zeros if we don't have enough rewards
+        reward_values = reward_values + [0.0] * (len(prompts) - len(reward_values))
+
+    # Only show the first num_samples samples
+    samples_to_show = min(num_samples, len(prompts))
+    
+    for i in range(samples_to_show):
+        prompt = prompts[i]
+        completion = completions[i]
+        reward = reward_values[i]
+        
+        # Format prompt (can be string or list of dicts)
+        formatted_prompt = Text()
+        if isinstance(prompt, str):
+            formatted_prompt = Text(prompt)
+        elif isinstance(prompt, list):
+            # For chat format, only show the last message content (typically the user's question)
+            if prompt:
+                last_message = prompt[-1]
+                content = last_message.get("content", "")
+                formatted_prompt = Text(content, style="bright_yellow")
+            else:
+                formatted_prompt = Text("")
+        else:
+            formatted_prompt = Text(str(prompt))
+            
         # Create a formatted Text object for completion with alternating colors based on role
         formatted_completion = Text()
         
@@ -82,8 +113,9 @@ def print_prompt_completions_sample(
             # Fallback for string completions
             formatted_completion = Text(str(completion))
 
-        table.add_row(Text(prompt), formatted_completion, Text(f"{reward:.2f}"))
-        table.add_section()  # Adds a separator between rows
+        table.add_row(formatted_prompt, formatted_completion, Text(f"{reward:.2f}"))
+        if i < samples_to_show - 1:  # Don't add section after last row
+            table.add_section()  # Adds a separator between rows
 
     panel = Panel(table, expand=False, title=f"Step {step}", border_style="bold white")
     console.print(panel)

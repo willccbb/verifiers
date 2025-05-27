@@ -1,7 +1,7 @@
 import threading
 import queue
 from typing import Dict, Any, Optional, List, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, Future
 import time
 import torch
@@ -31,6 +31,8 @@ class BatchResult:
     processed_results: Dict[str, Any]
     error: Optional[Exception] = None
     generation_time: float = 0.0
+    all_reward_dict: Dict[str, List[float]] = field(default_factory=dict)  # All reward scores
+    completions: List[Any] = field(default_factory=list)  # Store completions for logging
 
 
 class AsyncBatchGenerator:
@@ -234,7 +236,7 @@ class AsyncBatchGenerator:
             except Exception as e:
                 print(f"AsyncBatchGenerator worker error: {e}")
                 traceback.print_exc()
-                
+
     def _generate_batch(self, request: BatchRequest) -> BatchResult:
         """
         Generate a single batch. This runs in the worker thread.
@@ -249,6 +251,12 @@ class AsyncBatchGenerator:
             max_concurrent=request.max_concurrent,
         )
         
+        # Extract all reward-related keys
+        all_reward_dict = {}
+        reward_keys = [k for k in env_results.keys() if k.endswith('_func') or k == 'reward']
+        for key in reward_keys:
+            all_reward_dict[key] = env_results[key]
+        
         # Process results
         processed_results = self.env.process_env_results(
             env_results['prompt'],
@@ -261,5 +269,7 @@ class AsyncBatchGenerator:
         
         return BatchResult(
             batch_id=request.batch_id,
-            processed_results=processed_results
+            processed_results=processed_results,
+            all_reward_dict=all_reward_dict,
+            completions=env_results['completion']
         ) 

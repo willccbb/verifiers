@@ -431,7 +431,6 @@ class Environment(ABC):
         all_completion_masks = []
 
         for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
-            # TODO: handle state
             # Format-specific processing
             if is_chat_format:
                 assert isinstance(prompt, list) and isinstance(completion, list)
