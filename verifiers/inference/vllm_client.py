@@ -7,6 +7,7 @@ from typing import Optional
 
 import requests
 from requests import ConnectionError
+from requests.adapters import HTTPAdapter
 from openai import OpenAI
 import torch
 from torch import nn
@@ -74,6 +75,16 @@ class VLLMClient(OpenAI):
 
         super().__init__(base_url=f"http://{host}:{port}/v1", api_key="local")
         self.session = requests.Session()
+        # Configure connection pooling to handle rapid requests better
+        adapter = HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=10,
+            max_retries=3,
+            pool_block=False
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
         self.host = host
         self.server_port = port # Renamed from server_port to port to match super init
         self.group_port = group_port
@@ -112,100 +123,6 @@ class VLLMClient(OpenAI):
             # Retry logic: wait before trying again
             logger.info(f"Server is not up yet. Retrying in {retry_interval} seconds...")
             time.sleep(retry_interval)
-
-    def generate(
-        self,
-        prompts: list[str],
-        n: int = 1,
-        repetition_penalty: float = 1.0,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        min_p: float = 0.0,
-        max_tokens: int = 16,
-        guided_decoding_regex: Optional[str] = None,
-    ) -> list[list[str]]:
-        """
-        Generates model completions for the provided prompts.
-
-        Args:
-            prompts (`list[str]`):
-                List of text prompts for which the model will generate completions.
-            n (`int`, *optional*, defaults to `1`):
-                Number of completions to generate for each prompt.
-            repetition_penalty (`float`, *optional*, defaults to `1.0`):
-                Parameter for repetition penalty. 1.0 means no penalty.
-            temperature (`float`, *optional*, defaults to `1.0`):
-                Temperature parameter for sampling. Higher values increase diversity.
-            top_p (`float`, *optional*, defaults to `1.0`):
-                Top-p sampling parameter.`1.0` means no truncation.
-            top_k (`int`, *optional*, defaults to `-1`):
-                Top-k sampling parameter. `-1` means no truncation.
-            min_p (`float`, *optional*, defaults to `0.0`):
-                Minimum probability for sampling.
-            max_tokens (`int`, *optional*, defaults to `16`):
-                Maximum number of tokens to generate for each prompt.
-            guided_decoding_regex (`str` or `None`, *optional*, defaults to `None`):
-                Regular expression to guide the decoding process.
-
-        Returns:
-            `list[list[int]]`:
-                List of lists of token IDs representing the model-generated completions for each prompt.
-        """
-        url = f"http://{self.host}:{self.server_port}/generate/"
-        response = self.session.post(
-            url,
-            json={
-                "prompts": prompts,
-                "n": n,
-                "repetition_penalty": repetition_penalty,
-                "temperature": temperature,
-                "top_p": top_p,
-                "min_p": min_p,
-                "max_tokens": max_tokens,
-                "guided_decoding_regex": guided_decoding_regex,
-            },
-        )
-        if response.status_code == 200:
-            return response.json()["completion_ids"]
-        else:
-            raise Exception(f"Request failed: {response.status_code}, {response.text}")
-
-    def chat(self, messages: list[list[dict[str, str]]], **kw) -> dict[str, list]:
-        # The outer list always has length-1 because OpenAI takes *one* conversation at a time
-        if len(messages) != 1:
-            raise ValueError("OpenAI /v1/chat/completions accepts exactly one conversation per call")
-        conv = messages[0]
-
-        # Map our kwargs to OpenAI fields
-        resp = self.chat.completions.create(
-            model=kw.get("model", "local"), # model is a required field for openai client
-            messages=conv,
-            temperature=kw.get("temperature", 1.0),
-            top_p=kw.get("top_p", 1.0),
-            max_tokens=kw.get("max_tokens", 16),
-            extra_body={
-                "top_k": kw.get("top_k", -1),
-                "min_p": kw.get("min_p", 0.0),
-                "repetition_penalty": kw.get("repetition_penalty", 1.0),
-                "guided_decoding_regex": kw.get("guided_decoding_regex"),
-                "stop": kw.get("stop"),
-                "include_stop_str_in_output": kw.get("include_stop_str_in_output", False),
-                "skip_special_tokens": kw.get("skip_special_tokens", True),
-                "spaces_between_special_tokens": kw.get("spaces_between_special_tokens", True),
-                # n is not directly supported in extra_body for the openai client in this way
-                # if n > 1, the openai client typically handles this by making multiple requests or it's a param of specific methods
-                # For now, we assume n=1 as OpenAI standard chat completion generates one response per call by default.
-            },
-        )
-        return {
-            "responses": [{
-                "prompt_token_ids": [],   # Not available through OA API – return empty
-                "outputs": [{
-                    "token_ids": [], # Not available through OA API - return empty
-                    "text": resp.choices[0].message.content,
-                }],
-            }]
-        }
 
     def init_communicator(self):
         """
@@ -253,13 +170,27 @@ class VLLMClient(OpenAI):
         """
         dtype, shape = str(weights.dtype), tuple(weights.shape)
         url = f"http://{self.host}:{self.server_port}/update_named_param/"
-        response = self.session.post(url, json={"name": name, "dtype": dtype, "shape": shape})
+        logger.debug(f"[VLLM_CLIENT] Sending weight update request for {name}")
+        
+        # Add timeout to prevent hanging on HTTP request
+        try:
+            response = self.session.post(url, json={"name": name, "dtype": dtype, "shape": shape}, timeout=300.0)
+        except requests.exceptions.Timeout:
+            logger.error(f"[VLLM_CLIENT] Timeout waiting for server response for {name} after 300s")
+            raise Exception(f"Request timeout for {name} after 300s")
+        except Exception as e:
+            logger.error(f"[VLLM_CLIENT] Error sending request for {name}: {e}")
+            raise
+            
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
+        logger.debug(f"[VLLM_CLIENT] Server responded, starting NCCL broadcast for {name}")
 
         # Broadcast the weights to the other processes
         self.pynccl_comm.broadcast(weights, src=self.rank)
+        logger.debug(f"[VLLM_CLIENT] NCCL broadcast complete, waiting at barrier for {name}")
         self.pynccl_comm.group.barrier()
+        logger.debug(f"[VLLM_CLIENT] Barrier passed for {name}")
 
     def update_model_params(self, model: nn.Module):
         """

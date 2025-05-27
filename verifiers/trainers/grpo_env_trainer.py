@@ -36,6 +36,7 @@ from trl.trainer.utils import (
     selective_log_softmax
 )
 import wandb
+import time
 
 from verifiers import Environment
 from verifiers.inference import VLLMClient
@@ -469,6 +470,9 @@ class GRPOEnvTrainer(Trainer):
             gather_if_zero3 = deepspeed.zero.GatheredParameters
         else:
             gather_if_zero3 = nullcontext
+            
+        # Ensure all processes are synchronized before weight update
+        self.accelerator.wait_for_everyone()
 
         if is_peft_model(self.model):
             # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging, as
@@ -1080,8 +1084,10 @@ class GRPOEnvTrainer(Trainer):
         """Override training_step to ensure async generation is properly managed"""
         # Sync model weights to vLLM if needed
         if self._last_loaded_step != self.state.global_step:
+            print(f"[TRAINER] Syncing weights to vLLM at step {self.state.global_step} (last loaded: {self._last_loaded_step})")
             self._move_model_to_vllm()
             self._last_loaded_step = self.state.global_step
+            print(f"[TRAINER] Weight sync complete")
             
         # Continue with normal training
         return super().training_step(model, inputs, num_items_in_batch)

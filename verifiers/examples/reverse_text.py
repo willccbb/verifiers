@@ -40,9 +40,7 @@ trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
-    #peft_config=vf.lora_defaults(),
+    peft_config=vf.lora_defaults(),
     args=vf.grpo_defaults(run_name='reverse_text_warmup')
 )
 trainer.train()
-
-
