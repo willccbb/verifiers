@@ -16,12 +16,12 @@ dependencies = [
     "wandb",
     "rich",
     "trl>=0.17.0",
-    "liger-kernel",
+    "liger-kernel>=0.5.10",
     "requests>=2.32.3",
     "vllm>=0.8.5.post1",
     "openai>=1.81.0",
     "datasets>=3.6.0",
-    "transformers>=4.52.2",
+    "transformers",
 ]
 
 [project.optional-dependencies]

@@ -36,6 +36,8 @@ class GRPOEnvConfig(TrainingArguments):
             "argument of the `GRPOTrainer` is provided as a string."
         },
     )
+
+    # Parameters that control the model and reference model
     disable_dropout: bool = field(
         default=False,
         metadata={
@@ -60,7 +62,7 @@ class GRPOEnvConfig(TrainingArguments):
             "help": "Maximum length of the prompt. If the prompt is longer than this value, it will be truncated left."
         },
     )
-    num_generations: Optional[int] = field(
+    num_generations: int = field(
         default=8,
         metadata={
             "help": "Number of generations to sample. The effective batch size (num_processes * per_device_batch_size "
@@ -80,7 +82,7 @@ class GRPOEnvConfig(TrainingArguments):
             "is not compatible with vLLM generation."
         },
     )
-    shuffle_dataset: Optional[bool] = field(
+    shuffle_dataset: bool = field(
         default=True,
         metadata={"help": "Whether to shuffle the training dataset."},
     )
@@ -111,7 +113,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     top_k: Optional[int] = field(
-        default=50,
+        default=None,
         metadata={
             "help": "Number of highest probability vocabulary tokens to keep for top-k-filtering. If `None`, "
             "top-k-filtering is disabled."
@@ -130,6 +132,52 @@ class GRPOEnvConfig(TrainingArguments):
             "help": "Float that penalizes new tokens based on whether they appear in the prompt and the generated "
             "text so far. Values > 1.0 encourage the model to use new tokens, while values < 1.0 encourage the model "
             "to repeat tokens."
+        },
+    )
+    presence_penalty: float = field(
+        default=0.0,
+        metadata={
+            "help": "Presence penalty (default 0.0)"
+        }, 
+    )
+    frequency_penalty: float = field(
+        default=0.0,
+        metadata={
+            "help": "Frequency penalty (default 0.0)"
+        }, 
+    )
+    max_concurrent: int = field(
+        default=32,
+        metadata={"help": "Maximum number of concurrent requests to the environment."},
+    )
+
+    # Async generation parameters
+    use_async_generation: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to use asynchronous generation. When enabled, generation happens in a separate thread "
+            "while training continues, improving GPU utilization."
+        },
+    )
+    num_steps_async: int = field(
+        default=1,
+        metadata={
+            "help": "Number of batches to generate ahead when using async generation. Higher values can improve "
+            "GPU utilization but use more memory. Only used when use_async_generation=True."
+        },
+    )
+    async_generation_timeout: float = field(
+        default=300.0,
+        metadata={
+            "help": "Timeout in seconds for async generation. If a batch doesn't complete within this time, "
+            "a TimeoutError is raised. Only used when use_async_generation=True."
+        },
+    )
+    async_max_queue_size: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Maximum number of batches that can be queued for async generation. If None, defaults to "
+            "2 * num_steps_async. Only used when use_async_generation=True."
         },
     )
 
@@ -171,7 +219,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     num_iterations: int = field(
-        default=2,
+        default=1,
         metadata={"help": "Number of iterations per batch (denoted as μ in the algorithm)."},
     )
     epsilon: float = field(
@@ -179,7 +227,7 @@ class GRPOEnvConfig(TrainingArguments):
         metadata={"help": "Epsilon value for clipping."},
     )
     delta: Optional[float] = field(
-        default=4.0,
+        default=None,
         metadata={
             "help": "If set to a float value (e.g., 2.0), enables the upper clipping bound in two-sided GRPO loss. If None (default), the standard GRPO clipping is used. Recommended to be > 1 + epsilon when enabled."
         },
@@ -253,11 +301,6 @@ class GRPOEnvConfig(TrainingArguments):
             "synchronized with the reference policy. To use this parameter, you must set `sync_ref_model=True`."
         },
     )
-    use_liger_loss: bool = field(
-        default=False,
-        metadata={"help": "Whether to use the Liger GRPO loss."},
-    )
-
     # Parameters that control the logging
     log_completions: bool = field(
         default=False,

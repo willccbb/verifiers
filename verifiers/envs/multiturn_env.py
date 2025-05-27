@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from copy import deepcopy
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Union
 
 from openai import OpenAI
 
@@ -14,16 +14,16 @@ class MultiTurnEnv(Environment):
 
     @abstractmethod
     def is_completed(self,
-                     messages: List[Dict[str, str]],
+                     messages: List[Dict[str, Any]],
                      state: Dict[str, Any],
                      **kwargs: Any) -> bool:
         pass
 
     @abstractmethod
     def env_response(self,
-                     messages: List[Dict[str, str]],
+                     messages: List[Dict[str, Any]],
                      state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+                     **kwargs: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Generate a response from the environment (message, state).
         """
@@ -32,9 +32,12 @@ class MultiTurnEnv(Environment):
     def rollout(self,
                 client: OpenAI,
                 model: str,
-                prompt: str | List[Dict[str, str]],
+                prompt: Union[str, List[Dict[str, Any]]],
                 sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[List[Dict[str, str]], Dict[str, Any]]:
+                **kwargs: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Generate a multi-turn rollout with the environment (messages, state).
+        """
         is_completed = False
         state = {}
         assert isinstance(prompt, list)

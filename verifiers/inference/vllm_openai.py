@@ -66,13 +66,11 @@ class OAChatCompletionRequest(BaseModel):
     messages: list[OAChatMessage]
     temperature: float | None = 0.7
     top_p: float | None = 1.0
-    top_k: int | None = -1
+    presence_penalty: float | None = 0.0
+    frequency_penalty: float | None = 0.0
     max_tokens: int | None  = 1024
     n: int | None = 1
     stop: str | list[str] | None = None
-    presence_penalty: float | None = 0.0
-    frequency_penalty: float | None = 0.0
-    repetition_penalty: float | None = 1.0
     stream: bool = False # not supported
     extra_body: dict | None = None 
     # supported by vLLM:
@@ -96,13 +94,11 @@ class OACompletionRequest(BaseModel):
     prompt: str | list[str] 
     temperature: float | None = 0.7
     top_p: float | None = 1.0
-    top_k: int | None = -1
+    presence_penalty: float | None = 0.0
+    frequency_penalty: float | None = 0.0
     max_tokens: int | None  = 1024
     n: int  = 1
     stop: str | list[str] | None = None
-    presence_penalty: float | None = 0.0
-    frequency_penalty: float | None = 0.0
-    repetition_penalty: float | None = 1.0
     stream: bool = False # not supported
     extra_body: dict | None = None
 
@@ -394,18 +390,16 @@ def create_pool_signature(
     key_openai_to_vllm_map = {
         "temperature": "temperature", "top_p": "top_p", "n": "n", 
         "presence_penalty": "presence_penalty", "frequency_penalty": "frequency_penalty",
-        "repetition_penalty": "repetition_penalty", "stop": "stop", 
-        "seed": "seed", "ignore_eos": "ignore_eos", "min_tokens": "min_tokens",
+        "stop": "stop", "seed": "seed", "ignore_eos": "ignore_eos", "min_tokens": "min_tokens",
     }
     
     # Use defaults from Pydantic models if not provided in request
     param_defaults_for_sig = {
         "temperature": OAChatCompletionRequest.model_fields["temperature"].default,
         "top_p": OAChatCompletionRequest.model_fields["top_p"].default,
-        "n": OAChatCompletionRequest.model_fields["n"].default,
         "presence_penalty": OAChatCompletionRequest.model_fields["presence_penalty"].default,
         "frequency_penalty": OAChatCompletionRequest.model_fields["frequency_penalty"].default,
-        "repetition_penalty": OAChatCompletionRequest.model_fields["repetition_penalty"].default,
+        "n": OAChatCompletionRequest.model_fields["n"].default,
         "stop": OAChatCompletionRequest.model_fields["stop"].default,
         # stop: None, seed: None, ignore_eos: False, min_tokens: 0
     }
@@ -991,6 +985,8 @@ def main(script_args: ScriptArguments):
         raw_params_for_sig = {
             "temperature": req.temperature,
             "top_p": req.top_p,
+            "presence_penalty": req.presence_penalty,
+            "frequency_penalty": req.frequency_penalty,
             # "n" is not in OAChatCompletionRequest, defaults to 1 for chat in OpenAI spec
             "n": 1, 
         }
@@ -1074,6 +1070,8 @@ def main(script_args: ScriptArguments):
         raw_params_for_sig = {
             "temperature": req.temperature,
             "top_p": req.top_p,
+            "presence_penalty": req.presence_penalty,
+            "frequency_penalty": req.frequency_penalty,
             "n": req.n, # Pass 'n' from the request
         }
         # Add other SamplingParams-mappable fields from OACompletionRequest if they exist
@@ -1183,6 +1181,57 @@ def main(script_args: ScriptArguments):
             connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
 
         return {"message": "Request received, initializing communicator"}
+
+    class UpdateWeightsRequest(BaseModel):
+        name: str
+        dtype: str
+        shape: list[int]
+
+    @app.post("/update_named_param/")
+    async def update_named_param(request: UpdateWeightsRequest):
+        """
+        Updates the model weights with the provided tensor.
+
+        Once this endpoint is called, the client process should broadcast the updated weights to all server workers.
+
+        Args:
+            request (`UpdateWeightsRequest`):
+                - `name` (`str`): Name of the weight tensor being updated.
+                - `dtype` (`str`): Data type of the weight tensor (e.g., `"torch.float32"`).
+                - `shape` (list of `int`): Shape of the weight
+
+        """
+        # The function update_named_param is called this way: update_named_param("name", torch.float32, (10, 10))
+        # So with collective_rpc we need to call it this way:
+        # llm.collective_rpc("update_named_param", args=("name", torch.float32, (10, 10)))
+        dtype = torch.__getattribute__(request.dtype.split(".")[-1])
+        kwargs = {"method": "update_named_param", "args": (request.name, dtype, tuple(request.shape))}
+        for connection in connections:
+            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+
+        return {"message": "Request received, updating named parameter"}
+
+    @app.post("/reset_prefix_cache/")
+    async def reset_prefix_cache():
+        """
+        Resets the prefix cache for the model.
+        """
+        for connection in connections:
+            connection.send({"type": "call", "method": "reset_prefix_cache"})
+        # Wait for and collect all results
+        all_outputs = [connection.recv() for connection in connections]
+        success = all(output for output in all_outputs)
+        return {"message": "Request received, resetting prefix cache status: " + str(success)}
+
+    @app.post("/close_communicator/")
+    async def close_communicator():
+        """
+        Closes the weight update group and cleans up associated resources.
+        """
+        kwargs = {"method": "close_communicator"}
+        for connection in connections:
+            connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+        return {"message": "Request received, closing communicator"}
 
     # Start the server
     # Always use 1 Uvicorn worker. vLLM handles its own worker processes and scheduling.

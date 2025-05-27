@@ -3,7 +3,7 @@ from asyncio import Semaphore
 
 import inspect
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 from verifiers import RewardFunc
 from verifiers.parsers import Parser
@@ -53,8 +53,8 @@ class Rubric:
 
     def _call_reward_func(self,
                           func: RewardFunc,
-                          prompt: List[Dict[str, str]] | str,
-                          completion: List[Dict[str, str]] | str,
+                          prompt: Union[str, List[Dict[str, Any]]],
+                          completion: Union[str, List[Dict[str, Any]]],
                           answer: Any,
                           state: Dict[str, Any],
                           task: str | None,
@@ -95,8 +95,8 @@ class Rubric:
         return ans
     
     async def score_rollout(self,
-                            prompt: List[Dict[str, str]] | str,
-                            completion: List[Dict[str, str]] | str,
+                            prompt: Union[str, List[Dict[str, Any]]],
+                            completion: Union[str, List[Dict[str, Any]]],
                             answer: Any,
                             state: Dict[str, Any],
                             task: str | None = None,
@@ -144,8 +144,8 @@ class Rubric:
         return {k: [item[k] for item in rewards] for k in rewards[0]}
     
     def score_rollouts(self,
-                       prompts: List[List[Dict[str, str]] | str],
-                       completions: List[List[Dict[str, str]] | str],
+                       prompts: List[Union[str, List[Dict[str, Any]]]],
+                       completions: List[Union[str, List[Dict[str, Any]]]],
                        answers: List[Any],
                        states: List[Dict[str, Any]],
                        tasks: List[str],

@@ -2,7 +2,7 @@ from datasets import load_dataset
 import verifiers as vf
 
 #model = 'Qwen/Qwen2.5-1.5B-Instruct'
-model_name = 'willcb/Qwen2.5-7B-Reverse-SFT'
+model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
 parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
 system_prompt = f"""Reverse the given text.
@@ -10,7 +10,7 @@ system_prompt = f"""Reverse the given text.
 Respond in the following format:
 {parser.get_format_str()}"""
 
-def lcs_reward_func(completions, answer, **kwargs) -> list[float]:
+def lcs_reward_func(completion, answer, **kwargs) -> float:
     """
     LCS ratio of the reversed prompt and the parsed completion.
     """
@@ -20,8 +20,8 @@ def lcs_reward_func(completions, answer, **kwargs) -> list[float]:
         """
         from difflib import SequenceMatcher
         return SequenceMatcher(None, x, y).ratio()
-    responses = [parser.parse_answer(c) or '' for c in completions]
-    return [lcs_ratio(r, a) for r, a in zip(responses, answer)]
+    response = parser.parse_answer(completion) or ''
+    return lcs_ratio(response, answer)
 
 rubric = vf.Rubric(funcs=[
 	lcs_reward_func,
@@ -40,8 +40,8 @@ trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
-    peft_config=vf.lora_defaults(),
-    args=vf.grpo_defaults(run_name='reverse_text_warmup') # TRL GRPOConfig, modify as needed
+    #peft_config=vf.lora_defaults(),
+    args=vf.grpo_defaults(run_name='reverse_text_warmup')
 )
 trainer.train()
 

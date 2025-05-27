@@ -1,13 +1,6 @@
 from peft import LoraConfig
-from trl import GRPOConfig
 
-# extend GRPOConfig to include delta
-class GRPOEnvConfig(GRPOConfig):
-    def __init__(self, **kwargs):
-        # strip 'delta' from kwargs
-        delta = kwargs.pop("delta", None)
-        super().__init__(**kwargs)
-        self.delta = delta
+from verifiers.trainers.grpo_env_config import GRPOEnvConfig
 
 def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
     return GRPOEnvConfig(
@@ -20,24 +13,23 @@ def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
         max_steps=500,
         bf16=True,
         max_grad_norm=0.01,
-        num_iterations=2,
+        num_iterations=1,
         max_prompt_length=1024,
         max_completion_length=2048,
-        per_device_train_batch_size=12,
+        per_device_train_batch_size=6,
         num_generations=6,
         gradient_accumulation_steps=2,
         gradient_checkpointing=True,
         save_strategy="steps",
         save_steps=500,
         save_only_model=True,
-        use_vllm=True,
         logging_steps=1,
         log_on_each_node=False,
         log_completions=True,
         report_to="wandb",
     )
 
-def grpo_defaults(run_name: str) -> GRPOConfig:
+def grpo_defaults(run_name: str) -> GRPOEnvConfig:
     return get_default_grpo_config(run_name)
 
 def lora_defaults(r = 8, alpha = 16) -> LoraConfig:
