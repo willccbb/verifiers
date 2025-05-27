@@ -293,7 +293,10 @@ class GRPOEnvTrainer(Trainer):
             port=port,
             connection_timeout=args.vllm_server_timeout
         )
-        self.vllm_client.init_communicator()
+        # Only initialize communicator on the main process
+        # Other processes will only use the client for non-NCCL operations
+        if self.accelerator.is_main_process:
+            self.vllm_client.init_communicator()
         
         self._last_loaded_step = -1  # tag to avoid useless loading during grad accumulation
         self.model_accepts_loss_kwargs = False 
@@ -474,6 +477,11 @@ class GRPOEnvTrainer(Trainer):
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
 
+        # Only the main process updates weights to vLLM
+        # This is because only the main process has initialized the NCCL communicator
+        if not self.accelerator.is_main_process:
+            return
+
         if is_peft_model(self.model):
             # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging, as
             # merging adapters in a sharded manner is not supported.
@@ -491,8 +499,7 @@ class GRPOEnvTrainer(Trainer):
                         continue
                     name = name.replace("modules_to_save.default.", "")
 
-                    if self.accelerator.is_main_process:
-                        self.vllm_client.update_named_param(name, param.data)
+                    self.vllm_client.update_named_param(name, param.data)
                 self.model.unmerge_adapter() # type: ignore
         else:
             # For non-PEFT models, simply gather (if needed) and update each parameter individually.
