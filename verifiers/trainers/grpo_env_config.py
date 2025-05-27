@@ -146,6 +146,10 @@ class GRPOEnvConfig(TrainingArguments):
             "help": "Frequency penalty (default 0.0)"
         }, 
     )
+    max_num_processes: int = field(
+        default=8,
+        metadata={"help": "Maximum number of processes to use for filtering the dataset."},
+    )
     max_concurrent: int = field(
         default=32,
         metadata={"help": "Maximum number of concurrent requests to the environment."},

@@ -172,6 +172,7 @@ class GRPOEnvTrainer(Trainer):
         self.max_completion_length = args.max_completion_length  # = |o_i| in the GRPO paper
         self.num_generations = args.num_generations  # = G in the GRPO paper
         self.max_concurrent = args.max_concurrent
+        self.max_num_processes = args.max_num_processes
         self.temperature = args.temperature
         self.top_p = args.top_p
         self.min_p = args.min_p
@@ -201,6 +202,30 @@ class GRPOEnvTrainer(Trainer):
         self.shuffle_dataset = args.shuffle_dataset 
         train_dataset = env.get_dataset()
         assert train_dataset is not None
+        
+        # Filter out prompts that are too long if max_prompt_length is set
+        if self.max_prompt_length is not None:
+            print(f"Filtering dataset for prompts with length <= {self.max_prompt_length}")
+            max_length = self.max_prompt_length  # Capture for closure
+            
+            def filter_by_prompt_length(example):
+                prompt = example['prompt']
+                # Tokenize prompt to check length
+                if isinstance(prompt, list):
+                    # Chat format
+                    prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+                else:
+                    # Completion format
+                    prompt_text = prompt
+                prompt_ids = processing_class.encode(prompt_text)
+                return len(prompt_ids) <= max_length
+            
+            original_size = len(train_dataset)
+            train_dataset = train_dataset.filter(filter_by_prompt_length, num_proc=self.max_num_processes)
+            filtered_size = len(train_dataset)
+            if filtered_size < original_size:
+                print(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
+        
         def data_collator(features):
             return features
         super().__init__(
@@ -609,12 +634,24 @@ class GRPOEnvTrainer(Trainer):
                       for prompt_mask in processed_results['prompt_mask']]
         prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left')
         prompt_mask = pad(prompt_mask, padding_side='left')
+        
+        # Truncate prompts from the left if they exceed max_prompt_length
+        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
+            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
+            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
+        
         completion_ids = [torch.tensor(completion_ids, device=device)
                           for completion_ids in processed_results['completion_ids']]
         completion_mask = [torch.tensor(completion_mask, device=device)
                           for completion_mask in processed_results['completion_mask']]
         completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right')
         completion_mask = pad(completion_mask)
+        
+        # Truncate completions from the right if they exceed max_completion_length
+        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
+            completion_ids = completion_ids[:, :self.max_completion_length]
+            completion_mask = completion_mask[:, :self.max_completion_length]
+        
         rewards = processed_results['rewards']
         
         rewards = torch.tensor(rewards, device=device)
@@ -825,12 +862,23 @@ class GRPOEnvTrainer(Trainer):
                       for prompt_mask in processed_results['prompt_mask']]
         prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
         prompt_mask = pad(prompt_mask, padding_side='left')
+        
+        # Truncate prompts from the left if they exceed max_prompt_length
+        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
+            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
+            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
+        
         completion_ids = [torch.tensor(completion_ids, device=device)
                           for completion_ids in processed_results['completion_ids']]
         completion_mask = [torch.tensor(completion_mask, device=device)
                           for completion_mask in processed_results['completion_mask']]
         completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
         completion_mask = pad(completion_mask)
+        
+        # Truncate completions from the right if they exceed max_completion_length
+        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
+            completion_ids = completion_ids[:, :self.max_completion_length]
+            completion_mask = completion_mask[:, :self.max_completion_length]
 
         # Log 
         if mode == "train":
