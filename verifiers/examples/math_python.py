@@ -3,7 +3,7 @@ from trl import GRPOConfig
 
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils import preprocess_dataset
+from verifiers.utils import load_example_dataset
 
 """
 Multi-GPU training (single node, 4 training + 4 inference)
@@ -49,15 +49,10 @@ Let's submit the answer.
 </answer>
 """
 
-dataset = preprocess_dataset("math", "train", n=6000)
-
-eval_aime24 = preprocess_dataset("aime2024", n=30)
-eval_aime25 = preprocess_dataset("aime2025", n=30)
-eval_dataset = concatenate_datasets([eval_aime24, eval_aime25]).shuffle(seed=0)
+dataset = load_example_dataset("gsm8k", split="train")
 
 vf_env = vf.ToolEnv(
     dataset=dataset,
-    eval_dataset=eval_dataset,
     system_prompt=TOOL_PROMPT,
     few_shot=[],
     tools=[python],
