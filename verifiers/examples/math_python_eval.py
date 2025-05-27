@@ -15,7 +15,7 @@ uv run verifiers/examples/math_eval.py
 """
 
 TOOL_PROMPT = """
-Think step-by-step inside <reasoning>...</reasoning> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
+Think step-by-step inside <think>...</think> tags in each message, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
 
 You have access to the following tools to help solve problems:
 
@@ -30,16 +30,18 @@ Example usage:
 {{"name": "python", "args": {{"code": "import sympy\nx = sympy.symbols('x')\nprint(sympy.solve(x**2 - 4, x))"}}}}
 </tool>
 
-You will then see the tool's output inside <result> tags. You may call tools multiple times if needed.
+After concluding your message with a tool call,
+you will then see the tool's output inside <result> tags as a new message. \
+You may call tools multiple times if needed. \
+Tool state does not persist between calls. \
+Always use tools to solve problems whenever possible, rather than using your own knowledge.
 
-The <answer>...</answer> tags should contain only your final answer.
+The <answer>...</answer> tags should contain only your final answer as a numeric expression.
 
-Example for multiple choice questions:
-<answer>
-A
-</answer>
-
-Example for math problems:
+Example:
+<think>
+Let's submit the answer.
+</think>
 <answer>
 \\frac{{1}}{{2}}
 </answer>

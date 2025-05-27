@@ -17,7 +17,7 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml 
 """
 
 TOOL_PROMPT = """
-Think step-by-step inside <reasoning>...</reasoning> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
+Think step-by-step inside <think>...</think> tags in each message, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
 
 You have access to the following tools to help solve problems:
 
@@ -32,16 +32,18 @@ Example usage:
 {{"name": "python", "args": {{"code": "import sympy\nx = sympy.symbols('x')\nprint(sympy.solve(x**2 - 4, x))"}}}}
 </tool>
 
-You will then see the tool's output inside <result> tags. You may call tools multiple times if needed.
+After concluding your message with a tool call,
+you will then see the tool's output inside <result> tags as a new message. \
+You may call tools multiple times if needed. \
+Tool state does not persist between calls. \
+Always use tools to solve problems whenever possible, rather than using your own knowledge.
 
-The <answer>...</answer> tags should contain only your final answer.
+The <answer>...</answer> tags should contain only your final answer as a numeric expression.
 
-Example for multiple choice questions:
-<answer>
-A
-</answer>
-
-Example for math problems:
+Example:
+<think>
+Let's submit the answer.
+</think>
 <answer>
 \\frac{{1}}{{2}}
 </answer>
@@ -63,47 +65,16 @@ vf_env = vf.ToolEnv(
 )
 print(vf_env.system_prompt)
 
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 
-training_args=GRPOConfig(
-    output_dir=f"outputs/{run_name}",
-    run_name=run_name,
-    learning_rate=1e-6,
-    lr_scheduler_type="constant_with_warmup",
-    warmup_steps=10,
-    num_train_epochs=1,
-    temperature=1.0,
-    max_steps=1000,
-    bf16=True,
-    max_grad_norm=0.1,
-    num_iterations=2,
-    beta=0.002,
-    max_prompt_length=1024,
-    max_completion_length=2048,
-    per_device_train_batch_size=12,
-    per_device_eval_batch_size=12,
-    num_generations=6,
-    gradient_accumulation_steps=1,
-    gradient_checkpointing=True,
-    eval_strategy="steps",
-    eval_steps=100,
-    eval_accumulation_steps=1,
-    eval_on_start=False,
-    save_strategy="steps",
-    save_steps=100,
-    save_only_model=True,
-    use_vllm=True,
-    vllm_server_host="0.0.0.0", # replace with your inference server's host for multi-node setups
-    vllm_server_port=8000,
-    vllm_gpu_memory_utilization=0.9,
-    logging_steps=1,
-    log_on_each_node=False,
-    log_completions=True,
-    report_to="wandb",
-    reward_weights=vf_env.get_reward_weights()
-)
+training_args=vf.grpo_defaults(run_name=run_name)
+training_args.num_iterations=2
+training_args.per_device_train_batch_size=8
+training_args.num_generations=8
+training_args.gradient_accumulation_steps=2
+
 trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,
