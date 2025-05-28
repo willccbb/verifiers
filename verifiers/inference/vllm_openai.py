@@ -386,6 +386,7 @@ class PooledRequestState:
     finish_reason: Optional[str] = None
     completed_and_signaled: bool = False
     timed_out: bool = False
+    generation_stopped: bool = False  # Track if generation stopped (incomplete chunk)
 
 pending_requests_by_signature: defaultdict[PoolSignature, list[PooledRequestState]] = defaultdict(list)
 active_pool_signature: Optional[PoolSignature] = None
@@ -765,6 +766,7 @@ async def batch_processing_loop(
                                 # If we got fewer tokens than requested chunk size, generation is done
                                 if new_token_count < script_args.token_chunk_size:
                                     is_finished = True
+                                    req_state.generation_stopped = True  # Mark that generation has stopped
                                     if req_state.finish_reason is None or req_state.finish_reason == "length":
                                         # Set appropriate finish reason if not already set
                                         if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -817,6 +819,7 @@ async def batch_processing_loop(
                                 # If we got fewer tokens than requested chunk size, generation is done
                                 if new_token_count < script_args.token_chunk_size:
                                     is_finished = True
+                                    req_state.generation_stopped = True  # Mark that generation has stopped
                                     if req_state.finish_reason is None or req_state.finish_reason == "length":
                                         # Set appropriate finish reason if not already set
                                         if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -858,7 +861,8 @@ async def batch_processing_loop(
                         is_definitely_finished = (req_state.finish_reason is not None and req_state.finish_reason != "length") or \
                                                  (req_state.finish_reason == "length" and req_state.generated_token_count >= req_state.effective_max_tokens) or \
                                                  (req_state.generated_token_count >= req_state.effective_max_tokens) or \
-                                                 (req_state.error is not None)
+                                                 (req_state.error is not None) or \
+                                                 req_state.generation_stopped  # Generation stopped due to incomplete chunk
                         
                         # Add detailed logging for debugging
                         logger_instance.debug(f"Request {req_state.request_id} completion check: finish_reason={req_state.finish_reason}, "
