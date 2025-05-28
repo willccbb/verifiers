@@ -436,24 +436,31 @@ class PooledRequestState:
         """Single source of truth for whether this request is complete and should not be processed further."""
         # Already finalized
         if self.completed_and_signaled:
+            logger.debug(f"[is_complete] Request {self.request_id}: Already completed and signaled")
             return True
             
         # Error state
         if self.error is not None:
-            return True
-            
-        # vLLM indicated completion (any non-None finish reason means done)
-        if self.finish_reason is not None:
+            logger.debug(f"[is_complete] Request {self.request_id}: Has error: {self.error}")
             return True
             
         # Reached token limit
         if self.generated_token_count >= self.effective_max_tokens:
+            logger.debug(f"[is_complete] Request {self.request_id}: Reached token limit ({self.generated_token_count} >= {self.effective_max_tokens})")
             return True
             
         # Not enough room for meaningful generation (less than 1 token)
-        if self.effective_max_tokens - self.generated_token_count < 1:
+        tokens_remaining = self.effective_max_tokens - self.generated_token_count
+        if tokens_remaining < 1:
+            logger.debug(f"[is_complete] Request {self.request_id}: No room left ({tokens_remaining} tokens remaining)")
             return True
             
+        # vLLM indicated completion - but ignore "length" as that's just the chunk limit
+        if self.finish_reason is not None and self.finish_reason != "length":
+            logger.debug(f"[is_complete] Request {self.request_id}: Has finish_reason: {self.finish_reason} (not length)")
+            return True
+            
+        logger.debug(f"[is_complete] Request {self.request_id}: Not complete. Generated {self.generated_token_count}/{self.effective_max_tokens}, finish_reason={self.finish_reason}")
         return False
 
 pending_requests_by_signature: defaultdict[PoolSignature, list[PooledRequestState]] = defaultdict(list)
@@ -603,7 +610,9 @@ async def batch_processing_loop(
                 while True: # Loop to drain current items in asyncio.Queue
                     pooled_req_state: PooledRequestState = queue.get_nowait()
                     pending_requests_by_signature[pooled_req_state.pool_signature].append(pooled_req_state)
-                    logger_instance.debug(f"Request {pooled_req_state.request_id} enqueued to pending pool with sig {pooled_req_state.pool_signature}")
+                    logger_instance.debug(f"[LIFECYCLE] Request {pooled_req_state.request_id} enqueued to pending pool. "
+                                        f"max_tokens={pooled_req_state.effective_max_tokens}, "
+                                        f"signature={pooled_req_state.pool_signature}")
                     queue.task_done() # Signal that this item from main queue is taken
             except asyncio.QueueEmpty:
                 pass # No new requests in the main queue right now
@@ -617,7 +626,9 @@ async def batch_processing_loop(
                 if available_signatures:
                     active_pool_signature = available_signatures[0] # Pick one
                     active_pool_requests = pending_requests_by_signature.pop(active_pool_signature)
-                    logger_instance.info(f"Activated new pool with signature: {active_pool_signature}. Size: {len(active_pool_requests)}")
+                    logger_instance.info(f"[LIFECYCLE] Activated new pool with signature: {active_pool_signature}. Size: {len(active_pool_requests)}")
+                    for req in active_pool_requests:
+                        logger_instance.debug(f"[LIFECYCLE] Request {req.request_id} moved to active pool")
             
             # 3. Merge new matching requests into the active pool
             if active_pool_signature and active_pool_signature in pending_requests_by_signature:
@@ -680,8 +691,15 @@ async def batch_processing_loop(
                         for req in sub_batch_to_process
                     )
                     
+                    # Log token calculations
+                    logger_instance.debug(f"[CHUNK_CALC] Calculating chunk size for {len(sub_batch_to_process)} requests:")
+                    for req in sub_batch_to_process:
+                        tokens_left = req.effective_max_tokens - req.generated_token_count
+                        logger_instance.debug(f"[CHUNK_CALC]   Request {req.request_id}: {req.generated_token_count}/{req.effective_max_tokens} tokens, {tokens_left} remaining")
+                    
                     # Limit chunk size to available room
                     chunk_size = min(script_args.token_chunk_size, min_tokens_remaining)
+                    logger_instance.debug(f"[CHUNK_CALC] Final chunk size: {chunk_size} (configured: {script_args.token_chunk_size}, min_remaining: {min_tokens_remaining})")
                     
                     # CRITICAL: Ensure chunk_size is at least 1 to avoid vLLM issues
                     if chunk_size <= 0:
@@ -922,7 +940,24 @@ async def batch_processing_loop(
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
-                                req_state.finish_reason = completion_output.finish_reason
+                                
+                                # Store vLLM's finish reason but we'll interpret it carefully
+                                vllm_finish_reason = completion_output.finish_reason
+                                logger_instance.debug(f"[VLLM_RESPONSE] Request {req_state.request_id}: vLLM returned {new_token_count} tokens, finish_reason={vllm_finish_reason}")
+                                
+                                # Only update our finish_reason if it's meaningful
+                                if vllm_finish_reason == "length":
+                                    # vLLM hit the chunk limit - only set our finish_reason if we're at our actual limit
+                                    if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                        req_state.finish_reason = "length"
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='length' - hit actual limit")
+                                    else:
+                                        # Don't set finish_reason - we can continue generating
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Ignoring vLLM's finish_reason='length' - only at chunk limit")
+                                elif vllm_finish_reason is not None:
+                                    # Other finish reasons (stop, eos_token, etc.) are real completions
+                                    req_state.finish_reason = vllm_finish_reason
+                                    logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='{vllm_finish_reason}' from vLLM")
                                 
                                 # Log detailed state for debugging
                                 logger_instance.debug(f"Request {req_state.request_id} chunk result: "
@@ -931,11 +966,10 @@ async def batch_processing_loop(
                                 
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
-                                    # Incomplete chunk means generation has stopped
-                                    if req_state.finish_reason is None:
-                                        # Only set finish reason if vLLM didn't provide one
-                                        req_state.finish_reason = "length"
-                                    logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
+                                    # Incomplete chunk - log but don't force completion unless vLLM said so
+                                    logger_instance.debug(f"Request {req_state.request_id} generated incomplete chunk. "
+                                                        f"Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, "
+                                                        f"total: {req_state.generated_token_count}, finish_reason: {req_state.finish_reason}")
                                 
                                 # Log current state
                                 logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
@@ -967,7 +1001,24 @@ async def batch_processing_loop(
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
-                                req_state.finish_reason = completion_output.finish_reason
+                                
+                                # Store vLLM's finish reason but we'll interpret it carefully
+                                vllm_finish_reason = completion_output.finish_reason
+                                logger_instance.debug(f"[VLLM_RESPONSE] Request {req_state.request_id}: vLLM returned {new_token_count} tokens, finish_reason={vllm_finish_reason}")
+                                
+                                # Only update our finish_reason if it's meaningful
+                                if vllm_finish_reason == "length":
+                                    # vLLM hit the chunk limit - only set our finish_reason if we're at our actual limit
+                                    if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                        req_state.finish_reason = "length"
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='length' - hit actual limit")
+                                    else:
+                                        # Don't set finish_reason - we can continue generating
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Ignoring vLLM's finish_reason='length' - only at chunk limit")
+                                elif vllm_finish_reason is not None:
+                                    # Other finish reasons (stop, eos_token, etc.) are real completions
+                                    req_state.finish_reason = vllm_finish_reason
+                                    logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='{vllm_finish_reason}' from vLLM")
                                 
                                 # Log detailed state for debugging
                                 logger_instance.debug(f"Request {req_state.request_id} chunk result: "
@@ -976,11 +1027,10 @@ async def batch_processing_loop(
                                 
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
-                                    # Incomplete chunk means generation has stopped
-                                    if req_state.finish_reason is None:
-                                        # Only set finish reason if vLLM didn't provide one
-                                        req_state.finish_reason = "length"
-                                    logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
+                                    # Incomplete chunk - log but don't force completion unless vLLM said so
+                                    logger_instance.debug(f"Request {req_state.request_id} generated incomplete chunk. "
+                                                        f"Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, "
+                                                        f"total: {req_state.generated_token_count}, finish_reason: {req_state.finish_reason}")
                                 
                                 # Log current state
                                 logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
@@ -1002,14 +1052,19 @@ async def batch_processing_loop(
                             continue
 
                         # req_state is from the current sub_batch. Check its status.
+                        logger_instance.debug(f"[COMPLETION_CHECK] Checking request {req_state.request_id}: "
+                                            f"generated={req_state.generated_token_count}/{req_state.effective_max_tokens}, "
+                                            f"finish_reason={req_state.finish_reason}, is_complete={req_state.is_complete}")
+                        
                         if req_state.is_complete and not req_state.completed_and_signaled:
                             # Request is complete but not yet signaled
                             completed_in_sub_batch.append(req_state)
-                            logger_instance.debug(f"Request {req_state.request_id} is complete and will be finalized")
+                            logger_instance.info(f"[LIFECYCLE] Request {req_state.request_id} is complete and will be finalized. "
+                                               f"Generated {req_state.generated_token_count} tokens, finish_reason={req_state.finish_reason}")
                         elif not req_state.is_complete:
                             # Request is not complete, keep for next chunk
                             updated_active_pool.append(req_state)
-                            logger_instance.debug(f"Request {req_state.request_id} is not complete, keeping for next chunk")
+                            logger_instance.debug(f"[LIFECYCLE] Request {req_state.request_id} is not complete, keeping for next chunk")
                         # If already signaled (completed_and_signaled is True), don't re-add or re-signal
                     
                     active_pool_requests = updated_active_pool
@@ -1257,9 +1312,13 @@ def main(script_args: ScriptArguments):
             effective_max_tokens=effective_max_tokens,
             original_chat_messages=req.messages, # Store original messages
         )
+        
+        logger.info(f"[LIFECYCLE] Created chat request {request_id}: max_tokens={effective_max_tokens}, "
+                   f"messages={len(req.messages)}, model={req.model}")
 
         try:
             await request_queue.put(pooled_state)
+            logger.debug(f"[LIFECYCLE] Request {request_id} successfully queued")
         except Exception as e:
             logger.error(f"Enqueueing error for {request_id}: {e}", exc_info=True)
             return JSONResponse(status_code=500, content={"error": "Internal server error while queueing request."})
