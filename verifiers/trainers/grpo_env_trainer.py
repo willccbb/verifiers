@@ -512,7 +512,7 @@ class GRPOEnvTrainer(Trainer):
                 
                 # Use batch update for PEFT model
                 wrapper = PEFTModelWrapper(self.model)
-                self.vllm_client.batch_update_model_params(wrapper, batch_size=50)
+                self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
                 
                 self.model.unmerge_adapter() # type: ignore
         else:
@@ -538,10 +538,10 @@ class GRPOEnvTrainer(Trainer):
                             yield name, dummy_param
                 
                 wrapper = ZeRO3ModelWrapper(self.model, gather_if_zero3)
-                self.vllm_client.batch_update_model_params(wrapper, batch_size=50)
+                self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
             else:
                 # Regular model without ZeRO-3
-                self.vllm_client.batch_update_model_params(self.model, batch_size=50)  # type: ignore
+                self.vllm_client.batch_update_model_params(self.model, batch_size=10)  # type: ignore
 
         # Reset cache on vLLM
         print(f"[TRAINER] Resetting vLLM prefix cache")

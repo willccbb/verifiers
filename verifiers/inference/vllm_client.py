@@ -207,7 +207,12 @@ class VLLMClient(OpenAI):
     def batch_update_model_params(self, model: nn.Module, batch_size: int = 50):
         """
         Updates all parameters of the given model in batches to reduce overhead and prevent overwhelming the server.
-
+        
+        This method coordinates with the server to ensure proper NCCL synchronization:
+        1. Send batch of parameter metadata to server
+        2. Server notifies workers for each parameter
+        3. Client broadcasts each parameter via NCCL after server confirmation
+        
         Args:
             model (`nn.Module`):
                 Model whose parameters (weights/biases) are to be updated.
@@ -215,37 +220,44 @@ class VLLMClient(OpenAI):
                 Number of parameters to update in each batch.
         """
         # Collect all parameters
-        param_updates = []
-        param_tensors = []
+        all_params = list(model.named_parameters())
+        total_params = len(all_params)
         
-        for name, param in model.named_parameters():
-            param_updates.append({
-                "name": name,
-                "dtype": str(param.data.dtype),
-                "shape": list(param.data.shape)
-            })
-            param_tensors.append((name, param.data))
-        
-        logger.info(f"[VLLM_CLIENT] Starting batch update of {len(param_updates)} parameters in batches of {batch_size}")
+        logger.info(f"[VLLM_CLIENT] Starting batch update of {total_params} parameters in batches of {batch_size}")
         
         # Process in batches
-        for i in range(0, len(param_updates), batch_size):
-            batch_updates = param_updates[i:i + batch_size]
-            batch_tensors = param_tensors[i:i + batch_size]
+        for batch_idx, i in enumerate(range(0, total_params, batch_size)):
+            batch_params = all_params[i:i + batch_size]
+            
+            # Prepare batch update request
+            batch_updates = []
+            for name, param in batch_params:
+                batch_updates.append({
+                    "name": name,
+                    "dtype": str(param.data.dtype),
+                    "shape": list(param.data.shape)
+                })
             
             # Send batch update request
             url = f"http://{self.host}:{self.server_port}/batch_update_named_params/"
-            logger.debug(f"[VLLM_CLIENT] Sending batch {i//batch_size + 1} with {len(batch_updates)} parameters")
+            logger.debug(f"[VLLM_CLIENT] Sending batch {batch_idx + 1} with {len(batch_updates)} parameters")
             
             try:
                 response = self.session.post(url, json={"updates": batch_updates}, timeout=600.0)
                 if response.status_code not in [200, 207]:  # 207 is Multi-Status
                     raise Exception(f"Batch request failed: {response.status_code}, {response.text}")
                     
+                result = response.json()
+                
                 # Check for partial failures
                 if response.status_code == 207:
-                    result = response.json()
                     logger.warning(f"[VLLM_CLIENT] Batch had errors: {result.get('errors', [])}")
+                
+                # Get list of successfully notified parameters
+                successful_params = result.get('successful', [])
+                if not successful_params:
+                    logger.error(f"[VLLM_CLIENT] No successful parameters in batch response")
+                    continue
                     
             except requests.exceptions.Timeout:
                 logger.error(f"[VLLM_CLIENT] Timeout waiting for batch response after 600s")
@@ -254,15 +266,25 @@ class VLLMClient(OpenAI):
                 logger.error(f"[VLLM_CLIENT] Error sending batch request: {e}")
                 raise
             
-            # Broadcast weights for this batch via NCCL
-            logger.debug(f"[VLLM_CLIENT] Broadcasting weights for batch {i//batch_size + 1}")
-            for name, weights in batch_tensors:
-                self.pynccl_comm.broadcast(weights, src=self.rank)
-                self.pynccl_comm.group.barrier()
+            # Now broadcast weights for successfully notified parameters
+            logger.debug(f"[VLLM_CLIENT] Broadcasting weights for {len(successful_params)} parameters in batch {batch_idx + 1}")
             
-            logger.debug(f"[VLLM_CLIENT] Completed batch {i//batch_size + 1}")
+            for name, param in batch_params:
+                if name in successful_params:
+                    try:
+                        # Broadcast this specific parameter
+                        self.pynccl_comm.broadcast(param.data, src=self.rank)
+                        self.pynccl_comm.group.barrier()
+                        logger.debug(f"[VLLM_CLIENT] Broadcast complete for {name}")
+                    except Exception as e:
+                        logger.error(f"[VLLM_CLIENT] Failed to broadcast {name}: {e}")
+                        raise
+                else:
+                    logger.warning(f"[VLLM_CLIENT] Skipping broadcast for {name} - not in successful list")
+            
+            logger.debug(f"[VLLM_CLIENT] Completed batch {batch_idx + 1}")
         
-        logger.info(f"[VLLM_CLIENT] Batch update complete for {len(param_updates)} parameters")
+        logger.info(f"[VLLM_CLIENT] Batch update complete for {total_params} parameters")
 
     def reset_prefix_cache(self):
         """
