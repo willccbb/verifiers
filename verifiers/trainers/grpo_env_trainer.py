@@ -296,9 +296,13 @@ class GRPOEnvTrainer(Trainer):
         # Only initialize communicator on the main process
         # Other processes will only use the client for non-NCCL operations
         if self.accelerator.is_main_process:
+            # Log NCCL environment variables for debugging
+            nccl_vars = {k: v for k, v in os.environ.items() if k.startswith('NCCL')}
+            if nccl_vars:
+                print(f"[TRAINER] NCCL environment variables: {nccl_vars}")
             self.vllm_client.init_communicator()
         
-        self._last_loaded_step = -1  # tag to avoid useless loading during grad accumulation
+        self._last_loaded_step = 0  # Initialize to 0 since vLLM already has initial weights
         self.model_accepts_loss_kwargs = False 
         # When using vLLM, the main process is responsible for loading the model weights. This can cause process
         # desynchronization and seems to lead to DeepSpeed hanging during initialization. To prevent this, we
@@ -1133,7 +1137,8 @@ class GRPOEnvTrainer(Trainer):
     def training_step(self, model, inputs, num_items_in_batch=None):
         """Override training_step to ensure async generation is properly managed"""
         # Sync model weights to vLLM if needed
-        if self._last_loaded_step != self.state.global_step:
+        # Skip step 0 since vLLM already has the initial weights
+        if self.state.global_step > 0 and self._last_loaded_step != self.state.global_step:
             print(f"[TRAINER] Syncing weights to vLLM at step {self.state.global_step} (last loaded: {self._last_loaded_step})")
             self._move_model_to_vllm()
             self._last_loaded_step = self.state.global_step

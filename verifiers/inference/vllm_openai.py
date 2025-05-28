@@ -1202,25 +1202,43 @@ def main(script_args: ScriptArguments):
                 - `port` (`int`): Port number to be used for communication.
                 - `world_size` (`int`): Total number of participating processes in the group.
         """
-        logger.debug(f"[INIT_COMMUNICATOR] Received request: host={request.host}, port={request.port}, world_size={request.world_size}")
-        world_size = script_args.tensor_parallel_size * script_args.data_parallel_size + 1
+        logger.info(f"[INIT_COMMUNICATOR] Received request: host={request.host}, port={request.port}, world_size={request.world_size}")
+        
+        # Calculate actual world size based on vLLM configuration
+        vllm_world_size = script_args.tensor_parallel_size * script_args.data_parallel_size
+        expected_world_size = vllm_world_size + 1  # +1 for the client
+        
+        logger.info(f"[INIT_COMMUNICATOR] vLLM world size: {vllm_world_size} (TP={script_args.tensor_parallel_size} x DP={script_args.data_parallel_size})")
+        logger.info(f"[INIT_COMMUNICATOR] Expected total world size: {expected_world_size}")
+        
+        if request.world_size != expected_world_size:
+            logger.warning(f"[INIT_COMMUNICATOR] World size mismatch! Request: {request.world_size}, Expected: {expected_world_size}")
 
         # The function init_communicator is called this way: init_communicator(host, port, world_size)
         # So with collective_rpc we need to call it this way:
         # llm.collective_rpc(method="init_communicator", args=(host, port, world_size))
-        kwargs = {"method": "init_communicator", "args": (request.host, request.port, world_size)}
+        kwargs = {"method": "init_communicator", "args": (request.host, request.port, expected_world_size)}
         
         # Send to all workers synchronously to ensure they're ready
+        successful_workers = []
+        failed_workers = []
+        
         for i, connection in enumerate(connections):
             logger.debug(f"[INIT_COMMUNICATOR] Sending to worker {i}")
             try:
                 connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
+                successful_workers.append(i)
             except Exception as e:
                 logger.error(f"[INIT_COMMUNICATOR] Failed to notify worker {i}: {e}")
-                return JSONResponse(status_code=500, content={"error": f"Failed to notify worker {i}: {str(e)}"})
+                failed_workers.append((i, str(e)))
 
-        logger.debug(f"[INIT_COMMUNICATOR] Initialization complete")
-        return {"message": "Request received, initializing communicator"}
+        if failed_workers:
+            error_msg = f"Failed to notify workers: {failed_workers}"
+            logger.error(f"[INIT_COMMUNICATOR] {error_msg}")
+            return JSONResponse(status_code=500, content={"error": error_msg})
+
+        logger.info(f"[INIT_COMMUNICATOR] Successfully notified {len(successful_workers)} workers")
+        return {"message": "Request received, initializing communicator", "workers_notified": len(successful_workers)}
 
     class UpdateWeightsRequest(BaseModel):
         name: str
