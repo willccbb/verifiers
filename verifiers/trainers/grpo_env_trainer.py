@@ -477,7 +477,6 @@ class GRPOEnvTrainer(Trainer):
         zero_stage_3 = deepspeed_plugin is not None and deepspeed_plugin.zero_stage == 3
         if zero_stage_3:
             import deepspeed
-
             gather_if_zero3 = deepspeed.zero.GatheredParameters
         else:
             gather_if_zero3 = nullcontext
@@ -485,93 +484,63 @@ class GRPOEnvTrainer(Trainer):
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
 
-        # Only the main process updates weights to vLLM
-        # This is because only the main process has initialized the NCCL communicator
-        if not self.accelerator.is_main_process:
-            # Non-main processes wait here while main process updates weights
-            self.accelerator.wait_for_everyone()
-            return
+        # Only main process does server communication
+        if self.accelerator.is_main_process:
+            print(f"[TRAINER] Starting weight update to vLLM")
+            # Debug: Check if we can reach the vLLM server
+            try:
+                print(f"[TRAINER] Testing vLLM server connection at {self.vllm_client.host}:{self.vllm_client.server_port}")
+                import requests
+                response = requests.get(f"http://{self.vllm_client.host}:{self.vllm_client.server_port}/health/", timeout=5)
+                print(f"[TRAINER] vLLM server health check: {response.status_code}")
+            except Exception as e:
+                print(f"[TRAINER] Failed to reach vLLM server: {e}")
 
-        print(f"[TRAINER] Starting weight update to vLLM")
-        update_start_time = time.time()
-        
-        # Debug: Check if we can reach the vLLM server
-        try:
-            print(f"[TRAINER] Testing vLLM server connection at {self.vllm_client.host}:{self.vllm_client.server_port}")
-            import requests
-            response = requests.get(f"http://{self.vllm_client.host}:{self.vllm_client.server_port}/health/", timeout=5)
-            print(f"[TRAINER] vLLM server health check: {response.status_code}")
-        except Exception as e:
-            print(f"[TRAINER] Failed to reach vLLM server: {e}")
-        
+        # ALL processes must participate in model operations for DeepSpeed ZeRO-3
         if is_peft_model(self.model):
-            # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging, as
-            # merging adapters in a sharded manner is not supported.
+            # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging
             with gather_if_zero3(list(self.model.parameters())):  # type: ignore
                 self.model.merge_adapter() # type: ignore
                 
-                # Create a temporary model wrapper for PEFT to handle parameter name mapping
-                class PEFTModelWrapper:
-                    def __init__(self, peft_model):
-                        self.peft_model = peft_model
+                # Update vLLM weights while parameters are gathered
+                # Create a list to collect all parameters on all processes
+                all_params = []
+                for name, param in self.model.named_parameters():
+                    # When using PEFT, we need to recover the original parameter name and discard some parameters
+                    name = name.removeprefix("base_model.model.").replace(".base_layer", "")
+                    if self.model.prefix in name:
+                        continue
+                    # When module to save, remove its prefix and discard the original module
+                    if "original_module" in name:
+                        continue
+                    name = name.replace("modules_to_save.default.", "")
+                    all_params.append((name, param.data))
+                
+                # Only main process sends to vLLM
+                if self.accelerator.is_main_process:
+                    print(f"[TRAINER] Sending {len(all_params)} parameters to vLLM")
+                    for name, param_data in all_params:
+                        self.vllm_client.update_named_param(name, param_data)
                     
-                    def named_parameters(self):
-                        for name, param in self.peft_model.named_parameters():
-                            # When using PEFT, we need to recover the original parameter name and discard some parameters
-                            name = name.removeprefix("base_model.model.").replace(".base_layer", "")
-                            if self.peft_model.prefix in name:
-                                continue
-                            # When module to save, remove its prefix and discard the original module
-                            if "original_module" in name:
-                                continue
-                            name = name.replace("modules_to_save.default.", "")
-                            yield name, param
-                
-                # Use batch update for PEFT model
-                wrapper = PEFTModelWrapper(self.model)
-                print(f"[TRAINER] Starting batch_update_model_params for PEFT model")
-                self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
-                print(f"[TRAINER] Completed batch_update_model_params for PEFT model")
-                
                 self.model.unmerge_adapter() # type: ignore
         else:
-            # For non-PEFT models, use batch update directly
-            # For DeepSpeed ZeRO-3, we need to gather parameters as we go
-            if zero_stage_3:
-                # Create a wrapper that gathers parameters on demand
-                class ZeRO3ModelWrapper:
-                    def __init__(self, model, gather_fn):
-                        self.model = model
-                        self.gather_fn = gather_fn
-                        # Pre-gather all parameters to avoid issues with the batch update
-                        self.gathered_params = []
-                        for name, param in model.named_parameters():
-                            with gather_fn([param]):
-                                # Clone the parameter to keep it after the context manager exits
-                                self.gathered_params.append((name, param.data.clone()))
-                    
-                    def named_parameters(self):
-                        for name, param_data in self.gathered_params:
-                            # Create a dummy parameter object for the batch update
-                            dummy_param = torch.nn.Parameter(param_data)
-                            yield name, dummy_param
-                
-                wrapper = ZeRO3ModelWrapper(self.model, gather_if_zero3)
-                print(f"[TRAINER] Starting batch_update_model_params for ZeRO-3 model")
-                self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
-                print(f"[TRAINER] Completed batch_update_model_params for ZeRO-3 model")
-            else:
-                # Regular model without ZeRO-3
-                print(f"[TRAINER] Starting batch_update_model_params for regular model")
-                self.vllm_client.batch_update_model_params(self.model, batch_size=10)  # type: ignore
-                print(f"[TRAINER] Completed batch_update_model_params for regular model")
+            # For non-PEFT models, gather and update each parameter individually
+            # ALL processes must iterate through parameters
+            param_count = 0
+            for name, param in self.model.named_parameters():
+                with gather_if_zero3([param]):
+                    if self.accelerator.is_main_process:
+                        self.vllm_client.update_named_param(name, param.data)
+                        param_count += 1
+            
+            if self.accelerator.is_main_process:
+                print(f"[TRAINER] Sent {param_count} parameters to vLLM")
 
-        # Reset cache on vLLM
-        print(f"[TRAINER] Resetting vLLM prefix cache")
-        self.vllm_client.reset_prefix_cache()
-        
-        update_duration = time.time() - update_start_time
-        print(f"[TRAINER] Weight update complete in {update_duration:.1f}s")
+        # Reset cache on vLLM (main process only)
+        if self.accelerator.is_main_process:
+            print(f"[TRAINER] Resetting vLLM prefix cache")
+            self.vllm_client.reset_prefix_cache()
+            print(f"[TRAINER] Weight update complete")
         
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
