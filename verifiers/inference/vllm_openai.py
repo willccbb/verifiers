@@ -28,6 +28,7 @@ from multiprocessing import Pipe, Process
 from multiprocessing.connection import Connection as MPConnection
 from typing import Any as AnyType
 from uuid import uuid4
+import traceback
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse 
@@ -430,6 +431,7 @@ class PooledRequestState:
     finish_reason: Optional[str] = None
     completed_and_signaled: bool = False
     timed_out: bool = False
+    small_chunk_count: int = 0  # Track consecutive small chunks to detect stuck generation
     
     @property
     def is_complete(self) -> bool:
@@ -564,11 +566,31 @@ def llm_worker(
         if command["type"] in ["call", "fire_and_forget"]:
             method_name = command["method"]
             args, kwargs = command.get("args", ()), command.get("kwargs", {})
-            method = getattr(llm, method_name)
-            result = method(*args, **kwargs)
-            if command["type"] == "call":
-                connection.send(result)
+            
+            # Add debugging
+            logger.debug(f"[WORKER {data_parallel_rank}] Received command: {method_name}")
+            
+            try:
+                method = getattr(llm, method_name)
+                logger.debug(f"[WORKER {data_parallel_rank}] Calling {method_name} with kwargs keys: {list(kwargs.keys()) if kwargs else 'none'}")
+                
+                # Call the method
+                result = method(*args, **kwargs)
+                
+                logger.debug(f"[WORKER {data_parallel_rank}] {method_name} completed, result type: {type(result)}")
+                
+                if command["type"] == "call":
+                    # Send result back
+                    logger.debug(f"[WORKER {data_parallel_rank}] Sending result back")
+                    connection.send(result)
+                    logger.debug(f"[WORKER {data_parallel_rank}] Result sent")
+            except Exception as e:
+                logger.error(f"[WORKER {data_parallel_rank}] Error in {method_name}: {e}", exc_info=True)
+                if command["type"] == "call":
+                    # Send error back as a special result
+                    connection.send({"error": str(e), "traceback": traceback.format_exc()})
         elif command["type"] == "shutdown":
+            logger.info(f"[WORKER {data_parallel_rank}] Received shutdown command")
             break
 
 
@@ -994,11 +1016,15 @@ async def batch_processing_loop(
                                     logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Last chunk ({new_token_count} tokens): {repr(new_text_chunk[:100])}{'...' if len(new_text_chunk) > 100 else ''}")
                                 
                                 # Check if generation has stopped
-                                if new_token_count < script_args.token_chunk_size:
-                                    # Incomplete chunk - log but don't force completion unless vLLM said so
-                                    logger_instance.debug(f"Request {req_state.request_id} generated incomplete chunk. "
-                                                        f"Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, "
-                                                        f"total: {req_state.generated_token_count}, finish_reason: {req_state.finish_reason}")
+                                if new_token_count < chunk_size:
+                                    # Incomplete chunk indicates generation should stop
+                                    logger_instance.info(f"Request {req_state.request_id} generated incomplete chunk. "
+                                                        f"Generated {new_token_count}/{chunk_size} tokens in chunk. "
+                                                        f"Marking as complete to prevent doom loop.")
+                                    # Set finish reason if not already set by vLLM
+                                    if req_state.finish_reason is None:
+                                        req_state.finish_reason = "stop"  # Generation naturally stopped
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='stop' due to incomplete chunk")
                                 
                                 # Log current state
                                 logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
@@ -1066,11 +1092,15 @@ async def batch_processing_loop(
                                     logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Last chunk ({new_token_count} tokens): {repr(new_text_chunk[:100])}{'...' if len(new_text_chunk) > 100 else ''}")
                                 
                                 # Check if generation has stopped
-                                if new_token_count < script_args.token_chunk_size:
-                                    # Incomplete chunk - log but don't force completion unless vLLM said so
-                                    logger_instance.debug(f"Request {req_state.request_id} generated incomplete chunk. "
-                                                        f"Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, "
-                                                        f"total: {req_state.generated_token_count}, finish_reason: {req_state.finish_reason}")
+                                if new_token_count < chunk_size:
+                                    # Incomplete chunk indicates generation should stop
+                                    logger_instance.info(f"Request {req_state.request_id} generated incomplete chunk. "
+                                                        f"Generated {new_token_count}/{chunk_size} tokens in chunk. "
+                                                        f"Marking as complete to prevent doom loop.")
+                                    # Set finish reason if not already set by vLLM
+                                    if req_state.finish_reason is None:
+                                        req_state.finish_reason = "stop"  # Generation naturally stopped
+                                        logger_instance.debug(f"[FINISH_REASON] Request {req_state.request_id}: Setting finish_reason='stop' due to incomplete chunk")
                                 
                                 # Log current state
                                 logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
