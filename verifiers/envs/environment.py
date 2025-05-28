@@ -156,30 +156,45 @@ class Environment(ABC):
         Get model response for a given prompt (chat or completion).
         
         Convenience function for wrapping (chat, completion) API calls.
+        Returns special error messages for context length issues.
         """
         if sanitize_sampling_args:
             sanitized_args = self.sanitize_sampling_args(client, sampling_args)
         else:
             sanitized_args = sampling_args
         if message_type is None:
-            message_type = self.message_type #
+            message_type = self.message_type
 
-        if message_type == 'chat':
-            assert isinstance(prompt, list)
-            response = client.chat.completions.create(
-                model=model,
-                messages=prompt, # type: ignore
-                **sanitized_args
-            )
-            return response.choices[0].message.content # type: ignore
-        elif message_type == 'completion':
-            assert isinstance(prompt, str)
-            response: str = client.completions.create(
-                model=model,
-                prompt=prompt,
-                **sanitized_args
-            )
-            return response.choices[0].text # type: ignore
+        try:
+            if message_type == 'chat':
+                assert isinstance(prompt, list)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=prompt, # type: ignore
+                    **sanitized_args
+                )
+                # Check if generation was truncated due to max_tokens
+                if response.choices[0].finish_reason == 'length':
+                    return "[ERROR] max_tokens_reached"
+                return response.choices[0].message.content # type: ignore
+            elif message_type == 'completion':
+                assert isinstance(prompt, str)
+                response = client.completions.create(
+                    model=model,
+                    prompt=prompt,
+                    **sanitized_args
+                )
+                # Check if generation was truncated due to max_tokens
+                if response.choices[0].finish_reason == 'length':
+                    return "[ERROR] max_tokens_reached"
+                return response.choices[0].text # type: ignore
+        except Exception as e:
+            # Check for prompt too long errors
+            error_msg = str(e)
+            if "longer than the maximum" in error_msg or "exceeds the model" in error_msg:
+                return "[ERROR] prompt_too_long"
+            # Re-raise other errors
+            raise
 
     @abstractmethod
     def rollout(self,

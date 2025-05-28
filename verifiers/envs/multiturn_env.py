@@ -52,10 +52,11 @@ class MultiTurnEnv(Environment):
                 sampling_args=sampling_args,
                 message_type=self.message_type
             )
+            has_error = response.startswith("[ERROR]")
             messages.append({"role": "assistant", "content": response})
             completion.append({"role": "assistant", "content": response})
             turn += 1
-            if self.is_completed(messages, state, **kwargs) or turn >= self.max_turns:
+            if self.is_completed(messages, state, **kwargs) or turn >= self.max_turns or has_error:
                 is_completed = True
             else:
                 env_msg, state = self.env_response(messages, state, **kwargs)
