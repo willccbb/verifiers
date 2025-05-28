@@ -600,20 +600,86 @@ class GRPOEnvTrainer(Trainer):
         return result
 
     def _handle_async_generation(self, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
-        """Handle async generation for training"""
-        # Only main process handles async generation
+        """Handle async generation for training with proper look-ahead"""
+        
+        # Initialize async generator on first use (main process only)
+        if self.accelerator.is_main_process and not self._async_started and self.async_generator is not None:
+            self.async_generator.start()
+            self._async_started = True
+        
+        # On first call or when we need more batches, submit multiple batches for look-ahead
+        if self._next_batch_id == 0 or (self.accelerator.is_main_process and self.async_generator and 
+                                        self.async_generator.get_pending_count() < 2):
+            # Submit current batch first
+            prompts = [x['prompt'] for x in generation_batch]
+            answers = [x['answer'] for x in generation_batch]
+            tasks = [x.get('task', 'default') for x in generation_batch]
+            
+            # All processes must participate in gather
+            all_prompts = gather_object(prompts)
+            all_answers = gather_object(answers)
+            all_tasks = gather_object(tasks)
+            
+            if self.accelerator.is_main_process:
+                assert self.async_generator is not None  # Type assertion
+                request = BatchRequest(
+                    batch_id=self._next_batch_id,
+                    env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                    processing_class=self.processing_class,
+                    mask_env_responses=self.mask_env_responses,
+                    max_concurrent=self.max_concurrent,
+                    device=self.accelerator.device,
+                    accelerator=self.accelerator,
+                    process_index=self.accelerator.process_index,
+                    num_processes=self.accelerator.num_processes,
+                    local_batch_size=len(generation_batch),
+                )
+                self.async_generator.submit_batch(request)
+            
+            # Submit additional future batches for look-ahead
+            if hasattr(self, '_async_dataloader'):
+                num_future_batches = min(2, self.async_generator.num_steps_ahead - 1) if self.accelerator.is_main_process and self.async_generator else 0
+                
+                for i in range(num_future_batches):
+                    # Get future batches from async dataloader (available on all processes)
+                    future_batches = self._async_dataloader.peek_ahead(i + 1)
+                    if not future_batches or len(future_batches) <= i:
+                        break
+                    
+                    future_batch = future_batches[i]
+                    if isinstance(future_batch, dict):
+                        future_batch = [future_batch]
+                    
+                    # Extract data
+                    future_prompts = [x['prompt'] for x in future_batch]
+                    future_answers = [x['answer'] for x in future_batch]
+                    future_tasks = [x.get('task', 'default') for x in future_batch]
+                    
+                    # All processes gather
+                    all_future_prompts = gather_object(future_prompts)
+                    all_future_answers = gather_object(future_answers)
+                    all_future_tasks = gather_object(future_tasks)
+                    
+                    if self.accelerator.is_main_process:
+                        assert self.async_generator is not None  # Type assertion
+                        future_request = BatchRequest(
+                            batch_id=self._next_batch_id + i + 1,
+                            env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
+                            processing_class=self.processing_class,
+                            mask_env_responses=self.mask_env_responses,
+                            max_concurrent=self.max_concurrent,
+                            device=self.accelerator.device,
+                            accelerator=self.accelerator,
+                            process_index=self.accelerator.process_index,
+                            num_processes=self.accelerator.num_processes,
+                            local_batch_size=len(future_batch),
+                        )
+                        self.async_generator.submit_batch(future_request)
+        
+        # Get result for current batch
         batch_result = None
         if self.accelerator.is_main_process:
-            # Start async generator if not started
-            if not self._async_started and self.async_generator is not None:
-                self.async_generator.start()
-                self._async_started = True
-                # Submit initial batches
-                for _ in range(min(self.async_generator.num_steps_ahead, 3)):  # Pre-submit up to 3 batches
-                    self._submit_next_batch_async()
-            
-            # Get the current batch result
-            assert self.async_generator is not None  # Type assertion for linter
+            assert self.async_generator is not None
             batch_result = self.async_generator.get_batch(self._next_batch_id)
             if batch_result.error:
                 raise RuntimeError(f"Async generation failed for batch {self._next_batch_id}: {batch_result.error}")
@@ -629,59 +695,10 @@ class GRPOEnvTrainer(Trainer):
         # Process the result
         processed_batch = self._process_async_result(batch_result, generation_batch)
         
-        # Only main process increments batch ID and submits next batch
-        if self.accelerator.is_main_process:
-            self._next_batch_id += 1
-            self._submit_next_batch_async()
+        # Increment batch ID for next iteration
+        self._next_batch_id += 1
         
         return processed_batch
-    
-    def _submit_next_batch_async(self):
-        """Submit the next batch for async generation if needed"""
-        if not self.async_generator or not self.async_generator.should_submit_more():
-            return
-            
-        # Calculate which batch we need
-        pending_count = self.async_generator.get_pending_count()
-        completed_count = self.async_generator.get_completed_count()
-        batch_offset = pending_count + completed_count
-        
-        # Get future batches from the async dataloader
-        if hasattr(self, '_async_dataloader'):
-            future_batches = self._async_dataloader.get_future_batches(batch_offset, 1)
-            if not future_batches:
-                return  # No more batches available
-                
-            future_batch = future_batches[0]
-            
-            # Extract prompts and answers from the batch
-            prompts = [x['prompt'] for x in future_batch]
-            answers = [x['answer'] for x in future_batch]
-            tasks = [x.get('task', 'default') for x in future_batch]
-            
-            # Gather across all processes
-            all_prompts = gather_object(prompts)
-            all_answers = gather_object(answers)
-            all_tasks = gather_object(tasks)
-            
-            # Only main process submits the batch
-            if self.accelerator.is_main_process:
-                batch_id = self._next_batch_id + batch_offset
-                
-                request = BatchRequest(
-                    batch_id=batch_id,
-                    env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
-                    processing_class=self.processing_class,
-                    mask_env_responses=self.mask_env_responses,
-                    max_concurrent=self.max_concurrent,
-                    device=self.accelerator.device,
-                    accelerator=self.accelerator,
-                    process_index=self.accelerator.process_index,
-                    num_processes=self.accelerator.num_processes,
-                    local_batch_size=len(future_batch),
-                )
-                
-                self.async_generator.submit_batch(request)
 
     def _process_async_result(self, batch_result: BatchResult, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
         """Process async generation result and convert to expected format"""
