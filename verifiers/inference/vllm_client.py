@@ -128,21 +128,39 @@ class VLLMClient(OpenAI):
         """
         Initializes the weight update group in a distributed setup for model synchronization.
         """
+        logger.info(f"[VLLM_CLIENT] Starting init_communicator")
+        
         # Get the world size from the server
         url = f"http://{self.host}:{self.server_port}/get_world_size/"
-        response = requests.get(url)
+        logger.info(f"[VLLM_CLIENT] Getting world size from {url}")
+        try:
+            response = requests.get(url)
+            logger.info(f"[VLLM_CLIENT] World size response: status={response.status_code}")
+        except Exception as e:
+            logger.error(f"[VLLM_CLIENT] Failed to get world size: {e}")
+            raise
+            
         if response.status_code == 200:
             vllm_world_size = response.json()["world_size"]
+            logger.info(f"[VLLM_CLIENT] vLLM world size: {vllm_world_size}")
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
         world_size = vllm_world_size + 1  # add the client to the world
         self.rank = vllm_world_size  # the client's rank is the last process
+        logger.info(f"[VLLM_CLIENT] Client rank: {self.rank}, total world size: {world_size}")
 
         # Initialize weight update group
         url = f"http://{self.host}:{self.server_port}/init_communicator/"
+        logger.info(f"[VLLM_CLIENT] Sending init_communicator request to {url}")
         # In the server side, the host is set to 0.0.0.0
-        response = self.session.post(url, json={"host": "0.0.0.0", "port": self.group_port, "world_size": world_size})
+        try:
+            response = self.session.post(url, json={"host": "0.0.0.0", "port": self.group_port, "world_size": world_size})
+            logger.info(f"[VLLM_CLIENT] Init communicator response: status={response.status_code}")
+        except Exception as e:
+            logger.error(f"[VLLM_CLIENT] Failed to init communicator: {e}")
+            raise
+            
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
@@ -153,8 +171,8 @@ class VLLMClient(OpenAI):
 
         # Set up the communication group for weight broadcasting
         pg = StatelessProcessGroup.create(host=self.host, port=self.group_port, rank=self.rank, world_size=world_size)
-        # Use current CUDA device if available, otherwise default to 0
-        device = torch.cuda.current_device() if torch.cuda.is_available() else 0
+        # Use device 0 like the old code - this seems to work better for multi-GPU setups
+        device = 0
         logger.info(f"[VLLM_CLIENT] Initializing PyNcclCommunicator on device {device}, rank {self.rank}, world_size {world_size}")
         self.pynccl_comm = PyNcclCommunicator(pg, device=device)
 

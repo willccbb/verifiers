@@ -34,13 +34,18 @@ vf_env = vf.SingleTurnEnv(
     parser=parser,
     rubric=rubric
 )
+args = vf.grpo_defaults(run_name='reverse_text_warmup')
+args.num_iterations = 2
+args.per_device_train_batch_size = 8
+args.num_generations = 8
+args.gradient_accumulation_steps = 2
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOEnvTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
-    peft_config=vf.lora_defaults(),
-    args=vf.grpo_defaults(run_name='reverse_text_warmup')
+    #peft_config=vf.lora_defaults(),
+    args=args
 )
 trainer.train()
