@@ -719,20 +719,30 @@ async def batch_processing_loop(
                                 completion_output = request_output.outputs[0]
                                 new_text_chunk = completion_output.text
                                 req_state.accumulated_content += new_text_chunk
-                                req_state.generated_token_count += len(completion_output.token_ids)
+                                new_token_count = len(completion_output.token_ids)
+                                req_state.generated_token_count += new_token_count
                                 req_state.finish_reason = completion_output.finish_reason
                                 is_finished = False
-                                if req_state.finish_reason == "stop":
+                                
+                                # If we got fewer tokens than requested chunk size, generation is done
+                                if new_token_count < script_args.token_chunk_size:
                                     is_finished = True
-                                elif req_state.finish_reason == "length":
-                                    if req_state.generated_token_count >= req_state.effective_max_tokens:
-                                        is_finished = True
+                                    if req_state.finish_reason is None or req_state.finish_reason == "length":
+                                        # Set appropriate finish reason if not already set
+                                        if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                            req_state.finish_reason = "length"
+                                        else:
+                                            # vLLM stopped for some other reason (possibly internal limit)
+                                            req_state.finish_reason = "length"
+                                    logger_instance.debug(f"Request {req_state.request_id} finished due to incomplete chunk. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}")
+                                elif req_state.finish_reason == "stop":
+                                    is_finished = True
                                 elif req_state.finish_reason and req_state.finish_reason != "length":
                                     is_finished = True
-                                if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                elif req_state.generated_token_count >= req_state.effective_max_tokens:
                                     is_finished = True
-                                    if req_state.finish_reason != "stop":
-                                        req_state.finish_reason = "length"
+                                    req_state.finish_reason = "length"
+                                
                                 if is_finished:
                                     logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
                                 else:
@@ -761,20 +771,30 @@ async def batch_processing_loop(
                                 completion_output = request_output.outputs[0]
                                 new_text_chunk = completion_output.text
                                 req_state.accumulated_content += new_text_chunk
-                                req_state.generated_token_count += len(completion_output.token_ids)
+                                new_token_count = len(completion_output.token_ids)
+                                req_state.generated_token_count += new_token_count
                                 req_state.finish_reason = completion_output.finish_reason
                                 is_finished = False
-                                if req_state.finish_reason == "stop":
+                                
+                                # If we got fewer tokens than requested chunk size, generation is done
+                                if new_token_count < script_args.token_chunk_size:
                                     is_finished = True
-                                elif req_state.finish_reason == "length":
-                                    if req_state.generated_token_count >= req_state.effective_max_tokens:
-                                        is_finished = True
+                                    if req_state.finish_reason is None or req_state.finish_reason == "length":
+                                        # Set appropriate finish reason if not already set
+                                        if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                            req_state.finish_reason = "length"
+                                        else:
+                                            # vLLM stopped for some other reason (possibly internal limit)
+                                            req_state.finish_reason = "length"
+                                    logger_instance.debug(f"Request {req_state.request_id} finished due to incomplete chunk. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}")
+                                elif req_state.finish_reason == "stop":
+                                    is_finished = True
                                 elif req_state.finish_reason and req_state.finish_reason != "length":
                                     is_finished = True
-                                if req_state.generated_token_count >= req_state.effective_max_tokens:
+                                elif req_state.generated_token_count >= req_state.effective_max_tokens:
                                     is_finished = True
-                                    if req_state.finish_reason != "stop":
-                                        req_state.finish_reason = "length"
+                                    req_state.finish_reason = "length"
+                                
                                 if is_finished:
                                     logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
                                 else:
