@@ -803,6 +803,15 @@ async def batch_processing_loop(
                                     },
                                 }
                                 logger_instance.debug(f"Sending first-chunk chat request to LLM with {len(active_first_inputs)} messages")
+                                
+                                # Debug log for single-request pools
+                                if len(active_pool_requests) == 1 and active_first_inputs:
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Sending first-chunk request to vLLM:")
+                                    for msg_list in active_first_inputs[:1]:  # Just show first request
+                                        for i, msg in enumerate(msg_list):
+                                            content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+                                            logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   [{i}] {msg['role']}: {content_preview}")
+                                
                                 worker_idx = -1  # Initialize to avoid unbound variable
                                 try:
                                     worker_idx, worker_conn = await get_next_worker_connection(connections)
@@ -861,6 +870,15 @@ async def batch_processing_loop(
                                     },
                                 }
                                 logger_instance.debug(f"Sending continue-chunk chat request to LLM with {len(continue_chunk_inputs)} messages")
+                                
+                                # Debug log for single-request pools
+                                if len(active_pool_requests) == 1 and continue_chunk_inputs:
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Sending continuation request to vLLM:")
+                                    for msg_list in continue_chunk_inputs[:1]:  # Just show first request
+                                        for i, msg in enumerate(msg_list):
+                                            content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+                                            logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   [{i}] {msg['role']}: {content_preview}")
+                                
                                 worker_idx = -1  # Initialize to avoid unbound variable
                                 try:
                                     worker_idx, worker_conn = await get_next_worker_connection(connections)
@@ -964,6 +982,17 @@ async def batch_processing_loop(
                                                     f"new_tokens={new_token_count}, total_tokens={req_state.generated_token_count}, "
                                                     f"finish_reason={req_state.finish_reason}, chunk_text_len={len(new_text_chunk)}")
                                 
+                                # Special debug logging for single-request pools
+                                if len(active_pool_requests) == 1:
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Request {req_state.request_id} after chunk:")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Original messages:")
+                                    if req_state.original_chat_messages:
+                                        for i, msg in enumerate(req_state.original_chat_messages):
+                                            logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   [{i}] {msg.role}: {msg.content[:100]}{'...' if len(msg.content) > 100 else ''}")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Accumulated assistant response ({req_state.generated_token_count} tokens):")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   {req_state.accumulated_content[:500]}{'...' if len(req_state.accumulated_content) > 500 else ''}")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Last chunk ({new_token_count} tokens): {repr(new_text_chunk[:100])}{'...' if len(new_text_chunk) > 100 else ''}")
+                                
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
                                     # Incomplete chunk - log but don't force completion unless vLLM said so
@@ -1024,6 +1053,17 @@ async def batch_processing_loop(
                                 logger_instance.debug(f"Request {req_state.request_id} chunk result: "
                                                     f"new_tokens={new_token_count}, total_tokens={req_state.generated_token_count}, "
                                                     f"finish_reason={req_state.finish_reason}, chunk_text_len={len(new_text_chunk)}")
+                                
+                                # Special debug logging for single-request pools
+                                if len(active_pool_requests) == 1:
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Request {req_state.request_id} after chunk:")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Original messages:")
+                                    if req_state.original_chat_messages:
+                                        for i, msg in enumerate(req_state.original_chat_messages):
+                                            logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   [{i}] {msg.role}: {msg.content[:100]}{'...' if len(msg.content) > 100 else ''}")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Accumulated assistant response ({req_state.generated_token_count} tokens):")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG]   {req_state.accumulated_content[:500]}{'...' if len(req_state.accumulated_content) > 500 else ''}")
+                                    logger_instance.info(f"[SINGLE_REQUEST_DEBUG] Last chunk ({new_token_count} tokens): {repr(new_text_chunk[:100])}{'...' if len(new_text_chunk) > 100 else ''}")
                                 
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
