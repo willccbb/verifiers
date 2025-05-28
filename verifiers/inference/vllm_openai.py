@@ -561,11 +561,22 @@ async def batch_processing_loop(
                 # Take a sub-batch from the active pool
                 # If active_pool_requests is not empty, active_pool_signature must be set.
                 assert active_pool_signature is not None, "active_pool_signature cannot be None if active_pool_requests is populated"
-                sub_batch_to_process: list[PooledRequestState] = []
-                sub_batch_size = min(len(active_pool_requests), script_args.max_batch_size)
-                sub_batch_to_process = active_pool_requests[:sub_batch_size]
                 
-                if not sub_batch_to_process: # Should not happen if active_pool_requests was not empty
+                # Filter out already-completed requests before selecting sub-batch
+                available_requests = [req for req in active_pool_requests if not req.completed_and_signaled]
+                
+                if not available_requests:
+                    # All requests in active pool are already completed, clear the pool
+                    logger_instance.info(f"All requests in active pool {active_pool_signature} are already completed. Clearing pool.")
+                    active_pool_requests.clear()
+                    active_pool_signature = None
+                    continue
+                
+                sub_batch_to_process: list[PooledRequestState] = []
+                sub_batch_size = min(len(available_requests), script_args.max_batch_size)
+                sub_batch_to_process = available_requests[:sub_batch_size]
+                
+                if not sub_batch_to_process: # Should not happen if available_requests was not empty
                     await asyncio.sleep(0.01)
                     continue
 
@@ -830,8 +841,10 @@ async def batch_processing_loop(
                     
                     active_pool_requests = updated_active_pool
                     if not active_pool_requests:
+                        # Store signature before setting to None for logging
+                        deactivated_signature = active_pool_signature
                         active_pool_signature = None # Deactivate pool if empty
-                        logger_instance.info(f"Deactivated pool {active_pool_signature} as it is now empty.")
+                        logger_instance.info(f"Deactivated pool {deactivated_signature} as it is now empty.")
 
 
                     for req_state in completed_in_sub_batch:
