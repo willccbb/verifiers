@@ -204,6 +204,66 @@ class VLLMClient(OpenAI):
             # Update each parameter individually
             self.update_named_param(name, param.data)
 
+    def batch_update_model_params(self, model: nn.Module, batch_size: int = 50):
+        """
+        Updates all parameters of the given model in batches to reduce overhead and prevent overwhelming the server.
+
+        Args:
+            model (`nn.Module`):
+                Model whose parameters (weights/biases) are to be updated.
+            batch_size (`int`, *optional*, defaults to 50):
+                Number of parameters to update in each batch.
+        """
+        # Collect all parameters
+        param_updates = []
+        param_tensors = []
+        
+        for name, param in model.named_parameters():
+            param_updates.append({
+                "name": name,
+                "dtype": str(param.data.dtype),
+                "shape": list(param.data.shape)
+            })
+            param_tensors.append((name, param.data))
+        
+        logger.info(f"[VLLM_CLIENT] Starting batch update of {len(param_updates)} parameters in batches of {batch_size}")
+        
+        # Process in batches
+        for i in range(0, len(param_updates), batch_size):
+            batch_updates = param_updates[i:i + batch_size]
+            batch_tensors = param_tensors[i:i + batch_size]
+            
+            # Send batch update request
+            url = f"http://{self.host}:{self.server_port}/batch_update_named_params/"
+            logger.debug(f"[VLLM_CLIENT] Sending batch {i//batch_size + 1} with {len(batch_updates)} parameters")
+            
+            try:
+                response = self.session.post(url, json={"updates": batch_updates}, timeout=600.0)
+                if response.status_code not in [200, 207]:  # 207 is Multi-Status
+                    raise Exception(f"Batch request failed: {response.status_code}, {response.text}")
+                    
+                # Check for partial failures
+                if response.status_code == 207:
+                    result = response.json()
+                    logger.warning(f"[VLLM_CLIENT] Batch had errors: {result.get('errors', [])}")
+                    
+            except requests.exceptions.Timeout:
+                logger.error(f"[VLLM_CLIENT] Timeout waiting for batch response after 600s")
+                raise Exception(f"Batch request timeout after 600s")
+            except Exception as e:
+                logger.error(f"[VLLM_CLIENT] Error sending batch request: {e}")
+                raise
+            
+            # Broadcast weights for this batch via NCCL
+            logger.debug(f"[VLLM_CLIENT] Broadcasting weights for batch {i//batch_size + 1}")
+            for name, weights in batch_tensors:
+                self.pynccl_comm.broadcast(weights, src=self.rank)
+                self.pynccl_comm.group.barrier()
+            
+            logger.debug(f"[VLLM_CLIENT] Completed batch {i//batch_size + 1}")
+        
+        logger.info(f"[VLLM_CLIENT] Batch update complete for {len(param_updates)} parameters")
+
     def reset_prefix_cache(self):
         """
         Resets the prefix cache for the model.

@@ -484,18 +484,7 @@ class GRPOEnvTrainer(Trainer):
             self.accelerator.wait_for_everyone()
             return
 
-        # Count parameters to update
-        param_count = 0
-        if is_peft_model(self.model):
-            for name, param in self.model.named_parameters(): # type: ignore
-                name = name.removeprefix("base_model.model.").replace(".base_layer", "")
-                if self.model.prefix in name or "original_module" in name: # type: ignore
-                    continue
-                param_count += 1
-        else:
-            param_count = sum(1 for _ in self.model.named_parameters())
-        
-        print(f"[TRAINER] Starting weight update for {param_count} parameters")
+        print(f"[TRAINER] Starting weight update to vLLM")
         update_start_time = time.time()
         
         if is_peft_model(self.model):
@@ -503,46 +492,63 @@ class GRPOEnvTrainer(Trainer):
             # merging adapters in a sharded manner is not supported.
             with gather_if_zero3(list(self.model.parameters())):  # type: ignore
                 self.model.merge_adapter() # type: ignore
-
-                # DeepSpeed ZeRO-3 with PEFT
-                param_idx = 0
-                for name, param in self.model.named_parameters(): # type: ignore
-                    # When using PEFT, we need to recover the original parameter name and discard some parameters
-                    name = name.removeprefix("base_model.model.").replace(".base_layer", "")
-                    if self.model.prefix in name: # type: ignore
-                        continue
-                    # When module to save, remove its prefix and discard the original module
-                    if "original_module" in name:
-                        continue
-                    name = name.replace("modules_to_save.default.", "")
-
-                    param_idx += 1
-                    if param_idx % 50 == 0:
-                        print(f"[TRAINER] Updated {param_idx}/{param_count} parameters ({param_idx/param_count*100:.1f}%)")
-                    self.vllm_client.update_named_param(name, param.data)
-                    # Small delay to prevent overwhelming the synchronization mechanism
-                    if param_idx % 10 == 0:
-                        time.sleep(0.01)
+                
+                # Create a temporary model wrapper for PEFT to handle parameter name mapping
+                class PEFTModelWrapper:
+                    def __init__(self, peft_model):
+                        self.peft_model = peft_model
+                    
+                    def named_parameters(self):
+                        for name, param in self.peft_model.named_parameters():
+                            # When using PEFT, we need to recover the original parameter name and discard some parameters
+                            name = name.removeprefix("base_model.model.").replace(".base_layer", "")
+                            if self.peft_model.prefix in name:
+                                continue
+                            # When module to save, remove its prefix and discard the original module
+                            if "original_module" in name:
+                                continue
+                            name = name.replace("modules_to_save.default.", "")
+                            yield name, param
+                
+                # Use batch update for PEFT model
+                wrapper = PEFTModelWrapper(self.model)
+                self.vllm_client.batch_update_model_params(wrapper, batch_size=50)
+                
                 self.model.unmerge_adapter() # type: ignore
         else:
-            # For non-PEFT models, simply gather (if needed) and update each parameter individually.
-            param_idx = 0
-            for name, param in self.model.named_parameters(): # type: ignore
-                param_idx += 1
-                if param_idx % 50 == 0:
-                    print(f"[TRAINER] Updated {param_idx}/{param_count} parameters ({param_idx/param_count*100:.1f}%)")
-                with gather_if_zero3([param]):
-                    self.vllm_client.update_named_param(name, param.data)
-                # Small delay to prevent overwhelming the synchronization mechanism
-                if param_idx % 10 == 0:
-                    time.sleep(0.01)
+            # For non-PEFT models, use batch update directly
+            # For DeepSpeed ZeRO-3, we need to gather parameters as we go
+            if zero_stage_3:
+                # Create a wrapper that gathers parameters on demand
+                class ZeRO3ModelWrapper:
+                    def __init__(self, model, gather_fn):
+                        self.model = model
+                        self.gather_fn = gather_fn
+                        # Pre-gather all parameters to avoid issues with the batch update
+                        self.gathered_params = []
+                        for name, param in model.named_parameters():
+                            with gather_fn([param]):
+                                # Clone the parameter to keep it after the context manager exits
+                                self.gathered_params.append((name, param.data.clone()))
+                    
+                    def named_parameters(self):
+                        for name, param_data in self.gathered_params:
+                            # Create a dummy parameter object for the batch update
+                            dummy_param = torch.nn.Parameter(param_data)
+                            yield name, dummy_param
+                
+                wrapper = ZeRO3ModelWrapper(self.model, gather_if_zero3)
+                self.vllm_client.batch_update_model_params(wrapper, batch_size=50)
+            else:
+                # Regular model without ZeRO-3
+                self.vllm_client.batch_update_model_params(self.model, batch_size=50)  # type: ignore
 
         # Reset cache on vLLM
         print(f"[TRAINER] Resetting vLLM prefix cache")
         self.vllm_client.reset_prefix_cache()
         
         update_duration = time.time() - update_start_time
-        print(f"[TRAINER] Weight update complete. Updated {param_count} parameters in {update_duration:.1f}s ({param_count/update_duration:.1f} params/sec)")
+        print(f"[TRAINER] Weight update complete in {update_duration:.1f}s")
         
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
