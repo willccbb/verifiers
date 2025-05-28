@@ -346,7 +346,7 @@ class ScriptArguments:
         metadata={"help": "Maximum number of requests to process in one LLM call from the active pool."},
     )
     batch_request_timeout_seconds: int = field(
-        default=60,
+        default=300,
         metadata={"help": "Timeout in seconds for a single request waiting for its turn and completion."},
     )
     token_chunk_size: int = field(
