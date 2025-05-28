@@ -387,6 +387,23 @@ class PooledRequestState:
     completed_and_signaled: bool = False
     timed_out: bool = False
     generation_stopped: bool = False  # Track if generation stopped (incomplete chunk)
+    
+    @property
+    def is_complete(self) -> bool:
+        """Single source of truth for whether this request is complete and should not be processed further."""
+        if self.completed_and_signaled:
+            return True
+        if self.error is not None:
+            return True
+        if self.generation_stopped:
+            return True
+        if self.finish_reason == "stop":
+            return True
+        if self.finish_reason and self.finish_reason not in ["length", None]:
+            return True
+        if self.generated_token_count >= self.effective_max_tokens:
+            return True
+        return False
 
 pending_requests_by_signature: defaultdict[PoolSignature, list[PooledRequestState]] = defaultdict(list)
 active_pool_signature: Optional[PoolSignature] = None
@@ -564,7 +581,7 @@ async def batch_processing_loop(
                 assert active_pool_signature is not None, "active_pool_signature cannot be None if active_pool_requests is populated"
                 
                 # Filter out already-completed requests before selecting sub-batch
-                available_requests = [req for req in active_pool_requests if not req.completed_and_signaled]
+                available_requests = [req for req in active_pool_requests if not req.is_complete]
                 
                 if not available_requests:
                     # All requests in active pool are already completed, clear the pool
@@ -577,10 +594,6 @@ async def batch_processing_loop(
                 sub_batch_size = min(len(available_requests), script_args.max_batch_size)
                 sub_batch_to_process = available_requests[:sub_batch_size]
                 
-                if not sub_batch_to_process: # Should not happen if available_requests was not empty
-                    await asyncio.sleep(0.01)
-                    continue
-
                 logger_instance.debug(f"[BATCH_PROCESSOR] Processing sub-batch of {len(sub_batch_to_process)} for sig: {active_pool_signature}")
 
                 # Track active generation
@@ -659,7 +672,7 @@ async def batch_processing_loop(
                             active_first_states = []
                             active_first_inputs = []
                             for i, req_state in enumerate(first_chunk_states):
-                                if req_state.completed_and_signaled:
+                                if req_state.is_complete:
                                     logger_instance.debug(f"Skipping already-completed request {req_state.request_id} in first chunk processing")
                                     continue
                                 active_first_states.append(req_state)
@@ -688,7 +701,7 @@ async def batch_processing_loop(
                             # Filter out any already-completed requests
                             active_continue_states = []
                             for req_state in continue_chunk_states:
-                                if req_state.completed_and_signaled:
+                                if req_state.is_complete:
                                     logger_instance.debug(f"Skipping already-completed request {req_state.request_id} in continue chunk processing")
                                     continue
                                 active_continue_states.append(req_state)
@@ -761,12 +774,11 @@ async def batch_processing_loop(
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
                                 req_state.finish_reason = completion_output.finish_reason
-                                is_finished = False
                                 
-                                # If we got fewer tokens than requested chunk size, generation is done
+                                # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
-                                    is_finished = True
-                                    req_state.generation_stopped = True  # Mark that generation has stopped
+                                    # Incomplete chunk means generation has stopped
+                                    req_state.generation_stopped = True
                                     if req_state.finish_reason is None or req_state.finish_reason == "length":
                                         # Set appropriate finish reason if not already set
                                         if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -774,19 +786,10 @@ async def batch_processing_loop(
                                         else:
                                             # vLLM stopped for some other reason (possibly internal limit)
                                             req_state.finish_reason = "length"
-                                    logger_instance.debug(f"Request {req_state.request_id} finished due to incomplete chunk. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}")
-                                elif req_state.finish_reason == "stop":
-                                    is_finished = True
-                                elif req_state.finish_reason and req_state.finish_reason != "length":
-                                    is_finished = True
-                                elif req_state.generated_token_count >= req_state.effective_max_tokens:
-                                    is_finished = True
-                                    req_state.finish_reason = "length"
+                                    logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
                                 
-                                if is_finished:
-                                    logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
-                                else:
-                                    logger_instance.debug(f"Request {req_state.request_id} got chunk. New total tokens: {req_state.generated_token_count}. Reason: {req_state.finish_reason}")
+                                # Log current state
+                                logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
                     else:
                         # completion – unchanged
                         if len(llm_results) != len(processed_states):
@@ -814,12 +817,11 @@ async def batch_processing_loop(
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
                                 req_state.finish_reason = completion_output.finish_reason
-                                is_finished = False
                                 
-                                # If we got fewer tokens than requested chunk size, generation is done
+                                # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
-                                    is_finished = True
-                                    req_state.generation_stopped = True  # Mark that generation has stopped
+                                    # Incomplete chunk means generation has stopped
+                                    req_state.generation_stopped = True
                                     if req_state.finish_reason is None or req_state.finish_reason == "length":
                                         # Set appropriate finish reason if not already set
                                         if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -827,19 +829,10 @@ async def batch_processing_loop(
                                         else:
                                             # vLLM stopped for some other reason (possibly internal limit)
                                             req_state.finish_reason = "length"
-                                    logger_instance.debug(f"Request {req_state.request_id} finished due to incomplete chunk. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}")
-                                elif req_state.finish_reason == "stop":
-                                    is_finished = True
-                                elif req_state.finish_reason and req_state.finish_reason != "length":
-                                    is_finished = True
-                                elif req_state.generated_token_count >= req_state.effective_max_tokens:
-                                    is_finished = True
-                                    req_state.finish_reason = "length"
+                                    logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
                                 
-                                if is_finished:
-                                    logger_instance.debug(f"Request {req_state.request_id} finished. Reason: {req_state.finish_reason}. Total tokens: {req_state.generated_token_count}")
-                                else:
-                                    logger_instance.debug(f"Request {req_state.request_id} got chunk. New total tokens: {req_state.generated_token_count}. Reason: {req_state.finish_reason}")
+                                # Log current state
+                                logger_instance.debug(f"Request {req_state.request_id} chunk processed. Tokens in chunk: {new_token_count}, total: {req_state.generated_token_count}, is_complete: {req_state.is_complete}")
                     
                     # Now, handle all finished or errored requests from this sub_batch
                     # These need to be removed from active_pool_requests and have their events set.
@@ -858,22 +851,15 @@ async def batch_processing_loop(
                             continue
 
                         # req_state is from the current sub_batch. Check its status.
-                        is_definitely_finished = (req_state.finish_reason is not None and req_state.finish_reason != "length") or \
-                                                 (req_state.finish_reason == "length" and req_state.generated_token_count >= req_state.effective_max_tokens) or \
-                                                 (req_state.generated_token_count >= req_state.effective_max_tokens) or \
-                                                 (req_state.error is not None) or \
-                                                 req_state.generation_stopped  # Generation stopped due to incomplete chunk
-                        
-                        # Add detailed logging for debugging
-                        logger_instance.debug(f"Request {req_state.request_id} completion check: finish_reason={req_state.finish_reason}, "
-                                            f"generated={req_state.generated_token_count}, max={req_state.effective_max_tokens}, "
-                                            f"is_definitely_finished={is_definitely_finished}, completed_and_signaled={req_state.completed_and_signaled}")
-                        
-                        if is_definitely_finished and not req_state.completed_and_signaled:
+                        if req_state.is_complete and not req_state.completed_and_signaled:
+                            # Request is complete but not yet signaled
                             completed_in_sub_batch.append(req_state)
-                        elif not req_state.completed_and_signaled: # Not finished, and not yet signaled
-                            updated_active_pool.append(req_state) # Keep for next chunk
-                        # If already signaled (completed_and_signaled is True), it means it was handled (e.g. timeout), so don't re-add or re-signal.
+                            logger_instance.debug(f"Request {req_state.request_id} is complete and will be finalized")
+                        elif not req_state.is_complete:
+                            # Request is not complete, keep for next chunk
+                            updated_active_pool.append(req_state)
+                            logger_instance.debug(f"Request {req_state.request_id} is not complete, keeping for next chunk")
+                        # If already signaled (completed_and_signaled is True), don't re-add or re-signal
                     
                     active_pool_requests = updated_active_pool
                     if not active_pool_requests:
