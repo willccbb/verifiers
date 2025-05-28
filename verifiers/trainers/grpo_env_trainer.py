@@ -329,15 +329,17 @@ class GRPOEnvTrainer(Trainer):
         self._async_started = False
         
         if self.use_async_generation:
-            self.async_generator = AsyncBatchGenerator(
-                env=self.env,
-                client=self.oai_client,
-                model_name=self._get_model_name(),
-                sampling_args=self._get_sampling_args(),
-                num_steps_ahead=args.num_steps_async,
-                max_queue_size=args.async_max_queue_size,
-                generation_timeout=args.async_generation_timeout,
-            )
+            # Only create async generator on main process since only main process does generation
+            if self.accelerator.is_main_process:
+                self.async_generator = AsyncBatchGenerator(
+                    env=self.env,
+                    client=self.oai_client,
+                    model_name=self._get_model_name(),
+                    sampling_args=self._get_sampling_args(),
+                    num_steps_ahead=args.num_steps_async,
+                    max_queue_size=args.async_max_queue_size,
+                    generation_timeout=args.async_generation_timeout,
+                )
 
     def get_train_dataloader(self):
         if self.train_dataset is None:
@@ -599,25 +601,38 @@ class GRPOEnvTrainer(Trainer):
 
     def _handle_async_generation(self, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
         """Handle async generation for training"""
-        # Start async generator if not started
-        if not self._async_started and self.async_generator is not None:
-            self.async_generator.start()
-            self._async_started = True
-            # Submit initial batches
-            for _ in range(min(self.async_generator.num_steps_ahead, 3)):  # Pre-submit up to 3 batches
-                self._submit_next_batch_async()
+        # Only main process handles async generation
+        batch_result = None
+        if self.accelerator.is_main_process:
+            # Start async generator if not started
+            if not self._async_started and self.async_generator is not None:
+                self.async_generator.start()
+                self._async_started = True
+                # Submit initial batches
+                for _ in range(min(self.async_generator.num_steps_ahead, 3)):  # Pre-submit up to 3 batches
+                    self._submit_next_batch_async()
+            
+            # Get the current batch result
+            assert self.async_generator is not None  # Type assertion for linter
+            batch_result = self.async_generator.get_batch(self._next_batch_id)
+            if batch_result.error:
+                raise RuntimeError(f"Async generation failed for batch {self._next_batch_id}: {batch_result.error}")
         
-        # Get the current batch result
-        batch_result = self.async_generator.get_batch(self._next_batch_id)
-        if batch_result.error:
-            raise RuntimeError(f"Async generation failed for batch {self._next_batch_id}: {batch_result.error}")
+        # Broadcast the batch result to all processes
+        batch_result_list = [batch_result] if self.accelerator.is_main_process else [None]
+        broadcast_object_list(batch_result_list, from_process=0)
+        batch_result = batch_result_list[0]
+        
+        if batch_result is None:
+            raise RuntimeError("Failed to get batch result from main process")
         
         # Process the result
         processed_batch = self._process_async_result(batch_result, generation_batch)
         
-        # Increment batch ID and submit next batch
-        self._next_batch_id += 1
-        self._submit_next_batch_async()
+        # Only main process increments batch ID and submits next batch
+        if self.accelerator.is_main_process:
+            self._next_batch_id += 1
+            self._submit_next_batch_async()
         
         return processed_batch
     
