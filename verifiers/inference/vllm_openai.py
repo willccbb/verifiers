@@ -654,22 +654,43 @@ async def batch_processing_loop(
                     if is_chat_pool:
                         loop = asyncio.get_running_loop()
                         if first_chunk_inputs:
-                            flags = dict(add_generation_prompt=True, continue_final_message=False)
-                            payload = {
-                                "type": "call",
-                                "method": "chat",
-                                "kwargs": {
-                                    "messages": first_chunk_inputs,
-                                    "sampling_params": vllm_sampling_params,
-                                    **flags,
-                                },
-                            }
-                            llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
-                            processed_states = first_chunk_states
+                            # Filter out any already-completed requests from first_chunk_states
+                            active_first_states = []
+                            active_first_inputs = []
+                            for i, req_state in enumerate(first_chunk_states):
+                                if req_state.completed_and_signaled:
+                                    logger_instance.debug(f"Skipping already-completed request {req_state.request_id} in first chunk processing")
+                                    continue
+                                active_first_states.append(req_state)
+                                active_first_inputs.append(first_chunk_inputs[i])
+                            
+                            if not active_first_states:
+                                logger_instance.debug("All first chunk requests are already completed, skipping LLM call")
+                                processed_states = []
+                                llm_results = []
+                            else:
+                                flags = dict(add_generation_prompt=True, continue_final_message=False)
+                                payload = {
+                                    "type": "call",
+                                    "method": "chat",
+                                    "kwargs": {
+                                        "messages": active_first_inputs,
+                                        "sampling_params": vllm_sampling_params,
+                                        **flags,
+                                    },
+                                }
+                                llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                processed_states = active_first_states
                         elif continue_chunk_states:
                             # No first-chunk requests, process continuing requests
                             continue_chunk_inputs = []
+                            # Filter out any already-completed requests
+                            active_continue_states = []
                             for req_state in continue_chunk_states:
+                                if req_state.completed_and_signaled:
+                                    logger_instance.debug(f"Skipping already-completed request {req_state.request_id} in continue chunk processing")
+                                    continue
+                                active_continue_states.append(req_state)
                                 current_messages = []
                                 if req_state.original_chat_messages:
                                     current_messages.extend([m.model_dump() for m in req_state.original_chat_messages])
@@ -680,18 +701,24 @@ async def batch_processing_loop(
                                         logger_instance.warning(f"Request {req_state.request_id} in chat pool has no user prompt to start generation.")
                                         current_messages.append({"role": "user", "content": ""})
                                 continue_chunk_inputs.append(current_messages)
-                            flags = dict(add_generation_prompt=False, continue_final_message=True)
-                            payload = {
-                                "type": "call",
-                                "method": "chat",
-                                "kwargs": {
-                                    "messages": continue_chunk_inputs,
-                                    "sampling_params": vllm_sampling_params,
-                                    **flags,
-                                },
-                            }
-                            llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
-                            processed_states = continue_chunk_states
+                            
+                            if not active_continue_states:
+                                logger_instance.debug("All continue chunk requests are already completed, skipping LLM call")
+                                processed_states = []
+                                llm_results = []
+                            else:
+                                flags = dict(add_generation_prompt=False, continue_final_message=True)
+                                payload = {
+                                    "type": "call",
+                                    "method": "chat",
+                                    "kwargs": {
+                                        "messages": continue_chunk_inputs,
+                                        "sampling_params": vllm_sampling_params,
+                                        **flags,
+                                    },
+                                }
+                                llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                processed_states = active_continue_states
                         # else: nothing to process this tick
                     else:
                         # completion – unchanged
@@ -832,6 +859,11 @@ async def batch_processing_loop(
                                                  (req_state.finish_reason == "length" and req_state.generated_token_count >= req_state.effective_max_tokens) or \
                                                  (req_state.generated_token_count >= req_state.effective_max_tokens) or \
                                                  (req_state.error is not None)
+                        
+                        # Add detailed logging for debugging
+                        logger_instance.debug(f"Request {req_state.request_id} completion check: finish_reason={req_state.finish_reason}, "
+                                            f"generated={req_state.generated_token_count}, max={req_state.effective_max_tokens}, "
+                                            f"is_definitely_finished={is_definitely_finished}, completed_and_signaled={req_state.completed_and_signaled}")
                         
                         if is_definitely_finished and not req_state.completed_and_signaled:
                             completed_in_sub_batch.append(req_state)
