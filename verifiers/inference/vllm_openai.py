@@ -387,6 +387,7 @@ class PooledRequestState:
     completed_and_signaled: bool = False
     timed_out: bool = False
     generation_stopped: bool = False  # Track if generation stopped (incomplete chunk)
+    last_chunk_token_count: int = 0  # Track tokens generated in last chunk
     
     @property
     def is_complete(self) -> bool:
@@ -402,6 +403,13 @@ class PooledRequestState:
         if self.finish_reason and self.finish_reason not in ["length", None]:
             return True
         if self.generated_token_count >= self.effective_max_tokens:
+            return True
+        # Mark as complete if there's less than 8 tokens of room left
+        if self.effective_max_tokens - self.generated_token_count < 8:
+            return True
+        # Mark as complete if last chunk generated fewer than requested tokens (64)
+        # This indicates generation has naturally stopped
+        if self.last_chunk_token_count > 0 and self.last_chunk_token_count < 64:
             return True
         return False
 
@@ -583,6 +591,13 @@ async def batch_processing_loop(
                 # Filter out already-completed requests before selecting sub-batch
                 available_requests = [req for req in active_pool_requests if not req.is_complete]
                 
+                # Log the state of requests in the pool
+                logger_instance.debug(f"Active pool has {len(active_pool_requests)} total requests, {len(available_requests)} available for processing")
+                for req in active_pool_requests:
+                    logger_instance.debug(f"  Request {req.request_id}: tokens={req.generated_token_count}/{req.effective_max_tokens}, "
+                                        f"last_chunk={req.last_chunk_token_count}, is_complete={req.is_complete}, "
+                                        f"generation_stopped={req.generation_stopped}, finish_reason={req.finish_reason}")
+                
                 if not available_requests:
                     # All requests in active pool are already completed, clear the pool
                     logger_instance.info(f"All requests in active pool {active_pool_signature} are already completed. Clearing pool.")
@@ -617,13 +632,23 @@ async def batch_processing_loop(
                     if original_n != 1:
                         logger_instance.warning(f"Pool {active_pool_signature}: Original 'n={original_n}' overridden to n=1 for chunked generation.")
                     
+                    # Calculate the minimum tokens remaining across all requests in the batch
+                    min_tokens_remaining = min(
+                        req.effective_max_tokens - req.generated_token_count 
+                        for req in sub_batch_to_process
+                    )
+                    
+                    # Limit chunk size to available room
+                    chunk_size = min(script_args.token_chunk_size, min_tokens_remaining)
+                    logger_instance.debug(f"Chunk size for batch: {chunk_size} (min remaining: {min_tokens_remaining}, configured: {script_args.token_chunk_size})")
+                    
                     # Create a new dict for **kwargs, excluding 'n' as it's set explicitly
                     kwargs_for_sampling_params = {k: v for k, v in sig_sampling_dict.items() if k != 'n'}
                     
                     vllm_sampling_params = SamplingParams(
                         **kwargs_for_sampling_params,
                         n=1, # Generate one sequence continuation per request in the chunk
-                        max_tokens=script_args.token_chunk_size, # Generate one chunk
+                        max_tokens=chunk_size, # Use calculated chunk size
                         # Ensure guided_decoding is correctly set up if present in extra_body
                         guided_decoding=GuidedDecodingParams(backend="outlines", regex=sig_extra_body_dict["guided_decoding_regex"]) if "guided_decoding_regex" in sig_extra_body_dict else None,
                         # Remove any params from extra_body that might also be in SamplingParams if they were not filtered by create_pool_signature
@@ -693,7 +718,15 @@ async def batch_processing_loop(
                                         **flags,
                                     },
                                 }
-                                llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                logger_instance.debug(f"Sending first-chunk chat request to LLM with {len(active_first_inputs)} messages")
+                                try:
+                                    llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                    logger_instance.debug(f"Received {len(llm_results)} results from LLM for first-chunk chat")
+                                except Exception as e:
+                                    logger_instance.error(f"Error calling LLM for first-chunk chat: {e}", exc_info=True)
+                                    for req_state in active_first_states:
+                                        req_state.error = e
+                                    llm_results = []
                                 processed_states = active_first_states
                         elif continue_chunk_states:
                             # No first-chunk requests, process continuing requests
@@ -731,9 +764,21 @@ async def batch_processing_loop(
                                         **flags,
                                     },
                                 }
-                                llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                logger_instance.debug(f"Sending continue-chunk chat request to LLM with {len(continue_chunk_inputs)} messages")
+                                try:
+                                    llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                    logger_instance.debug(f"Received {len(llm_results)} results from LLM for continue-chunk chat")
+                                except Exception as e:
+                                    logger_instance.error(f"Error calling LLM for continue-chunk chat: {e}", exc_info=True)
+                                    for req_state in active_continue_states:
+                                        req_state.error = e
+                                    llm_results = []
                                 processed_states = active_continue_states
-                        # else: nothing to process this tick
+                        else:
+                            # No requests to process in this iteration
+                            logger_instance.debug("No chat requests to process in this iteration")
+                            processed_states = []
+                            llm_results = []
                     else:
                         # completion – unchanged
                         loop = asyncio.get_running_loop()
@@ -742,7 +787,15 @@ async def batch_processing_loop(
                             "method": "generate",
                             "kwargs": {"prompts": prompts_for_vllm, "sampling_params": vllm_sampling_params},
                         }
-                        llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                        logger_instance.debug(f"Sending completion request to LLM with {len(prompts_for_vllm)} prompts")
+                        try:
+                            llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                            logger_instance.debug(f"Received {len(llm_results)} results from LLM for completion")
+                        except Exception as e:
+                            logger_instance.error(f"Error calling LLM for completion: {e}", exc_info=True)
+                            for req_state in sub_batch_to_process:
+                                req_state.error = e
+                            llm_results = []
                         processed_states = sub_batch_to_process
 
                     # Now, update state for each request in the processed_states
@@ -773,6 +826,7 @@ async def batch_processing_loop(
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
+                                req_state.last_chunk_token_count = new_token_count  # Track this chunk's token count
                                 req_state.finish_reason = completion_output.finish_reason
                                 
                                 # Check if generation has stopped
@@ -816,6 +870,7 @@ async def batch_processing_loop(
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
+                                req_state.last_chunk_token_count = new_token_count  # Track this chunk's token count
                                 req_state.finish_reason = completion_output.finish_reason
                                 
                                 # Check if generation has stopped
