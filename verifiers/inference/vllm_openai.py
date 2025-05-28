@@ -727,7 +727,6 @@ async def batch_processing_loop(
                                 elif req_state.finish_reason == "length":
                                     if req_state.generated_token_count >= req_state.effective_max_tokens:
                                         is_finished = True
-                                        req_state.finish_reason = "length"
                                 elif req_state.finish_reason and req_state.finish_reason != "length":
                                     is_finished = True
                                 if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -770,7 +769,6 @@ async def batch_processing_loop(
                                 elif req_state.finish_reason == "length":
                                     if req_state.generated_token_count >= req_state.effective_max_tokens:
                                         is_finished = True
-                                        req_state.finish_reason = "length"
                                 elif req_state.finish_reason and req_state.finish_reason != "length":
                                     is_finished = True
                                 if req_state.generated_token_count >= req_state.effective_max_tokens:
@@ -801,6 +799,7 @@ async def batch_processing_loop(
                         # req_state is from the current sub_batch. Check its status.
                         is_definitely_finished = (req_state.finish_reason is not None and req_state.finish_reason != "length") or \
                                                  (req_state.finish_reason == "length" and req_state.generated_token_count >= req_state.effective_max_tokens) or \
+                                                 (req_state.generated_token_count >= req_state.effective_max_tokens) or \
                                                  (req_state.error is not None)
                         
                         if is_definitely_finished and not req_state.completed_and_signaled:
