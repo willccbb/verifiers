@@ -300,6 +300,8 @@ class GRPOEnvTrainer(Trainer):
             nccl_vars = {k: v for k, v in os.environ.items() if k.startswith('NCCL')}
             if nccl_vars:
                 print(f"[TRAINER] NCCL environment variables: {nccl_vars}")
+            current_device = torch.cuda.current_device() if torch.cuda.is_available() else -1
+            print(f"[TRAINER] Main process initializing NCCL communicator on device {current_device}")
             self.vllm_client.init_communicator()
         
         self._last_loaded_step = 0  # Initialize to 0 since vLLM already has initial weights

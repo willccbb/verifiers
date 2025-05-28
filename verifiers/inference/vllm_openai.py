@@ -163,6 +163,9 @@ class WeightSyncWorkerExtension:
 
         # Get the rank of the current worker in the global world group.
         rank = get_world_group().rank
+        
+        # Log device information for debugging
+        logger.info(f"[WORKER] Initializing communicator: rank={rank}, device={self.device}, world_size={world_size}") # type: ignore
 
         # Create a stateless process group to manage communication between training processes and vLLM workers.
         pg = StatelessProcessGroup.create(host=host, port=port, rank=rank, world_size=world_size)
