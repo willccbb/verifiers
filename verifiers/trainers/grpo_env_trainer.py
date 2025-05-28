@@ -495,6 +495,15 @@ class GRPOEnvTrainer(Trainer):
         print(f"[TRAINER] Starting weight update to vLLM")
         update_start_time = time.time()
         
+        # Debug: Check if we can reach the vLLM server
+        try:
+            print(f"[TRAINER] Testing vLLM server connection at {self.vllm_client.host}:{self.vllm_client.server_port}")
+            import requests
+            response = requests.get(f"http://{self.vllm_client.host}:{self.vllm_client.server_port}/health/", timeout=5)
+            print(f"[TRAINER] vLLM server health check: {response.status_code}")
+        except Exception as e:
+            print(f"[TRAINER] Failed to reach vLLM server: {e}")
+        
         if is_peft_model(self.model):
             # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging, as
             # merging adapters in a sharded manner is not supported.
@@ -520,7 +529,9 @@ class GRPOEnvTrainer(Trainer):
                 
                 # Use batch update for PEFT model
                 wrapper = PEFTModelWrapper(self.model)
+                print(f"[TRAINER] Starting batch_update_model_params for PEFT model")
                 self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
+                print(f"[TRAINER] Completed batch_update_model_params for PEFT model")
                 
                 self.model.unmerge_adapter() # type: ignore
         else:
@@ -546,10 +557,14 @@ class GRPOEnvTrainer(Trainer):
                             yield name, dummy_param
                 
                 wrapper = ZeRO3ModelWrapper(self.model, gather_if_zero3)
+                print(f"[TRAINER] Starting batch_update_model_params for ZeRO-3 model")
                 self.vllm_client.batch_update_model_params(wrapper, batch_size=10)
+                print(f"[TRAINER] Completed batch_update_model_params for ZeRO-3 model")
             else:
                 # Regular model without ZeRO-3
+                print(f"[TRAINER] Starting batch_update_model_params for regular model")
                 self.vllm_client.batch_update_model_params(self.model, batch_size=10)  # type: ignore
+                print(f"[TRAINER] Completed batch_update_model_params for regular model")
 
         # Reset cache on vLLM
         print(f"[TRAINER] Resetting vLLM prefix cache")

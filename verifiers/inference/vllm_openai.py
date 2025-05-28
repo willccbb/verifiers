@@ -52,11 +52,9 @@ logger = logging.getLogger(__name__) # Ensure logger is defined
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 # At the global level, after imports and logger setup:
+pipe_lock = threading.Lock()  # Global lock for pipe operations
 request_queue: Optional[asyncio.Queue] = None
 batch_processor_task: Optional[asyncio.Task] = None
-
-# Connection locks for thread safety
-connection_locks: dict[int, threading.Lock] = {}
 
 # Generation tracking
 active_generation_count = 0
@@ -128,13 +126,8 @@ class OACompletionResponse(BaseModel):
 
 def send_and_recv(conn: MPConnection, payload: dict):
     """Helper to send a payload and receive a response over a pipe."""
-    # Get or create a lock for this connection
-    conn_id = id(conn)
-    if conn_id not in connection_locks:
-        connection_locks[conn_id] = threading.Lock()
-    
-    # Use the connection-specific lock
-    with connection_locks[conn_id]:
+    # Use the global pipe_lock
+    with pipe_lock:
         conn.send(payload)
         return conn.recv()
 
