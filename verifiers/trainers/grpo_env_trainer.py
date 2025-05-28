@@ -607,9 +607,20 @@ class GRPOEnvTrainer(Trainer):
             self.async_generator.start()
             self._async_started = True
         
-        # On first call or when we need more batches, submit multiple batches for look-ahead
-        if self._next_batch_id == 0 or (self.accelerator.is_main_process and self.async_generator and 
-                                        self.async_generator.get_pending_count() < 2):
+        # Determine if we need to submit batches (main process decides, broadcasts decision)
+        should_submit_batches = False
+        if self.accelerator.is_main_process:
+            should_submit_batches = (self._next_batch_id == 0 or 
+                                   (self.async_generator is not None and 
+                                    self.async_generator.get_pending_count() < 2))
+        
+        # Broadcast decision to all processes
+        should_submit_list = [should_submit_batches]
+        broadcast_object_list(should_submit_list, from_process=0)
+        should_submit_batches = should_submit_list[0]
+        
+        # All processes participate in batch submission if needed
+        if should_submit_batches:
             # Submit current batch first
             prompts = [x['prompt'] for x in generation_batch]
             answers = [x['answer'] for x in generation_batch]
@@ -638,7 +649,15 @@ class GRPOEnvTrainer(Trainer):
             
             # Submit additional future batches for look-ahead
             if hasattr(self, '_async_dataloader'):
-                num_future_batches = min(2, self.async_generator.num_steps_ahead - 1) if self.accelerator.is_main_process and self.async_generator else 0
+                # Determine number of future batches (main process decides)
+                num_future_batches = 0
+                if self.accelerator.is_main_process and self.async_generator:
+                    num_future_batches = min(2, self.async_generator.num_steps_ahead - 1)
+                
+                # Broadcast decision
+                num_future_list = [num_future_batches]
+                broadcast_object_list(num_future_list, from_process=0)
+                num_future_batches = num_future_list[0]
                 
                 for i in range(num_future_batches):
                     # Get future batches from async dataloader (available on all processes)
