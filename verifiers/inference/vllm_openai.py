@@ -64,6 +64,20 @@ generation_count_lock = asyncio.Lock()
 MAX_CONCURRENT_WEIGHT_UPDATES = 5
 weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
+# Worker rotation for load balancing
+worker_rotation_index = 0
+worker_rotation_lock = asyncio.Lock()
+
+async def get_next_worker_connection(connections: list[AnyType]) -> tuple[int, AnyType]:
+    """Get the next worker connection using round-robin rotation."""
+    global worker_rotation_index
+    async with worker_rotation_lock:
+        if not connections:
+            raise RuntimeError("No worker connections available")
+        worker_idx = worker_rotation_index % len(connections)
+        worker_rotation_index += 1
+        return worker_idx, connections[worker_idx]
+
 # -------- OpenAI /v1/chat/completions Pydantic Models ---------- #
 class OAChatMessage(BaseModel):
     role: str
@@ -130,6 +144,36 @@ def send_and_recv(conn: MPConnection, payload: dict):
     with pipe_lock:
         conn.send(payload)
         return conn.recv()
+
+async def async_send_and_recv(conn: MPConnection, payload: dict, timeout: float = 30.0):
+    """Async helper to send a payload and receive a response with timeout."""
+    loop = asyncio.get_running_loop()
+    
+    # Send the payload in a thread to avoid blocking
+    async with asyncio.timeout(timeout):
+        try:
+            # Use the global pipe_lock in the executor
+            await loop.run_in_executor(None, lambda: pipe_lock.acquire())
+            try:
+                await loop.run_in_executor(None, conn.send, payload)
+                
+                # Poll for response with timeout
+                start_time = asyncio.get_event_loop().time()
+                while asyncio.get_event_loop().time() - start_time < timeout:
+                    if await loop.run_in_executor(None, conn.poll, 0.1):
+                        result = await loop.run_in_executor(None, conn.recv)
+                        return result
+                    await asyncio.sleep(0.05)  # Small sleep to avoid busy waiting
+                
+                raise asyncio.TimeoutError(f"Worker did not respond within {timeout} seconds")
+            finally:
+                await loop.run_in_executor(None, lambda: pipe_lock.release())
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout waiting for worker response after {timeout}s")
+            raise
+        except Exception as e:
+            logger.error(f"Error in async_send_and_recv: {e}", exc_info=True)
+            raise
 
 class WeightSyncWorkerExtension:
     """
@@ -386,31 +430,30 @@ class PooledRequestState:
     finish_reason: Optional[str] = None
     completed_and_signaled: bool = False
     timed_out: bool = False
-    generation_stopped: bool = False  # Track if generation stopped (incomplete chunk)
-    last_chunk_token_count: int = 0  # Track tokens generated in last chunk
     
     @property
     def is_complete(self) -> bool:
         """Single source of truth for whether this request is complete and should not be processed further."""
+        # Already finalized
         if self.completed_and_signaled:
             return True
+            
+        # Error state
         if self.error is not None:
             return True
-        if self.generation_stopped:
+            
+        # vLLM indicated completion (any non-None finish reason means done)
+        if self.finish_reason is not None:
             return True
-        if self.finish_reason == "stop":
-            return True
-        if self.finish_reason and self.finish_reason not in ["length", None]:
-            return True
+            
+        # Reached token limit
         if self.generated_token_count >= self.effective_max_tokens:
             return True
-        # Mark as complete if there's less than 8 tokens of room left
-        if self.effective_max_tokens - self.generated_token_count < 8:
+            
+        # Not enough room for meaningful generation (less than 1 token)
+        if self.effective_max_tokens - self.generated_token_count < 1:
             return True
-        # Mark as complete if last chunk generated fewer than requested tokens (64)
-        # This indicates generation has naturally stopped
-        if self.last_chunk_token_count > 0 and self.last_chunk_token_count < 64:
-            return True
+            
         return False
 
 pending_requests_by_signature: defaultdict[PoolSignature, list[PooledRequestState]] = defaultdict(list)
@@ -595,8 +638,7 @@ async def batch_processing_loop(
                 logger_instance.debug(f"Active pool has {len(active_pool_requests)} total requests, {len(available_requests)} available for processing")
                 for req in active_pool_requests:
                     logger_instance.debug(f"  Request {req.request_id}: tokens={req.generated_token_count}/{req.effective_max_tokens}, "
-                                        f"last_chunk={req.last_chunk_token_count}, is_complete={req.is_complete}, "
-                                        f"generation_stopped={req.generation_stopped}, finish_reason={req.finish_reason}")
+                                        f"is_complete={req.is_complete}, finish_reason={req.finish_reason}")
                 
                 if not available_requests:
                     # All requests in active pool are already completed, clear the pool
@@ -640,6 +682,17 @@ async def batch_processing_loop(
                     
                     # Limit chunk size to available room
                     chunk_size = min(script_args.token_chunk_size, min_tokens_remaining)
+                    
+                    # CRITICAL: Ensure chunk_size is at least 1 to avoid vLLM issues
+                    if chunk_size <= 0:
+                        logger_instance.error(f"Invalid chunk size {chunk_size} calculated. Min remaining: {min_tokens_remaining}")
+                        # Mark all requests as complete if we can't generate any more tokens
+                        for req_state in sub_batch_to_process:
+                            if not req_state.is_complete:
+                                req_state.finish_reason = "length"
+                                logger_instance.info(f"Request {req_state.request_id} marked complete due to no room for generation")
+                        continue  # Skip this iteration
+                    
                     logger_instance.debug(f"Chunk size for batch: {chunk_size} (min remaining: {min_tokens_remaining}, configured: {script_args.token_chunk_size})")
                     
                     # Create a new dict for **kwargs, excluding 'n' as it's set explicitly
@@ -667,16 +720,29 @@ async def batch_processing_loop(
                             current_messages = []
                             if req_state.original_chat_messages:
                                 current_messages.extend([m.model_dump() for m in req_state.original_chat_messages])
-                            if req_state.accumulated_content:
-                                current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
-                            else:
-                                if not current_messages or current_messages[-1]["role"] == "assistant":
-                                    logger_instance.warning(f"Request {req_state.request_id} in chat pool has no user prompt to start generation.")
-                                    current_messages.append({"role": "user", "content": ""})
+                            
+                            # For continuing generation, we need to ensure there's an assistant message to continue
                             if req_state.generated_token_count == 0:
+                                # First chunk - ensure we have a valid message sequence ending with user
+                                if not current_messages:
+                                    logger_instance.error(f"Request {req_state.request_id} has no messages")
+                                    req_state.error = ValueError("No messages provided")
+                                    continue
+                                if current_messages[-1]["role"] != "user":
+                                    logger_instance.error(f"Request {req_state.request_id} last message is not from user for first chunk")
+                                    req_state.error = ValueError("Last message must be from user for first chunk")
+                                    continue
                                 first_chunk_inputs.append(current_messages)
                                 first_chunk_states.append(req_state)
                             else:
+                                # Continuing chunk - add accumulated content as assistant message
+                                if req_state.accumulated_content:
+                                    current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
+                                else:
+                                    # This should not happen - we should have content if we're continuing
+                                    logger_instance.error(f"Request {req_state.request_id} has no accumulated content for continuation")
+                                    req_state.error = ValueError("No content to continue")
+                                    continue
                                 continue_chunk_states.append(req_state)
                         else:
                             if isinstance(req_state.original_prompt, str):
@@ -719,9 +785,17 @@ async def batch_processing_loop(
                                     },
                                 }
                                 logger_instance.debug(f"Sending first-chunk chat request to LLM with {len(active_first_inputs)} messages")
+                                worker_idx = -1  # Initialize to avoid unbound variable
                                 try:
-                                    llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                    worker_idx, worker_conn = await get_next_worker_connection(connections)
+                                    logger_instance.debug(f"Using worker {worker_idx} for first-chunk chat request")
+                                    llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
                                     logger_instance.debug(f"Received {len(llm_results)} results from LLM for first-chunk chat")
+                                except asyncio.TimeoutError:
+                                    logger_instance.error(f"Worker {worker_idx} timeout for first-chunk chat after 60s")
+                                    for req_state in active_first_states:
+                                        req_state.error = TimeoutError("Worker timeout during generation")
+                                    llm_results = []
                                 except Exception as e:
                                     logger_instance.error(f"Error calling LLM for first-chunk chat: {e}", exc_info=True)
                                     for req_state in active_first_states:
@@ -741,12 +815,16 @@ async def batch_processing_loop(
                                 current_messages = []
                                 if req_state.original_chat_messages:
                                     current_messages.extend([m.model_dump() for m in req_state.original_chat_messages])
-                                if req_state.accumulated_content:
-                                    current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
-                                else:
-                                    if not current_messages or current_messages[-1]["role"] == "assistant":
-                                        logger_instance.warning(f"Request {req_state.request_id} in chat pool has no user prompt to start generation.")
-                                        current_messages.append({"role": "user", "content": ""})
+                                
+                                # Must have accumulated content to continue
+                                if not req_state.accumulated_content:
+                                    logger_instance.error(f"Request {req_state.request_id} has no accumulated content for continuation")
+                                    req_state.error = ValueError("No content to continue generation")
+                                    active_continue_states.remove(req_state)  # Remove from active list
+                                    continue
+                                
+                                # Add the accumulated content as the assistant message to continue
+                                current_messages.append({"role": "assistant", "content": req_state.accumulated_content})
                                 continue_chunk_inputs.append(current_messages)
                             
                             if not active_continue_states:
@@ -765,9 +843,17 @@ async def batch_processing_loop(
                                     },
                                 }
                                 logger_instance.debug(f"Sending continue-chunk chat request to LLM with {len(continue_chunk_inputs)} messages")
+                                worker_idx = -1  # Initialize to avoid unbound variable
                                 try:
-                                    llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                                    worker_idx, worker_conn = await get_next_worker_connection(connections)
+                                    logger_instance.debug(f"Using worker {worker_idx} for continue-chunk chat request")
+                                    llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
                                     logger_instance.debug(f"Received {len(llm_results)} results from LLM for continue-chunk chat")
+                                except asyncio.TimeoutError:
+                                    logger_instance.error(f"Worker {worker_idx} timeout for continue-chunk chat after 60s")
+                                    for req_state in active_continue_states:
+                                        req_state.error = TimeoutError("Worker timeout during generation")
+                                    llm_results = []
                                 except Exception as e:
                                     logger_instance.error(f"Error calling LLM for continue-chunk chat: {e}", exc_info=True)
                                     for req_state in active_continue_states:
@@ -788,9 +874,17 @@ async def batch_processing_loop(
                             "kwargs": {"prompts": prompts_for_vllm, "sampling_params": vllm_sampling_params},
                         }
                         logger_instance.debug(f"Sending completion request to LLM with {len(prompts_for_vllm)} prompts")
+                        worker_idx = -1  # Initialize to avoid unbound variable
                         try:
-                            llm_results = await loop.run_in_executor(None, send_and_recv, connections[0], payload)
+                            worker_idx, worker_conn = await get_next_worker_connection(connections)
+                            logger_instance.debug(f"Using worker {worker_idx} for completion request")
+                            llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
                             logger_instance.debug(f"Received {len(llm_results)} results from LLM for completion")
+                        except asyncio.TimeoutError:
+                            logger_instance.error(f"Worker {worker_idx} timeout for completion after 60s")
+                            for req_state in sub_batch_to_process:
+                                req_state.error = TimeoutError("Worker timeout during generation")
+                            llm_results = []
                         except Exception as e:
                             logger_instance.error(f"Error calling LLM for completion: {e}", exc_info=True)
                             for req_state in sub_batch_to_process:
@@ -818,28 +912,29 @@ async def batch_processing_loop(
                                 real_idx += 1
                                 if not request_output.outputs or len(request_output.outputs) == 0:
                                     logger_instance.warning(f"Request {req_state.request_id} (idx {real_idx-1}) received no output from vLLM in chunk.")
-                                    req_state.finish_reason = request_output.outputs[0].finish_reason if request_output.outputs else "error_no_output"
-                                    temp_failed_requests_in_sub_batch.append(req_state)
+                                    # This might happen if vLLM can't generate any tokens (e.g., due to constraints)
+                                    # Mark as complete rather than error
+                                    req_state.finish_reason = "stop"  # vLLM couldn't generate
+                                    logger_instance.info(f"Request {req_state.request_id} marked complete due to empty vLLM output")
                                     continue
                                 completion_output = request_output.outputs[0]
                                 new_text_chunk = completion_output.text
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
-                                req_state.last_chunk_token_count = new_token_count  # Track this chunk's token count
                                 req_state.finish_reason = completion_output.finish_reason
+                                
+                                # Log detailed state for debugging
+                                logger_instance.debug(f"Request {req_state.request_id} chunk result: "
+                                                    f"new_tokens={new_token_count}, total_tokens={req_state.generated_token_count}, "
+                                                    f"finish_reason={req_state.finish_reason}, chunk_text_len={len(new_text_chunk)}")
                                 
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
                                     # Incomplete chunk means generation has stopped
-                                    req_state.generation_stopped = True
-                                    if req_state.finish_reason is None or req_state.finish_reason == "length":
-                                        # Set appropriate finish reason if not already set
-                                        if req_state.generated_token_count >= req_state.effective_max_tokens:
-                                            req_state.finish_reason = "length"
-                                        else:
-                                            # vLLM stopped for some other reason (possibly internal limit)
-                                            req_state.finish_reason = "length"
+                                    if req_state.finish_reason is None:
+                                        # Only set finish reason if vLLM didn't provide one
+                                        req_state.finish_reason = "length"
                                     logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
                                 
                                 # Log current state
@@ -862,28 +957,29 @@ async def batch_processing_loop(
                                 real_idx += 1
                                 if not request_output.outputs or len(request_output.outputs) == 0:
                                     logger_instance.warning(f"Request {req_state.request_id} (idx {real_idx-1}) received no output from vLLM in chunk.")
-                                    req_state.finish_reason = request_output.outputs[0].finish_reason if request_output.outputs else "error_no_output"
-                                    temp_failed_requests_in_sub_batch.append(req_state)
+                                    # This might happen if vLLM can't generate any tokens (e.g., due to constraints)
+                                    # Mark as complete rather than error
+                                    req_state.finish_reason = "stop"  # vLLM couldn't generate
+                                    logger_instance.info(f"Request {req_state.request_id} marked complete due to empty vLLM output")
                                     continue
                                 completion_output = request_output.outputs[0]
                                 new_text_chunk = completion_output.text
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
-                                req_state.last_chunk_token_count = new_token_count  # Track this chunk's token count
                                 req_state.finish_reason = completion_output.finish_reason
+                                
+                                # Log detailed state for debugging
+                                logger_instance.debug(f"Request {req_state.request_id} chunk result: "
+                                                    f"new_tokens={new_token_count}, total_tokens={req_state.generated_token_count}, "
+                                                    f"finish_reason={req_state.finish_reason}, chunk_text_len={len(new_text_chunk)}")
                                 
                                 # Check if generation has stopped
                                 if new_token_count < script_args.token_chunk_size:
                                     # Incomplete chunk means generation has stopped
-                                    req_state.generation_stopped = True
-                                    if req_state.finish_reason is None or req_state.finish_reason == "length":
-                                        # Set appropriate finish reason if not already set
-                                        if req_state.generated_token_count >= req_state.effective_max_tokens:
-                                            req_state.finish_reason = "length"
-                                        else:
-                                            # vLLM stopped for some other reason (possibly internal limit)
-                                            req_state.finish_reason = "length"
+                                    if req_state.finish_reason is None:
+                                        # Only set finish reason if vLLM didn't provide one
+                                        req_state.finish_reason = "length"
                                     logger_instance.debug(f"Request {req_state.request_id} generation stopped. Generated {new_token_count}/{script_args.token_chunk_size} tokens in chunk, total: {req_state.generated_token_count}, reason: {req_state.finish_reason}")
                                 
                                 # Log current state
