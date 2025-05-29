@@ -2,7 +2,7 @@ from peft import LoraConfig
 
 from verifiers.trainers.grpo_env_config import GRPOEnvConfig
 
-def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
+def grpo_defaults(run_name: str) -> GRPOEnvConfig:
     return GRPOEnvConfig(
         output_dir=f"outputs/{run_name}",
         run_name=run_name,
@@ -28,9 +28,6 @@ def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
         log_completions=True,
         report_to="wandb",
     )
-
-def grpo_defaults(run_name: str) -> GRPOEnvConfig:
-    return get_default_grpo_config(run_name)
 
 def lora_defaults(r = 8, alpha = 16) -> LoraConfig:
     return LoraConfig(
