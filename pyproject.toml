@@ -28,7 +28,7 @@ all = [
     "flash-attn",
     "liger-kernel>=0.5.10",
     "ipykernel",
-    "ipywidgets"
+    "ipywidgets",
     "duckduckgo-search",
     "brave-search",
     "reasoning-gym"
