@@ -60,14 +60,14 @@ RL environments and algorithms should be modular, reusable, and hackable.
 	- `MultiTurnEnv` abstract class for implementing custom multi-turn rollout logic on top of vLLM's `chat()` method -- just override `env_response(list[dict]) -> dict` and `is_completed(list[dict]) -> bool` and you're good to go.
 	- `Environment` abstract class for implementing whatever rollout logic you can imagine (go nuts!)
 
-Basic usage for a `GRPOEnvTrainer` training script:
+Basic usage for a `GRPOEnvTrainer` training script with 4 GPUs (2 inference + 2 training):
 
 ```bash
 # launch inference server
-CUDA_VISIBLE_DEVICES=0,1 uv run -m verifiers.inference.vllm_serve --model 'Qwen/Qwen2.5-7B-Instruct' --max_model_len 4096
+CUDA_VISIBLE_DEVICES=0,1 uv run -m verifiers.inference.vllm_openai --model 'Qwen/Qwen2.5-7B-Instruct'
 
 # launch training script; copy zero3.yaml or set values globally with `accelerate config`
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num-processes 1 --config-file configs/zero3.yaml train.py
+CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num-processes 2 --config-file configs/zero3.yaml train.py
 ```
 
 The included `train.py` mirrors `verifiers/examples/reverse_text.py` and is configured for 4xH200 GPUs (2 inference + 2 training). See [GRPO Rules of Thumb](#grpo-rules-of-thumb) for further discussion of hyperparameters and best practices; the easiest way to reduce memory requirements is by reducing `per_device_train_batch_size` and increasing `gradient_accumulation_steps` accordingly.
@@ -90,7 +90,8 @@ If you use this code in your research, please cite:
 `verifiers` is available via PyPI (TODO), and we recommend installation with `uv`:
 
 ```
-uv add verifiers # optionally, "verifiers[math,tools]"
+uv venv --python 3.11 (or 3.12)
+uv add verifiers # optionally, "verifiers[tools]"
 uv pip install flash-attn --no-build-isolation
 ```
 
