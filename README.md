@@ -1,24 +1,41 @@
 # Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
-TODO: GitHub header stuff
+TODO: GitHub header stuff, test coverage, [PyPI](https://pypi.org/project/verifiers/), general release prep
 
-## Roadmap for v0.1 Release
+## Roadmap for v0.1 Release (very soon)
 
-- 
-
-### Design Philosophy 
-
-Modularity:
-- W
-
-There are a number of features which we'd love to support eventually
-
+New features for this release:
+- Async inference support via OpenAI-compatible vLLM server (with weight syncing enabled)
+- Async execution for rollouts + rubrics
+- Native support for [reasoning-gym](https://github.com/open-thought/reasoning-gym) environments
+- Overlapped training + inference (via off-policy steps)
+- Rollout-level reward functions by default (with weight=0.0 supported)
+- Direct support for API evaluation + synthetic data collection 
+- Complete workflow for API eval -> data collection -> SFT -> RL (GRPO)
+- Full decoupling of rollout + reward logic from GRPOEnvTrainer
+- `transformers` Trainer as the base (replacing TRL's GRPO)
+- Direct support for LLM judges via JudgeRubric
+Included, but could use more testing:
+- Data-parallel vLLM workers
+- Multi-node training
+Not included, but planned for later releases:
+- TextArena environments
+- Enigmata environments
+- Native MCP tool support
+- Multimodal support (image-in, via /v1/chat/completions)
+- Tokenizer endpoint exposed for better token-level + turn-level mechanics (edge case handling, token-level rewards)
+- More flexible abstractions for dynamic batch construction + rollout reuse
+- FSDP (via prime-rl) 
 
 ## Overview
 
 `verifiers` is a set of tools and abstractions for training LLMs with reinforcement learning in **verifiable multi-turn environments** via Group-Relative Policy Optimization ([GRPO](https://huggingface.co/docs/trl/main/en/grpo_trainer)). In addition, `verifiers` includes support for synthetic data generation, SFT warmup on filtered traces, and offline evaluation with API clients.
 
 **Core principles**:
+RL environments and algorithms should be modular, reusable, and hackable.
+
+
+- Client (Actor): 
 - environment = instructions + tasks + interaction protocol + rubric
 - instructions = system prompts
 - tasks = datasets + verifiable targets
@@ -27,7 +44,7 @@ There are a number of features which we'd love to support eventually
 - environments = synthetic data engines = RL trainers = eval harnesses
 
 **Key features:**
-- First-class support for multi-turn tool use ("agentic") RL via `GRPOEnvTrainer`, built on top of Transformers.
+- First-class support for multi-turn tool use and agentic RL via `GRPOEnvTrainer`, built on top of Transformers.
 - Direct compatibility with API clients for synthetic data generation and evaluation, in addition to RL training with vLLM clients.
 - Utilities for SFT warmup/"cold start" data (see `examples/warmup` scripts)
 - Emphasis on OpenAI/`chat`-compatible messages rather than plaintext.
@@ -84,7 +101,7 @@ git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync
 uv pip install flash-attn --no-build-isolation
-uv pip install -e ".[math,tools]"
+uv pip install -e ".[jupyter,tools,extras]"
 ```
 
 **Troubleshooting:**
@@ -94,9 +111,9 @@ uv pip install -e ".[math,tools]"
 - If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
 ### Resource Requirements
 
-`verifiers` currently uses Hugging Face's TRL as its primary training backend, and is optimized for setups with at least 2 GPUs, scaling up to multiple 8xH100 nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be [rented](https://app.primeintellect.ai/dashboard/create-cluster?image=ubuntu_22_cuda_12) for <$1/hr.
+`verifiers` currently uses `transformers` Trainer as its primary training backend via `accelerate` (like Hugging Face's [TRL](https://github.com/huggingface/trl/tree/main/trl)), and is optimized for setups with at least 2 GPUs, scaling up to multiple 8xH100 nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be [rented](https://app.primeintellect.ai/dashboard/create-cluster?image=ubuntu_22_cuda_12) for <$1/hr.
 
-Depending on your goals, there are other RL frameworks with native support for multi-turn tool use which you may be interested in exploring as well. If you are looking for maximum efficiency on a single GPU, consider OpenPipe's [ART](https://github.com/OpenPipe/ART) framework, which builds on top of [Unsloth](https://github.com/unslothai/unsloth). If you are seeking to maximize absolute performance at large scales , consider Nvidia's [NeMo-RL](https://github.com/NVIDIA/NeMo-RL) or ByteDance's [veRL](https://github.com/volcengine/verl) (which powers many agent RL projects like [RAGEN](https://github.com/RAGEN-AI/RAGEN) and [SkyRL](https://github.com/NovaSky-AI/SkyRL/tree/main)).
+Depending on your goals, there are other RL frameworks with native support for multi-turn tool use which you may be interested in exploring as well. If you are looking for maximum efficiency on a single GPU, consider OpenPipe's [ART](https://github.com/OpenPipe/ART) framework, which builds on top of [Unsloth](https://github.com/unslothai/unsloth). If you are seeking to maximize absolute performance at large scales, consider Nvidia's [NeMo-RL](https://github.com/NVIDIA/NeMo-RL) or ByteDance's [veRL](https://github.com/volcengine/verl) (which powers many agent RL projects like [RAGEN](https://github.com/RAGEN-AI/RAGEN) and [SkyRL](https://github.com/NovaSky-AI/SkyRL/tree/main)).
 
 We aim to include support for additional trainers backends in the future, and are open to PRs. Our first-order objective is maintaining ease of use for users (and LLMs), and any potential contributions will be considered with this in mind. 
 
@@ -104,8 +121,8 @@ We aim to include support for additional trainers backends in the future, and ar
  
 **Level 0:** Inspect and run the included examples for simple training tasks:
 - `verifiers/examples/reverse_text.py`  (`SingleTurnEnv`)
+- `verifiers/examples/
 - `verifiers/examples/math_python.py` (`ToolEnv`)
-- `verifiers/examples/smola_math_tools.py` (`SmolaToolEnv`)
 
 **Level 1:** Implement your own reasoning task with verifiable rewards using `SingleTurnEnv`:
 

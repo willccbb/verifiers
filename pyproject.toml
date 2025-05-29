@@ -16,7 +16,6 @@ dependencies = [
     "wandb",
     "rich",
     "trl>=0.17.0",
-    "liger-kernel>=0.5.10",
     "requests>=2.32.3",
     "vllm>=0.8.5.post1",
     "openai>=1.81.0",
@@ -25,17 +24,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-jupyter = [
+all = [
+    "flash-attn"
+    "liger-kernel>=0.5.10",
     "ipykernel",
     "ipywidgets"
-]
-tools = [
     "duckduckgo-search",
     "brave-search",
-    "smolagents>=1.15.0",
-]
-extras = [
     "reasoning-gym"
+    "smolagents>=1.15.0",
 ]
 
 [tool.setuptools]

@@ -587,7 +587,7 @@ class GRPOEnvTrainer(Trainer):
 
     def _handle_async_generation(self, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
         """Handle async generation for training with proper multi-process coordination"""
-        
+ 
         # Step 1: Initialize async generator on first use (main process only)
         if self._next_batch_id == 0 and self.accelerator.is_main_process:
             if self.async_generator is not None:
@@ -776,9 +776,36 @@ class GRPOEnvTrainer(Trainer):
         advantages = rewards - mean_grouped_rewards
         if self.scale_rewards:
             advantages = advantages / (std_grouped_rewards + 1e-4)
+
+        # Log metrics (same as in _generate_and_score_completions)
+        mode = "train"  # async generation is only used in training
+        
+        # Update token count
+        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
+        self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item() # type: ignore
+        self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
+
+        # Log completion lengths
+        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
+        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item()) # type: ignore
+        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item()) # type: ignore
+        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item()) # type: ignore
+
+        # Check for EOS tokens and log terminated sequence lengths
+        is_eos = completion_ids == self.processing_class.eos_token_id # type: ignore
+        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1)) # type: ignore
+        term_completion_mask = agg_completion_mask[agg_terminated_with_eos] # type: ignore
+        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
+        self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
+        
+        if len(term_completion_mask) == 0:
+            # edge case where no completed sequences are found
+            term_completion_mask = torch.zeros(1, device=device)
+        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
+        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
+        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
             
         # Log reward statistics to metrics
-        mode = "train"  # async generation is only used in training
         self._metrics[mode]["reward"].append(rewards.mean().item())
         self._metrics[mode]["reward_std"].append(rewards.std().item())
         

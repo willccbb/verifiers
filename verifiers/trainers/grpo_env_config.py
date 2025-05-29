@@ -70,7 +70,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     max_completion_length: Optional[int] = field(
-        default=256,
+        default=1024,
         metadata={"help": "Maximum length of the generated completion."},
     )
     ds3_gather_for_generation: bool = field(
@@ -102,7 +102,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     temperature: float = field(
-        default=0.9,
+        default=1.0,
         metadata={"help": "Temperature for sampling. The higher the temperature, the more random the completions."},
     )
     top_p: float = field(
@@ -154,7 +154,6 @@ class GRPOEnvConfig(TrainingArguments):
         default=32,
         metadata={"help": "Maximum number of concurrent requests to the environment."},
     )
-
     # Async generation parameters
     use_async_generation: bool = field(
         default=True,
@@ -200,13 +199,12 @@ class GRPOEnvConfig(TrainingArguments):
         metadata={"help": "Port of the vLLM server to connect to."},
     )
     vllm_server_timeout: float = field(
-        default=240.0,
+        default=300.0,
         metadata={
             "help": "Total timeout duration in seconds to wait for the vLLM server to be up. If the server is not up "
             "after the timeout, a `ConnectionError` is raised."
         },
     )
-
     # Parameters that control the training
     learning_rate: float = field(
         default=1e-6,
@@ -243,13 +241,6 @@ class GRPOEnvConfig(TrainingArguments):
             "lower-bound specified in argument `epsilon`. Paper DAPO recommends `0.28`."
         },
     )
-    reward_weights: Optional[list[float]] = field(
-        default=None,
-        metadata={
-            "help": "Weights for each reward function. Must match the number of reward functions. If `None`, all "
-            "rewards are weighted equally with weight `1.0`."
-        },
-    )
     scale_rewards: bool = field(
         default=True,
         metadata={
@@ -284,7 +275,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     sync_ref_model: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to synchronize the reference model with the active model every `ref_model_sync_steps` "
             "steps, using the `ref_model_mixup_alpha` parameter."
@@ -299,7 +290,7 @@ class GRPOEnvConfig(TrainingArguments):
         },
     )
     ref_model_sync_steps: int = field(
-        default=64,
+        default=100,
         metadata={
             "help": "τ parameter from the TR-DPO paper, which determines how frequently the current policy is "
             "synchronized with the reference policy. To use this parameter, you must set `sync_ref_model=True`."
@@ -378,5 +369,3 @@ class GRPOEnvConfig(TrainingArguments):
                     "current global eval batch size, the valid values for the number of generations are: "
                     f"{possible_values}."
                 )
-        if self.delta is not None and self.use_liger_loss:
-            raise ValueError("Liger loss does not support two-sided GRPO loss yet.")

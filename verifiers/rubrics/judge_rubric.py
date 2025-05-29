@@ -7,6 +7,11 @@ from verifiers.rubrics.rubric import Rubric
 DEFAULT_JUDGE_PROMPT = """Given a ground truth answer \
 and a response, determine if the response is correct.
 
+Question:
+```
+{question}
+```
+
 Ground truth answer:
 ```
 {answer}
@@ -33,13 +38,19 @@ class JudgeRubric(Rubric):
         self.parser = parser
         self.add_reward_func(self.judge_reward_func)
 
-    def judge_reward_func(self, completion, answer, **kwargs) -> float:
+    def judge_reward_func(self, prompt, completion, answer, **kwargs) -> float:
         response = self.parser.parse_answer(completion)
         # check which fields are present in judge prompt template
-        if '{answer}' in self.judge_prompt:
-            prompt = self.judge_prompt.format(answer=answer, response=response)
+        # get question from answer:
+        if isinstance(prompt, list):
+            question = prompt[-1]['content']
         else:
-            prompt = self.judge_prompt.format(response=response)
+            question = prompt
+        if isinstance(completion, list):
+            response = completion[-1]['content']
+        else:
+            response = completion
+        prompt = self.judge_prompt.format(question=question, answer=answer, response=response)
         judge_response = self.judge_client.chat.completions.create(
             model=self.judge_model,
             messages=[
@@ -48,7 +59,13 @@ class JudgeRubric(Rubric):
             max_tokens=10,
         )
         judge_response = str(judge_response.choices[0].message.content)
-        return 1.0 if 'yes' in judge_response.lower() else 0.0
+        if 'yes' in judge_response.lower():
+            return 1.0
+        elif 'no' in judge_response.lower():
+            return 0.0
+        else:
+            # extract float from judge_response
+            return float(judge_response)
     
 
 

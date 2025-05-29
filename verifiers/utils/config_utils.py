@@ -12,7 +12,7 @@ def get_default_grpo_config(run_name: str) -> GRPOEnvConfig:
         num_train_epochs=1,
         max_steps=500,
         bf16=True,
-        max_grad_norm=0.01,
+        max_grad_norm=0.001,
         num_iterations=2,
         max_prompt_length=1024,
         max_completion_length=2048,
