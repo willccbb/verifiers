@@ -4,7 +4,7 @@ OpenAI-compatible vLLM server with weight synchronization.
 Usage:
 
 ```bash
-uv run python vllm_serve.py --model <model_name> --port <port>
+uv run python vllm_openai.py --model <model_name> --port <port>
 ```
 
 Supports:
