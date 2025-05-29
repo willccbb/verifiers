@@ -318,7 +318,6 @@ class GRPOEnvTrainer(Trainer):
             else:
                 self.ref_model = self.accelerator.prepare_model(self.ref_model, evaluation_mode=True)
         if self.sync_ref_model:
-            assert isinstance(self.ref_model, PreTrainedModel)
             self.add_callback(SyncRefModelCallback(ref_model=self.ref_model, accelerator=self.accelerator)) 
 
         # Environment
