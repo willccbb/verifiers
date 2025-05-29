@@ -25,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
-    "flash-attn"
+    "flash-attn",
     "liger-kernel>=0.5.10",
     "ipykernel",
     "ipywidgets"
