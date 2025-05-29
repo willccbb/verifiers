@@ -318,7 +318,7 @@ class GRPOEnvTrainer(Trainer):
             else:
                 self.ref_model = self.accelerator.prepare_model(self.ref_model, evaluation_mode=True)
         if self.sync_ref_model:
-            self.add_callback(SyncRefModelCallback(ref_model=self.ref_model, accelerator=self.accelerator)) 
+            self.add_callback(SyncRefModelCallback(ref_model=self.ref_model, accelerator=self.accelerator)) # type: ignore
 
         # Environment
         self.env = env
@@ -1219,10 +1219,9 @@ class GRPOEnvTrainer(Trainer):
         # Sync model weights to vLLM if needed
         # Skip step 0 since vLLM already has the initial weights
         if self.state.global_step > 0 and self._last_loaded_step != self.state.global_step:
-            print(f"[TRAINER] Syncing weights to vLLM at step {self.state.global_step} (last loaded: {self._last_loaded_step})")
+            print(f"Syncing weights to vLLM at step {self.state.global_step} (last loaded: {self._last_loaded_step})")
             self._move_model_to_vllm()
             self._last_loaded_step = self.state.global_step
-            print(f"[TRAINER] Weight sync complete")
             
         # Continue with normal training
         return super().training_step(model, inputs, num_items_in_batch)
