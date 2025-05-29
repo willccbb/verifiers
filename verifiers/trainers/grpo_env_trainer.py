@@ -172,8 +172,8 @@ class GRPOEnvTrainer(Trainer):
         self.max_prompt_length = args.max_prompt_length
         self.max_completion_length = args.max_completion_length  # = |o_i| in the GRPO paper
         self.num_generations = args.num_generations  # = G in the GRPO paper
+        self.steps_per_generation = args.steps_per_generation # type: ignore
         self.max_concurrent = args.max_concurrent
-        self.max_num_processes = args.max_num_processes
         self.temperature = args.temperature
         self.top_p = args.top_p
         self.min_p = args.min_p
@@ -184,7 +184,7 @@ class GRPOEnvTrainer(Trainer):
         self.loss_type = args.loss_type
         self.scale_rewards = args.scale_rewards
         self.mask_truncated_completions = args.mask_truncated_completions
-        self.delta = args.delta
+        self.delta = args.delta 
 
         # Reference model parameters
         self.beta = args.beta
@@ -199,7 +199,9 @@ class GRPOEnvTrainer(Trainer):
         self._step = 0
         self._buffered_inputs = None
 
-        # Data 
+        # Data
+        self.seed = args.seed
+        self.max_num_processes = args.max_num_processes
         self.shuffle_dataset = args.shuffle_dataset 
         train_dataset = env.get_dataset()
         assert train_dataset is not None
@@ -262,6 +264,7 @@ class GRPOEnvTrainer(Trainer):
                 disable_dropout_in_model(self.ref_model)
 
         # Initialize the metrics
+        self.report_to = args.report_to
         self._metrics = {"train": defaultdict(list), "eval": defaultdict(list)}
         self._total_train_tokens = 0
         self.log_completions = args.log_completions
@@ -294,14 +297,7 @@ class GRPOEnvTrainer(Trainer):
             connection_timeout=args.vllm_server_timeout
         )
         # Only initialize communicator on the main process
-        # Other processes will only use the client for non-NCCL operations
         if self.accelerator.is_main_process:
-            # Log NCCL environment variables for debugging
-            nccl_vars = {k: v for k, v in os.environ.items() if k.startswith('NCCL')}
-            if nccl_vars:
-                print(f"[TRAINER] NCCL environment variables: {nccl_vars}")
-            current_device = torch.cuda.current_device() if torch.cuda.is_available() else -1
-            print(f"[TRAINER] Main process initializing NCCL communicator on device {current_device}")
             self.vllm_client.init_communicator()
         
         self._last_loaded_step = 0  # Initialize to 0 since vLLM already has initial weights
@@ -324,10 +320,17 @@ class GRPOEnvTrainer(Trainer):
         self.env = env
 
         # Async generation setup
+        self.num_steps_async = args.num_steps_async
         self.use_async_generation = args.use_async_generation
         self.async_generator = None
         self._next_batch_id = 0
         self._async_started = False
+
+        self.dataloader_num_workers = args.dataloader_num_workers
+        self.dataloader_pin_memory = args.dataloader_pin_memory
+        self.dataloader_persistent_workers = args.dataloader_persistent_workers
+        self.dataloader_prefetch_factor = args.dataloader_prefetch_factor
+        self.dataloader_drop_last = args.dataloader_drop_last
         
         if self.use_async_generation:
             # Create async generator on all processes for consistent state
@@ -354,18 +357,18 @@ class GRPOEnvTrainer(Trainer):
             data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
 
         dataloader_params = {
-            "batch_size": self._train_batch_size * self.args.steps_per_generation, # type: ignore (None case handled by config __post_init__)
+            "batch_size": self._train_batch_size * self.steps_per_generation, # type: ignore (None case handled by config __post_init__)
             "collate_fn": data_collator,
-            "num_workers": self.args.dataloader_num_workers,
-            "pin_memory": self.args.dataloader_pin_memory,
-            "persistent_workers": self.args.dataloader_persistent_workers,
+            "num_workers": self.dataloader_num_workers,
+            "pin_memory": self.dataloader_pin_memory,
+            "persistent_workers": self.dataloader_persistent_workers,
         }
 
         if not isinstance(train_dataset, torch.utils.data.IterableDataset):
             dataloader_params["sampler"] = self._get_train_sampler()
-            dataloader_params["drop_last"] = self.args.dataloader_drop_last
+            dataloader_params["drop_last"] = self.dataloader_drop_last
             dataloader_params["worker_init_fn"] = seed_worker
-            dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
+            dataloader_params["prefetch_factor"] = self.dataloader_prefetch_factor
 
         dataloader = DataLoader(train_dataset, **dataloader_params)
         
@@ -374,7 +377,7 @@ class GRPOEnvTrainer(Trainer):
             # Store the wrapped dataloader for async access
             self._async_dataloader = AsyncDataLoaderWrapper(
                 dataloader, 
-                buffer_size=max(5, self.args.num_steps_async * 2)
+                buffer_size=max(5, self.num_steps_async * 2)
             )
             return self.accelerator.prepare(self._async_dataloader)
         else:
@@ -413,7 +416,7 @@ class GRPOEnvTrainer(Trainer):
             batch_size=self.generation_batch_size // self.num_generations,
             repeat_count=self.num_iterations * self.steps_per_generation,
             shuffle=self.shuffle_dataset,
-            seed=self.args.seed,
+            seed=self.seed,
         )
 
     def _enable_gradient_checkpointing(self, model: PreTrainedModel, args: GRPOEnvConfig) -> PreTrainedModel:
@@ -818,17 +821,16 @@ class GRPOEnvTrainer(Trainer):
                     reward_tensor = reward_values
                 mean_reward = reward_tensor.mean().item()
                 self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
-            
-        # Log all reward scores - both individual functions and consolidated
-        completions = batch_result.completions[process_slice] if hasattr(batch_result, 'completions') else []
-        prompts = [x['prompt'] for x in generation_batch]
-        self._textual_logs["prompt"].extend(gather_object(prompts))
-        self._textual_logs["completion"].extend(gather_object(completions))
-        for reward_key in all_reward_dict:
-            # Slice rewards for this process
-            reward_values = all_reward_dict[reward_key][process_slice]
-            self._textual_logs["rewards"][reward_key].extend(gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values))
-        
+
+        # Log textual data - only on main process to avoid duplication
+        if self.accelerator.is_main_process:
+            self._textual_logs["prompt"].extend(prompts)
+            self._textual_logs["completion"].extend(completions)
+            for reward_key in all_reward_dict:
+                # Slice rewards for this process
+                reward_values = all_reward_dict[reward_key][process_slice]
+                self._textual_logs["rewards"][reward_key].extend(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values)
+
         return {
             "prompt_ids": prompt_ids,
             "prompt_mask": prompt_mask,
@@ -1063,14 +1065,14 @@ class GRPOEnvTrainer(Trainer):
                 mean_reward = reward_tensor.view(-1, self.num_generations).mean(dim=1).mean().item()
                 self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
 
-        # Log textual data - gather from all processes
-        self._textual_logs["prompt"].extend(gather_object(prompts))
-        self._textual_logs["completion"].extend(gather_object(completions))
-        # Log all reward scores - both individual functions and consolidated
-        for reward_key in all_reward_dict:
-            # Slice rewards for this process
-            reward_values = all_reward_dict[reward_key][process_slice]
-            self._textual_logs["rewards"][reward_key].extend(gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values))
+        # Log textual data - only on main process to avoid duplication
+        if self.accelerator.is_main_process:
+            self._textual_logs["prompt"].extend(prompts)
+            self._textual_logs["completion"].extend(completions)
+            for reward_key in all_reward_dict:
+                # Slice rewards for this process
+                reward_values = all_reward_dict[reward_key][process_slice]
+                self._textual_logs["rewards"][reward_key].extend(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values)
         
         return {
             "prompt_ids": prompt_ids,
@@ -1194,7 +1196,7 @@ class GRPOEnvTrainer(Trainer):
                 self.state.global_step,
             )
 
-            if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
+            if self.report_to and "wandb" in self.report_to and wandb.run is not None:
                 import pandas as pd
  
                 table = {
