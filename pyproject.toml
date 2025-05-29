@@ -31,7 +31,7 @@ all = [
     "ipywidgets",
     "duckduckgo-search",
     "brave-search",
-    "reasoning-gym"
+    "reasoning-gym",
     "smolagents>=1.15.0",
 ]
 
