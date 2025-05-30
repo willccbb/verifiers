@@ -96,11 +96,11 @@ class MultiTurnEnv(Environment):
 
     @abstractmethod
     def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
-        pass
+        raise NotImplementedError("is_completed method must be implemented in subclasses")
 
     @abstractmethod
     def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
-        pass
+        raise NotImplementedError("env_response method must be implemented in subclasses")
 
     def step(self,
              states: List[Dict[str, Any]],
