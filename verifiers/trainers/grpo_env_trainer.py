@@ -27,29 +27,11 @@ from trl import GRPOTrainer, GRPOConfig
 from trl.data_utils import maybe_apply_chat_template
 from trl.import_utils import is_rich_available
 from trl.trainer.utils import pad
+from trl.trainer.grpo_trainer import nanstd
 
 if is_wandb_available():
     import wandb
 
-
-
-# torch.nanstd doesn't exist, so we define it here
-def nanstd(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the standard deviation of a tensor, ignoring NaNs. This function only supports 1D tensors.
-
-    Args:
-        tensor (`torch.Tensor`):
-            Input tensor of shape `(N,)`.
-
-    Returns:
-        `torch.Tensor`:
-            Standard deviation of the tensor, ignoring NaNs.
-    """
-    variance = torch.nanmean((tensor - torch.nanmean(tensor, keepdim=True)) ** 2)  # Compute variance ignoring NaNs
-    count = torch.sum(~torch.isnan(tensor))  # Count of non-NaN values
-    variance *= count / (count - 1)  # Bessel's correction
-    return torch.sqrt(variance)
 
 class GRPOEnvTrainer(GRPOTrainer):
     def __init__(
@@ -137,6 +119,7 @@ class GRPOEnvTrainer(GRPOTrainer):
         completion_messages = broadcast_object_list(completion_messages, from_process=0)
         completion_mask = broadcast_object_list(completion_mask, from_process=0)
 
+        # Slice to keep only the local part of the data
         process_slice = slice(
             self.accelerator.process_index * len(prompts),
             (self.accelerator.process_index + 1) * len(prompts),
@@ -222,11 +205,6 @@ class GRPOEnvTrainer(GRPOTrainer):
             # Scale the rewards to be between 0 and 1
             advantages = advantages / (std_grouped_rewards + 1e-4)
 
-        # Slice to keep only the local part of the data
-        process_slice = slice(
-            self.accelerator.process_index * len(prompts),
-            (self.accelerator.process_index + 1) * len(prompts),
-        )
         advantages = advantages[process_slice]
 
         # Log the metrics
@@ -247,11 +225,17 @@ class GRPOEnvTrainer(GRPOTrainer):
         self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item()) # type: ignore
 
         if self.log_completions and self.state.global_step % self.args.logging_steps == 0:
-            prompts_to_log = gather_object(prompts)
-            completions_to_log = gather_object(completions)
-            rewards_to_log = rewards.tolist()
+            log_data = gather_object({
+                "prompts": prompts,
+                "completions": completions,
+                "rewards": rewards.tolist()
+            })
 
             if self.accelerator.is_main_process:
+                prompts_to_log = log_data["prompts"]
+                completions_to_log = log_data["completions"]
+                rewards_to_log = log_data["rewards"]
+
                 if is_rich_available():
                     print_prompt_completions_sample(
                         [str(prompts_to_log[0][-1]["content"])],
