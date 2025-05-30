@@ -4,7 +4,7 @@ OpenAI-compatible vLLM server with weight synchronization.
 Usage:
 
 ```bash
-uv run python vllm_serve.py --model <model_name> --port <port>
+uv run python vllm_server.py --model <model_name> --port <port>
 ```
 
 Supports:
@@ -16,7 +16,7 @@ import logging
 import os
 import time 
 import asyncio 
-import threading 
+import threading
 import inspect 
 from collections.abc import Sequence
 from collections import defaultdict 
@@ -541,7 +541,7 @@ def llm_worker(
         dtype=script_args.dtype,
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
-        worker_extension_cls="verifiers.inference.vllm_openai.WeightSyncWorkerExtension",
+        worker_extension_cls="verifiers.inference.vllm_server.WeightSyncWorkerExtension",
     )
 
     # Send ready signal to parent process

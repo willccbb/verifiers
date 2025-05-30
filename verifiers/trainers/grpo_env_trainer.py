@@ -598,14 +598,7 @@ class GRPOEnvTrainer(Trainer):
             self.accelerator.wait_for_everyone()
         
         # Step 2: Gather data from all processes for current batch
-        prompts = [x['prompt'] for x in generation_batch]
-        answers = [x['answer'] for x in generation_batch]
-        tasks = [x.get('task', 'default') for x in generation_batch]
-        
-        # All processes participate in gather
-        all_prompts = gather_object(prompts)
-        all_answers = gather_object(answers)
-        all_tasks = gather_object(tasks)
+        all_prompts, all_answers, all_tasks = self._gather_batch_inputs(generation_batch)
         
         # Step 3: Determine if we need to submit batches (coordinated decision)
         should_submit_batches = False
@@ -655,15 +648,8 @@ class GRPOEnvTrainer(Trainer):
                 if isinstance(future_batch, dict):
                     future_batch = [future_batch]
                 
-                # Extract and gather future batch data
-                future_prompts = [x['prompt'] for x in future_batch]
-                future_answers = [x['answer'] for x in future_batch]
-                future_tasks = [x.get('task', 'default') for x in future_batch]
-                
-                # All processes participate in gather
-                all_future_prompts = gather_object(future_prompts)
-                all_future_answers = gather_object(future_answers)
-                all_future_tasks = gather_object(future_tasks)
+                # Extract and gather future batch data using helper
+                all_future_prompts, all_future_answers, all_future_tasks = self._gather_batch_inputs(future_batch)
                 
                 # Main process submits
                 if self.accelerator.is_main_process and self.async_generator is not None:
@@ -738,69 +724,35 @@ class GRPOEnvTrainer(Trainer):
         for key, value in processed_results.items():
             processed_results[key] = value[process_slice]
         
-        # Convert lists to tensors, concatenate, and pad
-        prompt_ids = [torch.tensor(prompt_ids, device=device)
-                      for prompt_ids in processed_results['prompt_ids']]
-        prompt_mask = [torch.tensor(prompt_mask, device=device)
-                      for prompt_mask in processed_results['prompt_mask']]
-        prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left')
-        prompt_mask = pad(prompt_mask, padding_side='left')
+        # Use helper to process token sequences
+        prompt_ids, prompt_mask, completion_ids, completion_mask = self._process_token_sequences(
+            processed_results, device
+        )
         
-        # Truncate prompts from the left if they exceed max_prompt_length
-        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
-            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
-            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
-        
-        completion_ids = [torch.tensor(completion_ids, device=device)
-                          for completion_ids in processed_results['completion_ids']]
-        completion_mask = [torch.tensor(completion_mask, device=device)
-                          for completion_mask in processed_results['completion_mask']]
-        completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right')
-        completion_mask = pad(completion_mask)
-        
-        # Truncate completions from the right if they exceed max_completion_length
-        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
-            completion_ids = completion_ids[:, :self.max_completion_length]
-            completion_mask = completion_mask[:, :self.max_completion_length]
-        
+        # Convert rewards to tensor if needed
         rewards = processed_results['rewards']
+        rewards = torch.tensor(rewards, device=device) if not isinstance(rewards, torch.Tensor) else rewards
         
-        rewards = torch.tensor(rewards, device=device)
-        mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
-        std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
-
-        # Normalize the rewards to compute the advantages
-        mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
-        std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
-        advantages = rewards - mean_grouped_rewards
-        if self.scale_rewards:
-            advantages = advantages / (std_grouped_rewards + 1e-4)
-            
-        # Log reward statistics to metrics
-        mode = "train"  # async generation is only used in training
-        self._metrics[mode]["reward"].append(rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(rewards.std().item())
+        # Use helper to compute advantages
+        advantages = self._compute_advantages(rewards, full_batch=True)
         
-        # Log individual reward function scores as metrics
-        for reward_key in all_reward_dict:
-            if reward_key != 'reward':  # Skip the consolidated reward
-                reward_values = all_reward_dict[reward_key][process_slice]
-                if isinstance(reward_values, list):
-                    reward_tensor = torch.tensor(reward_values, device=device)
-                else:
-                    reward_tensor = reward_values
-                mean_reward = reward_tensor.mean().item()
-                self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
-            
-        # Log all reward scores - both individual functions and consolidated
+        # Store prompt_mask for metrics logging (used in _log_generation_metrics)
+        self._current_prompt_mask = prompt_mask
+        
+        # Use helper to log metrics
+        self._log_generation_metrics(
+            mode="train",  # async generation is only used in training
+            completion_mask=completion_mask,
+            completion_ids=completion_ids,
+            rewards=rewards,
+            all_reward_dict=all_reward_dict,
+            process_slice=process_slice
+        )
+        
+        # Use helper to log textual data
         completions = batch_result.completions[process_slice] if hasattr(batch_result, 'completions') else []
         prompts = [x['prompt'] for x in generation_batch]
-        self._textual_logs["prompt"].extend(gather_object(prompts))
-        self._textual_logs["completion"].extend(gather_object(completions))
-        for reward_key in all_reward_dict:
-            # Slice rewards for this process
-            reward_values = all_reward_dict[reward_key][process_slice]
-            self._textual_logs["rewards"][reward_key].extend(gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values))
+        self._log_textual_data(prompts, completions, all_reward_dict, process_slice)
         
         return {
             "prompt_ids": prompt_ids,
@@ -810,6 +762,154 @@ class GRPOEnvTrainer(Trainer):
             "old_per_token_logps": None,
             "advantages": advantages,
         }
+
+    # ========== Helper methods for code consolidation ==========
+
+    def _gather_batch_inputs(self, inputs: List[Dict[str, Any]]) -> Tuple[List, List, List]:
+        """Gather prompts, answers, and tasks from all processes."""
+        prompts = [x['prompt'] for x in inputs]
+        answers = [x['answer'] for x in inputs]
+        tasks = [x.get('task', 'default') for x in inputs]
+        
+        all_prompts = gather_object(prompts)
+        all_answers = gather_object(answers)
+        all_tasks = gather_object(tasks)
+        
+        return all_prompts, all_answers, all_tasks
+
+    def _process_token_sequences(
+        self, 
+        processed_results: Dict[str, List],
+        device: torch.device
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Convert lists to tensors, pad, and truncate sequences."""
+        # Convert lists to tensors
+        prompt_ids = [torch.tensor(prompt_ids, device=device)
+                      for prompt_ids in processed_results['prompt_ids']]
+        prompt_mask = [torch.tensor(prompt_mask, device=device)
+                       for prompt_mask in processed_results['prompt_mask']]
+        completion_ids = [torch.tensor(completion_ids, device=device)
+                          for completion_ids in processed_results['completion_ids']]
+        completion_mask = [torch.tensor(completion_mask, device=device)
+                           for completion_mask in processed_results['completion_mask']]
+        
+        # Pad sequences
+        prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left')
+        prompt_mask = pad(prompt_mask, padding_side='left')
+        completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right')
+        completion_mask = pad(completion_mask)
+        
+        # Truncate prompts from the left if they exceed max_prompt_length
+        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
+            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
+            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
+        
+        # Truncate completions from the right if they exceed max_completion_length
+        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
+            completion_ids = completion_ids[:, :self.max_completion_length]
+            completion_mask = completion_mask[:, :self.max_completion_length]
+        
+        return prompt_ids, prompt_mask, completion_ids, completion_mask
+
+    def _compute_advantages(
+        self,
+        rewards: torch.Tensor,
+        full_batch: bool = True
+    ) -> torch.Tensor:
+        """Compute advantages from rewards with optional normalization."""
+        if full_batch:
+            # Use full batch statistics
+            mean_grouped = rewards.view(-1, self.num_generations).mean(dim=1)
+            std_grouped = rewards.view(-1, self.num_generations).std(dim=1)
+        else:
+            # Use local batch statistics (for potential future use)
+            mean_grouped = rewards.mean()
+            std_grouped = rewards.std()
+        
+        # Normalize the rewards to compute advantages
+        mean_grouped = mean_grouped.repeat_interleave(self.num_generations, dim=0)
+        std_grouped = std_grouped.repeat_interleave(self.num_generations, dim=0)
+        advantages = rewards - mean_grouped
+        
+        if self.scale_rewards:
+            advantages = advantages / (std_grouped + 1e-4)
+        
+        return advantages
+
+    def _log_generation_metrics(
+        self,
+        mode: str,
+        completion_mask: torch.Tensor,
+        completion_ids: torch.Tensor,
+        rewards: torch.Tensor,
+        all_reward_dict: Dict[str, Any],
+        process_slice: slice
+    ) -> None:
+        """Log all generation-related metrics."""
+        # Log token count
+        if mode == "train":
+            prompt_mask = self._current_prompt_mask  # We'll need to store this
+            attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
+            self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
+        self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
+        
+        # Log completion lengths
+        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
+        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item())
+        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item())
+        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item())
+        
+        # Check for EOS tokens and log terminated sequence lengths
+        is_eos = completion_ids == self.processing_class.eos_token_id
+        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1))
+        term_completion_mask = agg_completion_mask[agg_terminated_with_eos]
+        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
+        self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
+        
+        if len(term_completion_mask) == 0:
+            # edge case where no completed sequences are found
+            term_completion_mask = torch.zeros(1, device=completion_mask.device)
+        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
+        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
+        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
+        
+        # Log reward statistics
+        mean_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
+        std_rewards = rewards.view(-1, self.num_generations).std(dim=1)
+        self._metrics[mode]["reward"].append(mean_rewards.mean().item())
+        self._metrics[mode]["reward_std"].append(std_rewards.mean().item())
+        
+        # Log individual reward function scores as metrics
+        for reward_key in all_reward_dict:
+            if reward_key != 'reward':  # Skip the consolidated reward
+                reward_values = all_reward_dict[reward_key][process_slice]
+                if isinstance(reward_values, list):
+                    reward_tensor = torch.tensor(reward_values, device=rewards.device)
+                else:
+                    reward_tensor = reward_values
+                mean_reward = reward_tensor.mean().item()
+                self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
+
+    def _log_textual_data(
+        self,
+        prompts: List[str],
+        completions: List[str],
+        all_reward_dict: Dict[str, Any],
+        process_slice: slice
+    ) -> None:
+        """Log textual data for wandb."""
+        self._textual_logs["prompt"].extend(gather_object(prompts))
+        self._textual_logs["completion"].extend(gather_object(completions))
+        
+        # Log all reward scores - both individual functions and consolidated
+        for reward_key in all_reward_dict:
+            # Slice rewards for this process
+            reward_values = all_reward_dict[reward_key][process_slice]
+            self._textual_logs["rewards"][reward_key].extend(
+                gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values)
+            )
+
+    # ========== End of helper methods ==========
 
     def _get_sampling_args(self) -> Dict[str, Any]:
         """Get sampling arguments for Environment generation."""
@@ -875,15 +975,9 @@ class GRPOEnvTrainer(Trainer):
         """
         device = self.accelerator.device
         mode = "train" if self.model.training else "eval" # type: ignore
-        prompts = [x['prompt'] for x in inputs] # type: ignore
-        answers = [x['answer'] for x in inputs] # type: ignore
-        all_prompts = gather_object(prompts)
-        all_answers = gather_object(answers)
-        if 'task' in inputs[0].keys():
-            tasks = [x['task'] for x in inputs] # type: ignore
-            all_tasks = gather_object(tasks)
-        else:
-            all_tasks = ['default'] * len(all_prompts)
+        
+        # Use helper to gather inputs from all processes
+        all_prompts, all_answers, all_tasks = self._gather_batch_inputs(inputs)
 
         # generate via Environment (main process only)
         object_keys = ['prompt_ids', 'prompt_mask', 'completion_ids', 'completion_mask', 'rewards']
@@ -942,15 +1036,7 @@ class GRPOEnvTrainer(Trainer):
         
         # Compute advantages BEFORE process slicing to use the full reward batch
         all_rewards = torch.tensor(processed_results['rewards'], device=device)
-        mean_grouped_rewards = all_rewards.view(-1, self.num_generations).mean(dim=1)
-        std_grouped_rewards = all_rewards.view(-1, self.num_generations).std(dim=1)
-        
-        # Normalize the rewards to compute the advantages
-        mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
-        std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
-        all_advantages = all_rewards - mean_grouped_rewards
-        if self.scale_rewards:
-            all_advantages = all_advantages / (std_grouped_rewards + 1e-4)
+        all_advantages = self._compute_advantages(all_rewards, full_batch=True)
         
         # Step 5: Slice data for this process
         process_slice = slice(
@@ -966,84 +1052,27 @@ class GRPOEnvTrainer(Trainer):
         completions = all_completions[process_slice] if all_completions else []
         rewards = all_rewards[process_slice]
 
-        # convert lists to tensors, concatenate, and pad
-        prompt_ids = [torch.tensor(prompt_ids, device=device)
-                      for prompt_ids in processed_results['prompt_ids']]
-        prompt_mask = [torch.tensor(prompt_mask, device=device)
-                      for prompt_mask in processed_results['prompt_mask']]
-        prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
-        prompt_mask = pad(prompt_mask, padding_side='left')
+        # Use helper to process token sequences
+        prompt_ids, prompt_mask, completion_ids, completion_mask = self._process_token_sequences(
+            processed_results, device
+        )
         
-        # Truncate prompts from the left if they exceed max_prompt_length
-        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
-            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
-            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
+        # Store prompt_mask for metrics logging (used in _log_generation_metrics)
+        self._current_prompt_mask = prompt_mask
         
-        completion_ids = [torch.tensor(completion_ids, device=device)
-                          for completion_ids in processed_results['completion_ids']]
-        completion_mask = [torch.tensor(completion_mask, device=device)
-                          for completion_mask in processed_results['completion_mask']]
-        completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-        completion_mask = pad(completion_mask)
+        # Use helper to log metrics
+        self._log_generation_metrics(
+            mode=mode,
+            completion_mask=completion_mask,
+            completion_ids=completion_ids,
+            rewards=rewards,
+            all_reward_dict=all_reward_dict,
+            process_slice=process_slice
+        )
         
-        # Truncate completions from the right if they exceed max_completion_length
-        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
-            completion_ids = completion_ids[:, :self.max_completion_length]
-            completion_mask = completion_mask[:, :self.max_completion_length]
-
-        # Log 
-        if mode == "train":
-            # Update token count
-            attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
-            self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item() # type: ignore
-        self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
-
-        # Log completion lengths
-        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
-        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item()) # type: ignore
-        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item()) # type: ignore
-        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item()) # type: ignore
-
-        # Check for EOS tokens and log terminated sequence lengths
-        is_eos = completion_ids == self.processing_class.eos_token_id # type: ignore
-        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1)) # type: ignore
-        term_completion_mask = agg_completion_mask[agg_terminated_with_eos] # type: ignore
-        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
-        self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
-        
-        if len(term_completion_mask) == 0:
-            # edge case where no completed sequences are found
-            term_completion_mask = torch.zeros(1, device=device)
-        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
-        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
-        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
-
-        # Log reward statistics
-        mean_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
-        std_rewards = rewards.view(-1, self.num_generations).std(dim=1)
-        self._metrics[mode]["reward"].append(mean_rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(std_rewards.mean().item())
-        
-        # Log individual reward function scores as metrics
-        for reward_key in all_reward_dict:
-            if reward_key != 'reward':  # Skip the consolidated reward as it's already logged above
-                # Get rewards for this process and compute mean
-                reward_values = all_reward_dict[reward_key][process_slice]
-                if isinstance(reward_values, list):
-                    reward_tensor = torch.tensor(reward_values, device=device)
-                else:
-                    reward_tensor = reward_values
-                mean_reward = reward_tensor.view(-1, self.num_generations).mean(dim=1).mean().item()
-                self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
-
-        # Log textual data - gather from all processes
-        self._textual_logs["prompt"].extend(gather_object(prompts))
-        self._textual_logs["completion"].extend(gather_object(completions))
-        # Log all reward scores - both individual functions and consolidated
-        for reward_key in all_reward_dict:
-            # Slice rewards for this process
-            reward_values = all_reward_dict[reward_key][process_slice]
-            self._textual_logs["rewards"][reward_key].extend(gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values))
+        # Use helper to log textual data
+        prompts = [x['prompt'] for x in inputs]
+        self._log_textual_data(prompts, completions, all_reward_dict, process_slice)
         
         return {
             "prompt_ids": prompt_ids,
