@@ -1217,7 +1217,7 @@ class GRPOTrainer(Trainer):
             if key.startswith('reward_') and key != 'reward':
                 reward_values = eval_results[key]
                 if isinstance(reward_values, list):
-                    metrics[f'eval_rewards/{key[7:]}'] = np.mean(reward_values)
+                    metrics[f'eval_rewards/{key[7:]}'] = float(np.mean(reward_values))
                 else:
                     metrics[f'eval_rewards/{key[7:]}'] = reward_values.mean().item()
         
@@ -1236,9 +1236,9 @@ class GRPOTrainer(Trainer):
                     # Tokenize and count
                     completion_lengths.append(len(tokens))
             
-            metrics['eval_completions/mean_length'] = np.mean(completion_lengths)
-            metrics['eval_completions/min_length'] = np.min(completion_lengths) 
-            metrics['eval_completions/max_length'] = np.max(completion_lengths)
+            metrics['eval_completions/mean_length'] = float(np.mean(completion_lengths))
+            metrics['eval_completions/min_length'] = int(np.min(completion_lengths))
+            metrics['eval_completions/max_length'] = int(np.max(completion_lengths))
         
         # Log sample completions if requested
         if self.accelerator.is_main_process and self.log_completions and 'prompt' in eval_results:
