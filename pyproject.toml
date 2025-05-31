@@ -34,5 +34,12 @@ all = [
     "smolagents>=1.15.0",
 ]
 
+[project.scripts]
+vf-vllm = "verifiers.inference.vllm_server:cli_main"
+
 [tool.setuptools]
 packages = ["verifiers"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

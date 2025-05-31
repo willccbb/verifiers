@@ -33,7 +33,6 @@ import traceback
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse 
 import torch
-from trl import TrlParser
 from pydantic import BaseModel
 import uvicorn
 from vllm import LLM, SamplingParams
@@ -625,9 +624,6 @@ async def batch_processing_loop(
                 while True: # Loop to drain current items in asyncio.Queue
                     pooled_req_state: PooledRequestState = queue.get_nowait()
                     pending_requests_by_signature[pooled_req_state.pool_signature].append(pooled_req_state)
-                    logger_instance.debug(f"[LIFECYCLE] Request {pooled_req_state.request_id} enqueued to pending pool. "
-                                        f"max_tokens={pooled_req_state.effective_max_tokens}, "
-                                        f"signature={pooled_req_state.pool_signature}")
                     queue.task_done() # Signal that this item from main queue is taken
             except asyncio.QueueEmpty:
                 pass # No new requests in the main queue right now
@@ -641,9 +637,6 @@ async def batch_processing_loop(
                 if available_signatures:
                     active_pool_signature = available_signatures[0] # Pick one
                     active_pool_requests = pending_requests_by_signature.pop(active_pool_signature)
-                    logger_instance.info(f"[LIFECYCLE] Activated new pool with signature: {active_pool_signature}. Size: {len(active_pool_requests)}")
-                    for req in active_pool_requests:
-                        logger_instance.debug(f"[LIFECYCLE] Request {req.request_id} moved to active pool")
             
             # 3. Merge new matching requests into the active pool
             if active_pool_signature and active_pool_signature in pending_requests_by_signature:
@@ -983,10 +976,6 @@ async def batch_processing_loop(
                                 
                                 # Check if generation has stopped
                                 if new_token_count < chunk_size:
-                                    # Incomplete chunk indicates generation should stop
-                                    logger_instance.info(f"Request {req_state.request_id} generated incomplete chunk. "
-                                                        f"Generated {new_token_count}/{chunk_size} tokens in chunk. "
-                                                        f"Marking as complete to prevent doom loop.")
                                     # Set finish reason if not already set by vLLM
                                     if req_state.finish_reason is None:
                                         req_state.finish_reason = "stop"  # Generation naturally stopped
@@ -1084,12 +1073,9 @@ async def batch_processing_loop(
                         if req_state.is_complete and not req_state.completed_and_signaled:
                             # Request is complete but not yet signaled
                             completed_in_sub_batch.append(req_state)
-                            logger_instance.info(f"[LIFECYCLE] Request {req_state.request_id} is complete and will be finalized. "
-                                               f"Generated {req_state.generated_token_count} tokens, finish_reason={req_state.finish_reason}")
                         elif not req_state.is_complete:
                             # Request is not complete, keep for next chunk
                             updated_active_pool.append(req_state)
-                            logger_instance.debug(f"[LIFECYCLE] Request {req_state.request_id} is not complete, keeping for next chunk")
                         # If already signaled (completed_and_signaled is True), don't re-add or re-signal
                     
                     active_pool_requests = updated_active_pool
@@ -1338,12 +1324,8 @@ def main(script_args: ScriptArguments):
             original_chat_messages=req.messages, # Store original messages
         )
         
-        logger.info(f"[LIFECYCLE] Created chat request {request_id}: max_tokens={effective_max_tokens}, "
-                   f"messages={len(req.messages)}, model={req.model}")
-
         try:
             await request_queue.put(pooled_state)
-            logger.debug(f"[LIFECYCLE] Request {request_id} successfully queued")
         except Exception as e:
             logger.error(f"Enqueueing error for {request_id}: {e}", exc_info=True)
             return JSONResponse(status_code=500, content={"error": "Internal server error while queueing request."})
@@ -1702,14 +1684,74 @@ def main(script_args: ScriptArguments):
     )
 
 
-def make_parser(subparsers: Optional[argparse._SubParsersAction] = None):
-    if subparsers is not None:
-        parser = subparsers.add_parser("vllm-serve", help="Run the vLLM serve script", dataclass_types=ScriptArguments)
-    else:
-        parser = TrlParser(ScriptArguments)
+def make_parser():
+    parser = argparse.ArgumentParser(description="OpenAI-compatible vLLM server with weight synchronization")
+    
+    parser.add_argument("--model", type=str, required=True,
+                        help="Model name or path to load the model from.")
+    parser.add_argument("--revision", type=str, default=None,
+                        help="Revision to use for the model. If not specified, the default branch will be used.")
+    parser.add_argument("--tensor-parallel-size", type=int, default=1,
+                        help="Number of tensor parallel workers to use.")
+    parser.add_argument("--data-parallel-size", type=int, default=1,
+                        help="Number of data parallel workers to use.")
+    parser.add_argument("--host", type=str, default="0.0.0.0",
+                        help="Host address to run the server on.")
+    parser.add_argument("--port", type=int, default=8000,
+                        help="Port to run the server on.")
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.95,
+                        help="Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV cache.")
+    parser.add_argument("--dtype", type=str, default="auto",
+                        help="Data type to use for vLLM generation. If set to 'auto', the data type will be automatically determined.")
+    parser.add_argument("--max-model-len", type=int, default=8192,
+                        help="The max_model_len to use for vLLM. This can be useful when running with reduced gpu_memory_utilization.")
+    parser.add_argument("--enable-prefix-caching", action="store_true", default=True,
+                        help="Whether to enable prefix caching in vLLM.")
+    parser.add_argument("--no-enable-prefix-caching", dest="enable_prefix_caching", action="store_false",
+                        help="Disable prefix caching in vLLM.")
+    parser.add_argument("--enforce-eager", action="store_true", default=None,
+                        help="Whether to enforce eager execution. If True, disable CUDA graph and always execute in eager mode.")
+    parser.add_argument("--kv-cache-dtype", type=str, default="auto",
+                        help="Data type to use for KV cache. If set to 'auto', the dtype will default to the model data type.")
+    parser.add_argument("--log-level", type=str, default="info", 
+                        choices=["critical", "error", "warning", "info", "debug", "trace"],
+                        help="Log level for uvicorn.")
+    parser.add_argument("--max-batch-size", type=int, default=32,
+                        help="Maximum number of requests to process in one LLM call from the active pool.")
+    parser.add_argument("--batch-request-timeout-seconds", type=int, default=300,
+                        help="Timeout in seconds for a single request waiting for its turn and completion.")
+    parser.add_argument("--token-chunk-size", type=int, default=64,
+                        help="Number of tokens to generate per iteration per request in token-chunk dynamic batching.")
+    
     return parser
 
-if __name__ == "__main__":
+def cli_main():
+    """Entry point for the vf-vllm CLI command."""
     parser = make_parser()
-    (script_args,) = parser.parse_args_and_config()
+    args = parser.parse_args()
+    
+    # Convert argparse Namespace to ScriptArguments dataclass
+    script_args = ScriptArguments(
+        model=args.model,
+        revision=args.revision,
+        tensor_parallel_size=args.tensor_parallel_size,
+        data_parallel_size=args.data_parallel_size,
+        host=args.host,
+        port=args.port,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+        dtype=args.dtype,
+        max_model_len=args.max_model_len,
+        enable_prefix_caching=args.enable_prefix_caching,
+        enforce_eager=args.enforce_eager,
+        kv_cache_dtype=args.kv_cache_dtype,
+        log_level=args.log_level,
+        max_batch_size=args.max_batch_size,
+        batch_request_timeout_seconds=args.batch_request_timeout_seconds,
+        token_chunk_size=args.token_chunk_size
+    )
+    
     main(script_args)
+
+
+if __name__ == "__main__":
+    cli_main()

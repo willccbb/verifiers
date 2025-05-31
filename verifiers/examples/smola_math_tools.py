@@ -1,8 +1,7 @@
 from datasets import concatenate_datasets
-from trl import GRPOConfig
 
 import verifiers as vf
-from verifiers.utils import preprocess_dataset
+from verifiers.utils import load_example_dataset
 from verifiers.prompts.system_prompts import MATH_SMOLA_PROMPT_TEMPLATE
 from verifiers.prompts.few_shots import CALCULATOR_SMOLA_FEW_SHOTS
 from verifiers.envs.smola_tool_env import SmolaToolEnv
@@ -16,7 +15,7 @@ except ImportError:
 """
 Multi-GPU training (single node, 4 training + 4 inference) using SmolaAgents tools
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model 'Qwen/Qwen2.5-7B-Instruct' \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_server.py --model 'Qwen/Qwen2.5-7B-Instruct' \
     --tensor_parallel_size 4 --max_model_len 8192 --dtype bfloat16 \
     --gpu_memory_utilization 0.9 --enable_prefix_caching True \
     --host 0.0.0.0 --port 8000
@@ -24,10 +23,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model 'Q
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/smola_math_train.py
 """
 
-dataset = preprocess_dataset("math", "train", n=6000)
+dataset = load_example_dataset("math", "train", n=6000)
 
-eval_aime24 = preprocess_dataset("aime2024", n=30)
-eval_aime25 = preprocess_dataset("aime2025", n=30)
+eval_aime24 = load_example_dataset("aime2024", n=30)
+eval_aime25 = load_example_dataset("aime2025", n=30)
 eval_dataset = concatenate_datasets([eval_aime24, eval_aime25]).shuffle(seed=0)
 
 # Use SmolaAgents' PythonInterpreterTool as a replacement for the python tool
