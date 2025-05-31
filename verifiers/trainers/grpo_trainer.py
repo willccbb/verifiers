@@ -644,7 +644,7 @@ class GRPOTrainer(Trainer):
                     
                     # Only main process submits
                     if self.accelerator.is_main_process:
-                        future_request = BatchRequest(
+                        request = BatchRequest(
                             batch_id=i,
                             env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
                             processing_class=self.processing_class,
@@ -656,7 +656,8 @@ class GRPOTrainer(Trainer):
                             num_processes=self.accelerator.num_processes,
                             local_batch_size=len(future_batch),
                         )
-                        self.async_generator.submit_batch(future_request)
+                        self.async_generator.submit_batch(request)
+                        self._next_batch_id = i + 1
                 
                 if self.accelerator.is_main_process:
                     self.logger.info(f"Submitted {self._next_batch_id} batches to prime the pipeline")
