@@ -1,9 +1,9 @@
 from peft import LoraConfig
 
-from verifiers.trainers.grpo_env_config import GRPOEnvConfig
+from verifiers.trainers.grpo_config import GRPOConfig
 
-def grpo_defaults(run_name: str) -> GRPOEnvConfig:
-    return GRPOEnvConfig(
+def grpo_defaults(run_name: str) -> GRPOConfig:
+    return GRPOConfig(
         output_dir=f"outputs/{run_name}",
         run_name=run_name,
         learning_rate=1e-6,

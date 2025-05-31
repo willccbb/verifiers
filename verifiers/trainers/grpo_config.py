@@ -9,9 +9,9 @@ from transformers import TrainingArguments # type: ignore
 
 
 @dataclass
-class GRPOEnvConfig(TrainingArguments):
+class GRPOConfig(TrainingArguments):
     r"""
-    Configuration class for the [`GRPOEnvTrainer`].
+    Configuration class for the [`GRPOTrainer`].
 
     Only the parameters specific to GRPO training are listed here. For details on other parameters, refer to the
     [`~transformers.TrainingArguments`] documentation.

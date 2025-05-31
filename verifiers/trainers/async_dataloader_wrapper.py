@@ -1,5 +1,4 @@
-from typing import Iterator, Optional, Any, Dict, List, Union
-import torch
+from typing import Any, List
 from torch.utils.data import DataLoader
 from collections import deque
 import threading

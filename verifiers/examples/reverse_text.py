@@ -4,6 +4,10 @@ import verifiers as vf
 #model = 'Qwen/Qwen2.5-1.5B-Instruct'
 model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
+# evaluate on the first 32 examples, train on the rest
+eval_dataset = dataset.select(range(32)) # type: ignore
+train_dataset = dataset.select(range(32, len(dataset))) # type: ignore
+
 parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
 system_prompt = f"""Reverse the given text.
 
@@ -29,7 +33,8 @@ rubric = vf.Rubric(funcs=[
 ], weights=[1.0, 0.2])
 
 vf_env = vf.SingleTurnEnv(
-    dataset=dataset, # type: ignore
+    dataset=train_dataset, # type: ignore
+    eval_dataset=eval_dataset, # type: ignore
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric
@@ -39,9 +44,11 @@ args.num_iterations = 2
 args.per_device_train_batch_size = 8
 args.num_generations = 8
 args.gradient_accumulation_steps = 4
+args.eval_strategy = "steps"
+args.eval_steps = 10
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-trainer = vf.GRPOEnvTrainer(
+trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,

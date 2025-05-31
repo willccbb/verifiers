@@ -24,10 +24,11 @@ from .envs.smola_tool_env import SmolaToolEnv
 from .inference.vllm_client import VLLMClient
 
 from .utils.logging_utils import setup_logging, print_prompt_completions_sample
-from .trainers.grpo_env_trainer import GRPOEnvTrainer
+from .trainers.grpo_trainer import GRPOTrainer
+from .trainers.grpo_config import GRPOConfig
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
-from .utils.config_utils import GRPOEnvConfig, grpo_defaults, lora_defaults
+from .utils.config_utils import grpo_defaults, lora_defaults
 
 __version__ = "0.1.0"
 
@@ -48,12 +49,12 @@ __all__ = [
     "ReasoningGymEnv",
     "ToolEnv",
     "SmolaToolEnv",
-    "GRPOEnvTrainer",
+    "GRPOTrainer",
+    "GRPOConfig",
     "VLLMClient",
     "get_model",
     "get_tokenizer",
     "get_model_and_tokenizer",
-    "GRPOEnvConfig",
     "grpo_defaults",
     "lora_defaults",
     "extract_boxed_answer",

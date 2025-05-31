@@ -1,8 +1,7 @@
 import threading
 import queue
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, Future
 import time
 import torch
 from collections import deque

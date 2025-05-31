@@ -1,28 +1,18 @@
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
 
-import os
 import logging
-import textwrap
-import warnings
 from collections import defaultdict, deque
-from collections.abc import Sized
 from contextlib import nullcontext
-from typing import Callable, Optional, Union, Any, List, Dict, Tuple
+from typing import Optional, Union, Any, List, Dict, Tuple
 
 import datasets
 import openai
 import torch
 from torch.utils.data import DataLoader, Sampler
-from accelerate.utils import broadcast_object_list, gather, gather_object, is_peft_model, set_seed
-from datasets import Dataset, IterableDataset
-from liger_kernel.chunked_loss import LigerFusedLinearGRPOLoss
-from peft import PeftConfig, get_peft_model, PeftModel, PeftMixedModel
-from torch import nn
+from accelerate.utils import broadcast_object_list, gather_object, is_peft_model
+from peft import PeftConfig, get_peft_model
 from torch.utils.data import DataLoader
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-)
+from transformers import AutoModelForCausalLM
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -37,12 +27,12 @@ from trl.trainer.utils import (
     selective_log_softmax
 )
 import wandb
-import time
+import numpy as np
 
 from verifiers import Environment
 from verifiers.inference import VLLMClient
-from verifiers.trainers.grpo_env_config import GRPOEnvConfig
-from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest, BatchResult
+from verifiers.trainers.grpo_config import GRPOConfig
+from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
 from verifiers.utils.trainer_utils import RepeatSampler
@@ -142,12 +132,12 @@ def nanmax(tensor: torch.Tensor) -> torch.Tensor:
     return torch.max(tensor[~torch.isnan(tensor)])
 
 
-class GRPOEnvTrainer(Trainer):
+class GRPOTrainer(Trainer):
     def __init__(
             self,
             model: PreTrainedModel,
             env: Environment,
-            args: GRPOEnvConfig,
+            args: GRPOConfig,
             processing_class: PreTrainedTokenizerBase,
             callbacks: Optional[list[TrainerCallback]] = None,
             optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
@@ -206,6 +196,8 @@ class GRPOEnvTrainer(Trainer):
         self.shuffle_dataset = args.shuffle_dataset 
         train_dataset = env.get_dataset()
         assert train_dataset is not None
+
+        eval_dataset = env.get_eval_dataset()
         
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
@@ -237,6 +229,7 @@ class GRPOEnvTrainer(Trainer):
             args=args,
             data_collator=data_collator,
             train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
             processing_class=processing_class,
             callbacks=callbacks,
             optimizers=optimizers,
@@ -412,7 +405,7 @@ class GRPOEnvTrainer(Trainer):
             seed=self.args.seed,
         )
 
-    def _enable_gradient_checkpointing(self, model: PreTrainedModel, args: GRPOEnvConfig) -> PreTrainedModel:
+    def _enable_gradient_checkpointing(self, model: PreTrainedModel, args: GRPOConfig) -> PreTrainedModel:
         """Enables gradient checkpointing for the model."""
         # Ensure use_cache is disabled
         model.config.use_cache = False
@@ -1193,3 +1186,99 @@ class GRPOEnvTrainer(Trainer):
             if self.async_generator and self._async_started and self.accelerator.is_main_process:
                 self.async_generator.stop()
             self._async_started = False
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval", **kwargs):
+        """
+        Override the evaluate method to use env.evaluate() directly.
+        This bypasses the standard batch-by-batch evaluation and uses the environment's
+        built-in evaluation logic instead.
+        """
+        self.logger.info("Running evaluation using environment's evaluate method")
+        
+        # Call env.evaluate with appropriate parameters
+        eval_results = self.env.evaluate(
+            client=self.oai_client,
+            model=self._get_model_name(),
+            sampling_args=self._get_sampling_args(),
+            max_concurrent=self.env_max_concurrent,
+        )
+        
+        # Process results to compute metrics
+        metrics = {}
+        
+        # Compute reward statistics
+        if 'reward' in eval_results:
+            rewards = torch.tensor(eval_results['reward'])
+            metrics['eval_reward'] = rewards.mean().item()
+            metrics['eval_reward_std'] = rewards.std().item() 
+        
+        # Log individual reward function scores
+        for key in eval_results:
+            if key.startswith('reward_') and key != 'reward':
+                reward_values = eval_results[key]
+                if isinstance(reward_values, list):
+                    metrics[f'eval_rewards/{key[7:]}'] = np.mean(reward_values)
+                else:
+                    metrics[f'eval_rewards/{key[7:]}'] = reward_values.mean().item()
+        
+        # Compute completion length statistics
+        if 'completion' in eval_results:
+            completions = eval_results['completion']
+            if isinstance(completions[0], str):
+                # Completion format - directly tokenize strings
+                completion_lengths = [len(self.processing_class.encode(c)) for c in completions] # type: ignore
+            else:
+                # Chat format - use apply_chat_template
+                completion_lengths = []
+                for comp in completions:
+                    # Apply chat template to get the full text
+                    tokens = self.processing_class.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
+                    # Tokenize and count
+                    completion_lengths.append(len(tokens))
+            
+            metrics['eval_completions/mean_length'] = np.mean(completion_lengths)
+            metrics['eval_completions/min_length'] = np.min(completion_lengths) 
+            metrics['eval_completions/max_length'] = np.max(completion_lengths)
+        
+        # Log sample completions if requested
+        if self.accelerator.is_main_process and self.log_completions and 'prompt' in eval_results:
+            # Prepare textual logs
+            prompts = eval_results['prompt'][:self.num_completions_to_print]
+            completions = eval_results['completion'][:self.num_completions_to_print]
+            
+            # Extract rewards for logging
+            reward_dict = {}
+            if 'reward' in eval_results:
+                reward_dict['reward'] = eval_results['reward'][:self.num_completions_to_print]
+            for key in eval_results:
+                if key.startswith('reward_') and key != 'reward':
+                    reward_dict[key] = eval_results[key][:self.num_completions_to_print]
+            
+            # Print sample
+            print_prompt_completions_sample(
+                prompts,
+                completions, 
+                reward_dict,
+                self.state.global_step,
+            )
+            
+            # Log to wandb if available
+            if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
+                import pandas as pd
+                
+                table_data = {
+                    "step": [str(self.state.global_step)] * len(prompts),
+                    "prompt": prompts,
+                    "completion": completions,
+                }
+                for k, v in reward_dict.items():
+                    table_data[k] = v
+                    
+                df = pd.DataFrame(table_data)
+                wandb.log({"eval_completions": wandb.Table(dataframe=df)})
+        
+        # Log all metrics
+        self.log(metrics)
+        
+        # Return metrics dict to match base class signature
+        return metrics
