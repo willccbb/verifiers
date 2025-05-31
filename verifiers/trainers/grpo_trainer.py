@@ -619,15 +619,34 @@ class GRPOTrainer(Trainer):
                         answers = []
                         tasks = []
                     
-                    all_prompts = gather_object(prompts)
-                    all_answers = gather_object(answers)
-                    all_tasks = gather_object(tasks)
+                    # Debug log before gather
+                    if self._step < 10:
+                        self.logger.info(
+                            f"Process {self.accelerator.process_index}: About to gather future batch data. "
+                            f"Has data: {future_batch is not None}"
+                        )
+                    
+                    all_future_prompts = gather_object(prompts)
+                    all_future_answers = gather_object(answers)
+                    all_future_tasks = gather_object(tasks)
+                    
+                    # Debug log after gather
+                    if self._step < 10 and self.accelerator.is_main_process:
+                        self.logger.info(
+                            f"Main process: Gathered future batch data. "
+                            f"Total prompts: {len(all_future_prompts)}"
+                        )
+                    
+                    # Flatten the gathered lists (gather_object returns list of lists)
+                    all_future_prompts = [item for sublist in all_future_prompts for item in sublist]
+                    all_future_answers = [item for sublist in all_future_answers for item in sublist]
+                    all_future_tasks = [item for sublist in all_future_tasks for item in sublist]
                     
                     # Only main process submits
                     if self.accelerator.is_main_process:
-                        request = BatchRequest(
+                        future_request = BatchRequest(
                             batch_id=i,
-                            env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                            env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
                             processing_class=self.processing_class,
                             mask_env_responses=self.mask_env_responses,
                             max_concurrent=self.max_concurrent,
@@ -637,8 +656,7 @@ class GRPOTrainer(Trainer):
                             num_processes=self.accelerator.num_processes,
                             local_batch_size=len(future_batch),
                         )
-                        self.async_generator.submit_batch(request)
-                        self._next_batch_id = i + 1
+                        self.async_generator.submit_batch(future_request)
                 
                 if self.accelerator.is_main_process:
                     self.logger.info(f"Submitted {self._next_batch_id} batches to prime the pipeline")
@@ -685,7 +703,18 @@ class GRPOTrainer(Trainer):
         device = self.accelerator.device
         
         # Step 1: Gather batch inputs from all processes
+        if self._step < 10:
+            self.logger.info(
+                f"Process {self.accelerator.process_index}: About to gather batch inputs. "
+                f"Local batch size: {len(generation_batch)}"
+            )
+        
         all_prompts, all_answers, all_tasks = self._gather_batch_inputs(generation_batch)
+        
+        if self._step < 10 and self.accelerator.is_main_process:
+            self.logger.info(
+                f"Main process: Gathered batch inputs. Total prompts: {len(all_prompts)}"
+            )
         
         # From here, ALL processes must participate in broadcasts, but only main process does actual work
         # Initialize common variables
@@ -799,9 +828,28 @@ class GRPOTrainer(Trainer):
                     answers = []
                     tasks = []
                 
+                # Debug log before gather
+                if self._step < 10:
+                    self.logger.info(
+                        f"Process {self.accelerator.process_index}: About to gather future batch data. "
+                        f"Has data: {future_batch is not None}"
+                    )
+                
                 all_future_prompts = gather_object(prompts)
                 all_future_answers = gather_object(answers)
                 all_future_tasks = gather_object(tasks)
+                
+                # Debug log after gather
+                if self._step < 10 and self.accelerator.is_main_process:
+                    self.logger.info(
+                        f"Main process: Gathered future batch data. "
+                        f"Total prompts: {len(all_future_prompts)}"
+                    )
+                
+                # Flatten the gathered lists (gather_object returns list of lists)
+                all_future_prompts = [item for sublist in all_future_prompts for item in sublist]
+                all_future_answers = [item for sublist in all_future_answers for item in sublist]
+                all_future_tasks = [item for sublist in all_future_tasks for item in sublist]
                 
                 # Only main process submits
                 if self.accelerator.is_main_process:
@@ -823,6 +871,9 @@ class GRPOTrainer(Trainer):
         if self.accelerator.is_main_process:
             self._next_batch_id += iterations_to_run
         
+        # Ensure all processes complete the submission phase before retrieval
+        self.accelerator.wait_for_everyone()
+        
         # Now main process retrieves results and processes them
         if self.accelerator.is_main_process:
             # Debug logging before retrieval
@@ -840,6 +891,10 @@ class GRPOTrainer(Trainer):
                     raise batch_result.error
             except Exception as e:
                 raise RuntimeError(f"Async generation failed for batch {batch_id_to_retrieve}: {e}")
+            
+            # Debug log successful retrieval
+            if self._step < 10:
+                self.logger.info(f"Successfully retrieved batch {batch_id_to_retrieve}")
             
             # Process everything on primary
             processed_results = batch_result.processed_results
@@ -910,6 +965,9 @@ class GRPOTrainer(Trainer):
         else:
             # Non-primary processes just wait for the broadcast
             broadcast_data = None
+        
+        # Ensure all processes are synchronized before broadcast
+        self.accelerator.wait_for_everyone()
         
         # Step 2: Broadcast all processed data to other processes
         broadcast_list = [broadcast_data]
@@ -990,7 +1048,8 @@ class GRPOTrainer(Trainer):
             prompt_mask=prompt_mask
         )
         
-        # Note: Don't increment _step here, that happens in _prepare_inputs
+        # Final synchronization to ensure all processes exit together
+        self.accelerator.wait_for_everyone()
         
         return {
             "prompt_ids": prompt_ids,
