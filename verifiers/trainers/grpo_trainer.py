@@ -552,11 +552,11 @@ class GRPOTrainer(Trainer):
                 
                 # Submit initial batches (all processes participate in gather operations)
                 for i in range(num_batches_to_prime):
-                    # Main process peeks at future batches
+                    # ALL processes peek at future batches from their local dataloader
                     future_batch = None
                     batch_exists = False
                     
-                    if self.accelerator.is_main_process:
+                    if hasattr(self, '_async_dataloader'):
                         future_batches = self._async_dataloader.peek_ahead(i + 1)
                         if future_batches and len(future_batches) > i:
                             future_batch = future_batches[i]
@@ -564,16 +564,16 @@ class GRPOTrainer(Trainer):
                                 future_batch = [future_batch]
                             batch_exists = True
                     
-                    # Broadcast whether batch exists to all processes
-                    batch_exists_list = [batch_exists]
+                    # Broadcast whether batch exists to all processes (from main process)
+                    batch_exists_list = [batch_exists] if self.accelerator.is_main_process else [None]
                     broadcast_object_list(batch_exists_list, from_process=0)
                     batch_exists = batch_exists_list[0]
                     
                     if not batch_exists:
                         break  # No more batches available
                     
-                    # ALL processes must participate in gather
-                    if self.accelerator.is_main_process and future_batch is not None:
+                    # ALL processes contribute their local data
+                    if future_batch is not None:
                         prompts = [x['prompt'] for x in future_batch]
                         answers = [x['answer'] for x in future_batch]
                         tasks = [x.get('task', 'default') for x in future_batch]
