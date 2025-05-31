@@ -663,31 +663,47 @@ class GRPOTrainer(Trainer):
                 # We want to stay num_steps_ahead batches ahead of what we're retrieving
                 target_batch_id = batch_id_to_retrieve + self.async_generator.num_steps_ahead
                 
-                # Submit batches to reach our target
-                while self._next_batch_id <= target_batch_id:
+                # Calculate how many iterations we'll run (synchronized across processes)
+                iterations_to_run = 0
+                if self.accelerator.is_main_process:
+                    iterations_to_run = max(0, target_batch_id - self._next_batch_id + 1)
+                
+                # Broadcast the number of iterations to all processes
+                iterations_list = [iterations_to_run]
+                broadcast_object_list(iterations_list, from_process=0)
+                iterations_to_run = iterations_list[0]
+                
+                # Now all processes will run the same number of iterations
+                for iteration in range(iterations_to_run):
+                    current_batch_id = self._next_batch_id + iteration if self.accelerator.is_main_process else -1
+                    
+                    # Broadcast current batch info
+                    batch_info = [current_batch_id]
+                    broadcast_object_list(batch_info, from_process=0)
+                    current_batch_id = batch_info[0]
+                    
                     # Check if we have data for this batch
-                    batch_offset = self._next_batch_id - batch_id_to_retrieve
+                    batch_offset = current_batch_id - batch_id_to_retrieve
                     if batch_offset < 0:
                         # This batch should have been pre-submitted during priming
-                        self._next_batch_id += 1
                         continue
                         
                     # For current batch (offset 0), use the provided data
                     if batch_offset == 0:
-                        request = BatchRequest(
-                            batch_id=self._next_batch_id,
-                            env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
-                            processing_class=self.processing_class,
-                            mask_env_responses=self.mask_env_responses,
-                            max_concurrent=self.max_concurrent,
-                            device=device,
-                            accelerator=self.accelerator,
-                            process_index=self.accelerator.process_index,
-                            num_processes=self.accelerator.num_processes,
-                            local_batch_size=len(generation_batch),
-                        )
-                        self.async_generator.submit_batch(request)
-                        self._next_batch_id += 1
+                        if self.accelerator.is_main_process:
+                            request = BatchRequest(
+                                batch_id=current_batch_id,
+                                env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                                processing_class=self.processing_class,
+                                mask_env_responses=self.mask_env_responses,
+                                max_concurrent=self.max_concurrent,
+                                device=device,
+                                accelerator=self.accelerator,
+                                process_index=self.accelerator.process_index,
+                                num_processes=self.accelerator.num_processes,
+                                local_batch_size=len(generation_batch),
+                            )
+                            self.async_generator.submit_batch(request)
                     else:
                         # For future batches, peek ahead in the dataloader
                         # ALL processes must participate in gather operations
@@ -715,7 +731,7 @@ class GRPOTrainer(Trainer):
                         has_future_batch = has_future_batch_list[0]
                         
                         if not has_future_batch:
-                            break  # No more data available
+                            continue  # Skip this iteration, but all processes do it together
                         
                         # Broadcast future batch data
                         future_batch_data_list = [future_batch_data]
@@ -739,7 +755,7 @@ class GRPOTrainer(Trainer):
                         # Only main process submits
                         if self.accelerator.is_main_process:
                             future_request = BatchRequest(
-                                batch_id=self._next_batch_id,
+                                batch_id=current_batch_id,
                                 env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
                                 processing_class=self.processing_class,
                                 mask_env_responses=self.mask_env_responses,
@@ -751,7 +767,10 @@ class GRPOTrainer(Trainer):
                                 local_batch_size=future_batch_data['batch_size'],
                             )
                             self.async_generator.submit_batch(future_request)
-                            self._next_batch_id += 1
+                
+                # Update next_batch_id only on main process
+                if self.accelerator.is_main_process:
+                    self._next_batch_id += iterations_to_run
                 
                 # Get the batch result we need
                 try:
@@ -837,6 +856,14 @@ class GRPOTrainer(Trainer):
         broadcast_list = [broadcast_data]
         broadcast_object_list(broadcast_list, from_process=0)
         broadcast_data = broadcast_list[0]
+        
+        # Add defensive check for broadcast synchronization issues
+        if not isinstance(broadcast_data, dict):
+            raise RuntimeError(
+                f"Process {self.accelerator.process_index} received invalid broadcast data type: "
+                f"{type(broadcast_data)}. Expected dict. This usually indicates a synchronization "
+                f"issue between processes during async generation."
+            )
         
         # Step 3: Each process takes its slice
         process_slice = slice(
