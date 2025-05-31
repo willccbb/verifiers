@@ -46,7 +46,7 @@ Let's submit the answer.
 </answer>
 """
 
-dataset = load_example_dataset("gsm8k", split="train")
+dataset = load_example_dataset("math", split="train")
 
 vf_env = vf.ToolEnv(
     dataset=dataset,
