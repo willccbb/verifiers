@@ -641,19 +641,13 @@ class GRPOTrainer(Trainer):
         # Step 1: Gather batch inputs from all processes
         all_prompts, all_answers, all_tasks = self._gather_batch_inputs(generation_batch)
         
-        # From here, only PRIMARY process does work, others wait
+        # From here, ALL processes must participate in broadcasts, but only main process does actual work
+        # Initialize common variables
+        batch_id_to_retrieve = self._step // (self.gradient_accumulation_steps * self.num_iterations)
+        
+        # Determine if we need to submit more batches
+        target_batch_id = 0
         if self.accelerator.is_main_process:
-            # Initialize async generator on first use (if not already done in priming)
-            if not self._async_started and self.async_generator is not None:
-                self.async_generator.start()
-                self._async_started = True
-            
-            # Determine current batch ID to retrieve
-            # We generate once every (gradient_accumulation_steps * num_iterations) steps
-            # So batch 0 is for steps 0-3, batch 1 is for steps 4-7, etc.
-            batch_id_to_retrieve = self._step // (self.gradient_accumulation_steps * self.num_iterations)
-            
-            # Determine if we need to submit more batches
             if self.async_generator is not None:
                 pending_count = self.async_generator.get_pending_count()
                 completed_count = self.async_generator.get_completed_count()
@@ -662,125 +656,129 @@ class GRPOTrainer(Trainer):
                 # Calculate how many batches ahead we should be
                 # We want to stay num_steps_ahead batches ahead of what we're retrieving
                 target_batch_id = batch_id_to_retrieve + self.async_generator.num_steps_ahead
+        
+        # Calculate how many iterations we'll run (synchronized across processes)
+        iterations_to_run = 0
+        if self.accelerator.is_main_process:
+            iterations_to_run = max(0, target_batch_id - self._next_batch_id + 1)
+        
+        # Broadcast the number of iterations to all processes
+        iterations_list = [iterations_to_run]
+        broadcast_object_list(iterations_list, from_process=0)
+        iterations_to_run = iterations_list[0]
+        
+        # Now all processes will run the same number of iterations
+        for iteration in range(iterations_to_run):
+            current_batch_id = self._next_batch_id + iteration if self.accelerator.is_main_process else -1
+            
+            # Broadcast current batch info
+            batch_info = [current_batch_id]
+            broadcast_object_list(batch_info, from_process=0)
+            current_batch_id = batch_info[0]
+            
+            # Check if we have data for this batch
+            batch_offset = current_batch_id - batch_id_to_retrieve
+            if batch_offset < 0:
+                # This batch should have been pre-submitted during priming
+                continue
                 
-                # Calculate how many iterations we'll run (synchronized across processes)
-                iterations_to_run = 0
+            # For current batch (offset 0), use the provided data
+            if batch_offset == 0:
                 if self.accelerator.is_main_process:
-                    iterations_to_run = max(0, target_batch_id - self._next_batch_id + 1)
-                
-                # Broadcast the number of iterations to all processes
-                iterations_list = [iterations_to_run]
-                broadcast_object_list(iterations_list, from_process=0)
-                iterations_to_run = iterations_list[0]
-                
-                # Now all processes will run the same number of iterations
-                for iteration in range(iterations_to_run):
-                    current_batch_id = self._next_batch_id + iteration if self.accelerator.is_main_process else -1
+                    if not self._async_started and self.async_generator is not None:
+                        self.async_generator.start()
+                        self._async_started = True
                     
-                    # Broadcast current batch info
-                    batch_info = [current_batch_id]
-                    broadcast_object_list(batch_info, from_process=0)
-                    current_batch_id = batch_info[0]
-                    
-                    # Check if we have data for this batch
-                    batch_offset = current_batch_id - batch_id_to_retrieve
-                    if batch_offset < 0:
-                        # This batch should have been pre-submitted during priming
-                        continue
-                        
-                    # For current batch (offset 0), use the provided data
-                    if batch_offset == 0:
-                        if self.accelerator.is_main_process:
-                            request = BatchRequest(
-                                batch_id=current_batch_id,
-                                env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
-                                processing_class=self.processing_class,
-                                mask_env_responses=self.mask_env_responses,
-                                max_concurrent=self.max_concurrent,
-                                device=device,
-                                accelerator=self.accelerator,
-                                process_index=self.accelerator.process_index,
-                                num_processes=self.accelerator.num_processes,
-                                local_batch_size=len(generation_batch),
-                            )
-                            self.async_generator.submit_batch(request)
-                    else:
-                        # For future batches, peek ahead in the dataloader
-                        # ALL processes must participate in gather operations
-                        future_batch_data = None
-                        has_future_batch = False
-                        
-                        if self.accelerator.is_main_process:
-                            if hasattr(self, '_async_dataloader'):
-                                future_batches = self._async_dataloader.peek_ahead(batch_offset)
-                                if future_batches and len(future_batches) > batch_offset - 1:
-                                    future_batch = future_batches[batch_offset - 1]
-                                    if isinstance(future_batch, dict):
-                                        future_batch = [future_batch]
-                                    has_future_batch = True
-                                    future_batch_data = {
-                                        'prompts': [x['prompt'] for x in future_batch],
-                                        'answers': [x['answer'] for x in future_batch],
-                                        'tasks': [x.get('task', 'default') for x in future_batch],
-                                        'batch_size': len(future_batch)
-                                    }
-                        
-                        # Broadcast whether we have a future batch to all processes
-                        has_future_batch_list = [has_future_batch]
-                        broadcast_object_list(has_future_batch_list, from_process=0)
-                        has_future_batch = has_future_batch_list[0]
-                        
-                        if not has_future_batch:
-                            continue  # Skip this iteration, but all processes do it together
-                        
-                        # Broadcast future batch data
-                        future_batch_data_list = [future_batch_data]
-                        broadcast_object_list(future_batch_data_list, from_process=0)
-                        future_batch_data = future_batch_data_list[0]
-                        
-                        # ALL processes participate in gather
-                        if self.accelerator.is_main_process:
-                            prompts = future_batch_data['prompts']
-                            answers = future_batch_data['answers']
-                            tasks = future_batch_data['tasks']
-                        else:
-                            prompts = []
-                            answers = []
-                            tasks = []
-                        
-                        all_future_prompts = gather_object(prompts)
-                        all_future_answers = gather_object(answers)
-                        all_future_tasks = gather_object(tasks)
-                        
-                        # Only main process submits
-                        if self.accelerator.is_main_process:
-                            future_request = BatchRequest(
-                                batch_id=current_batch_id,
-                                env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
-                                processing_class=self.processing_class,
-                                mask_env_responses=self.mask_env_responses,
-                                max_concurrent=self.max_concurrent,
-                                device=device,
-                                accelerator=self.accelerator,
-                                process_index=self.accelerator.process_index,
-                                num_processes=self.accelerator.num_processes,
-                                local_batch_size=future_batch_data['batch_size'],
-                            )
-                            self.async_generator.submit_batch(future_request)
-                
-                # Update next_batch_id only on main process
-                if self.accelerator.is_main_process:
-                    self._next_batch_id += iterations_to_run
-                
-                # Get the batch result we need
-                try:
-                    batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
-                    if batch_result.error:
-                        raise batch_result.error
-                except Exception as e:
-                    raise RuntimeError(f"Async generation failed for batch {batch_id_to_retrieve}: {e}")
+                    request = BatchRequest(
+                        batch_id=current_batch_id,
+                        env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                        processing_class=self.processing_class,
+                        mask_env_responses=self.mask_env_responses,
+                        max_concurrent=self.max_concurrent,
+                        device=device,
+                        accelerator=self.accelerator,
+                        process_index=self.accelerator.process_index,
+                        num_processes=self.accelerator.num_processes,
+                        local_batch_size=len(generation_batch),
+                    )
+                    self.async_generator.submit_batch(request)
             else:
-                raise RuntimeError("Async generator not initialized on main process")
+                # For future batches, peek ahead in the dataloader
+                # ALL processes must participate in gather operations
+                future_batch_data = None
+                has_future_batch = False
+                
+                if self.accelerator.is_main_process:
+                    if hasattr(self, '_async_dataloader'):
+                        future_batches = self._async_dataloader.peek_ahead(batch_offset)
+                        if future_batches and len(future_batches) > batch_offset - 1:
+                            future_batch = future_batches[batch_offset - 1]
+                            if isinstance(future_batch, dict):
+                                future_batch = [future_batch]
+                            has_future_batch = True
+                            future_batch_data = {
+                                'prompts': [x['prompt'] for x in future_batch],
+                                'answers': [x['answer'] for x in future_batch],
+                                'tasks': [x.get('task', 'default') for x in future_batch],
+                                'batch_size': len(future_batch)
+                            }
+                
+                # Broadcast whether we have a future batch to all processes
+                has_future_batch_list = [has_future_batch]
+                broadcast_object_list(has_future_batch_list, from_process=0)
+                has_future_batch = has_future_batch_list[0]
+                
+                if not has_future_batch:
+                    continue  # Skip this iteration, but all processes do it together
+                
+                # Broadcast future batch data
+                future_batch_data_list = [future_batch_data]
+                broadcast_object_list(future_batch_data_list, from_process=0)
+                future_batch_data = future_batch_data_list[0]
+                
+                # ALL processes participate in gather
+                if self.accelerator.is_main_process:
+                    prompts = future_batch_data['prompts']
+                    answers = future_batch_data['answers']
+                    tasks = future_batch_data['tasks']
+                else:
+                    prompts = []
+                    answers = []
+                    tasks = []
+                
+                all_future_prompts = gather_object(prompts)
+                all_future_answers = gather_object(answers)
+                all_future_tasks = gather_object(tasks)
+                
+                # Only main process submits
+                if self.accelerator.is_main_process:
+                    future_request = BatchRequest(
+                        batch_id=current_batch_id,
+                        env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
+                        processing_class=self.processing_class,
+                        mask_env_responses=self.mask_env_responses,
+                        max_concurrent=self.max_concurrent,
+                        device=device,
+                        accelerator=self.accelerator,
+                        process_index=self.accelerator.process_index,
+                        num_processes=self.accelerator.num_processes,
+                        local_batch_size=future_batch_data['batch_size'],
+                    )
+                    self.async_generator.submit_batch(future_request)
+        
+        # Update next_batch_id only on main process
+        if self.accelerator.is_main_process:
+            self._next_batch_id += iterations_to_run
+        
+        # Now main process retrieves results and processes them
+        if self.accelerator.is_main_process:
+            # Get the batch result we need
+            try:
+                batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
+                if batch_result.error:
+                    raise batch_result.error
+            except Exception as e:
+                raise RuntimeError(f"Async generation failed for batch {batch_id_to_retrieve}: {e}")
             
             # Process everything on primary
             processed_results = batch_result.processed_results
@@ -849,7 +847,7 @@ class GRPOTrainer(Trainer):
                 'rewards': all_rewards,
             }
         else:
-            # Non-primary processes just wait
+            # Non-primary processes just wait for the broadcast
             broadcast_data = None
         
         # Step 2: Broadcast all processed data to other processes
