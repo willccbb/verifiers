@@ -471,6 +471,9 @@ class GRPOTrainer(Trainer):
             
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
+        
+        # Debug log
+        self.logger.info(f"Process {self.accelerator.process_index}: Starting weight sync to vLLM")
 
         # ALL processes must participate in model operations for DeepSpeed ZeRO-3
         if is_peft_model(self.model):
@@ -513,6 +516,13 @@ class GRPOTrainer(Trainer):
             self.logger.info(f"Resetting vLLM prefix cache")
             self.vllm_client.reset_prefix_cache()
         
+        # Debug - check model state after sync
+        self.logger.info(
+            f"Process {self.accelerator.process_index}: Weight sync complete. "
+            f"Model training mode: {self.model.training}, "
+            f"Model device: {next(self.model.parameters()).device}"
+        )
+        
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
 
@@ -537,6 +547,22 @@ class GRPOTrainer(Trainer):
         mode = "train" if self.model.training else "eval"
         if mode == "train":
             generate_every = self.gradient_accumulation_steps * self.num_iterations
+            
+            # Debug logging for step management
+            if self._step < 10:  # Log first few steps
+                self.logger.info(
+                    f"Process {self.accelerator.process_index}: _prepare_inputs step {self._step}, "
+                    f"generate_every={generate_every}, grad_accum={self.gradient_accumulation_steps}, "
+                    f"num_iterations={self.num_iterations}, "
+                    f"should_generate={self._step % generate_every == 0}"
+                )
+                
+                # Verify step synchronization across processes
+                step_list = [self._step]
+                all_steps = gather_object(step_list)
+                if self.accelerator.is_main_process:
+                    if not all(s == self._step for s in all_steps):
+                        raise RuntimeError(f"Step desynchronization detected: {all_steps}")
             
             # Prime the async pipeline on first use (dummy round)
             if self._step == 0 and self.async_generator is not None and self.async_generator.num_steps_ahead > 0:
@@ -634,6 +660,15 @@ class GRPOTrainer(Trainer):
                 processed_batch = shuffle_tensor_dict(processed_batch)
                 self._buffered_inputs = split_tensor_dict(processed_batch, self.gradient_accumulation_steps)
             result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
+            
+            # Debug logging for returned data
+            if self._step < 10:
+                buffer_index = self._step % self.gradient_accumulation_steps
+                self.logger.info(
+                    f"Process {self.accelerator.process_index}: Returning buffer[{buffer_index}] "
+                    f"with prompt_ids shape: {result['prompt_ids'].shape if 'prompt_ids' in result else 'N/A'}"
+                )
+            
             self._step += 1
         else:
             # In evaluation, generate without buffering
@@ -655,6 +690,14 @@ class GRPOTrainer(Trainer):
         # From here, ALL processes must participate in broadcasts, but only main process does actual work
         # Initialize common variables
         batch_id_to_retrieve = self._step // (self.gradient_accumulation_steps * self.num_iterations)
+        
+        # Debug logging for batch management
+        if self.accelerator.is_main_process and self._step < 10:
+            self.logger.info(
+                f"_handle_async_generation: step={self._step}, "
+                f"batch_id_to_retrieve={batch_id_to_retrieve}, "
+                f"next_batch_id={self._next_batch_id}"
+            )
         
         # Determine if we need to submit more batches
         target_batch_id = 0
@@ -782,6 +825,14 @@ class GRPOTrainer(Trainer):
         
         # Now main process retrieves results and processes them
         if self.accelerator.is_main_process:
+            # Debug logging before retrieval
+            if self._step < 10:
+                self.logger.info(
+                    f"About to retrieve batch {batch_id_to_retrieve} from async generator. "
+                    f"Pending: {self.async_generator.get_pending_count()}, "
+                    f"Completed: {self.async_generator.get_completed_count()}"
+                )
+            
             # Get the batch result we need
             try:
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
@@ -879,11 +930,54 @@ class GRPOTrainer(Trainer):
             (self.accelerator.process_index + 1) * len(generation_batch),
         )
         
+        # Debug logging to understand data distribution
+        total_samples = broadcast_data['prompt_ids'].shape[0]
+        slice_start = process_slice.start
+        slice_end = process_slice.stop
+        
+        # Validate slice bounds
+        if slice_end > total_samples:
+            self.logger.warning(
+                f"Process {self.accelerator.process_index}: Slice end {slice_end} exceeds total samples {total_samples}. "
+                f"Adjusting slice. Local batch size: {len(generation_batch)}"
+            )
+            # Adjust slice to actual data bounds
+            actual_start = min(slice_start, total_samples)
+            actual_end = min(slice_end, total_samples)
+            process_slice = slice(actual_start, actual_end)
+            slice_start = actual_start
+            slice_end = actual_end
+        
+        if self.accelerator.is_local_main_process:
+            self.logger.info(
+                f"Process {self.accelerator.process_index}: "
+                f"Total samples: {total_samples}, "
+                f"Local batch size: {len(generation_batch)}, "
+                f"Slice: [{slice_start}:{slice_end}], "
+                f"Expected samples: {slice_end - slice_start}"
+            )
+        
         prompt_ids = broadcast_data['prompt_ids'][process_slice]
         prompt_mask = broadcast_data['prompt_mask'][process_slice]
         completion_ids = broadcast_data['completion_ids'][process_slice]
         completion_mask = broadcast_data['completion_mask'][process_slice]
         advantages = broadcast_data['advantages'][process_slice]
+        
+        # Validate that we have data
+        if prompt_ids.shape[0] == 0:
+            raise RuntimeError(
+                f"Process {self.accelerator.process_index} received empty data slice. "
+                f"Total samples: {total_samples}, slice: [{slice_start}:{slice_end}], "
+                f"local batch size: {len(generation_batch)}"
+            )
+        
+        # Debug logging for actual data received
+        if self.accelerator.is_local_main_process:
+            self.logger.info(
+                f"Process {self.accelerator.process_index}: "
+                f"Received data shapes - prompt_ids: {prompt_ids.shape}, "
+                f"advantages: {advantages.shape}"
+            )
         
         # Store for local metrics if needed
         self._current_prompt_mask = prompt_mask
@@ -918,6 +1012,11 @@ class GRPOTrainer(Trainer):
         all_prompts = gather_object(prompts)
         all_answers = gather_object(answers)
         all_tasks = gather_object(tasks)
+        
+        # Flatten the gathered lists (gather_object returns list of lists)
+        all_prompts = [item for sublist in all_prompts for item in sublist]
+        all_answers = [item for sublist in all_answers for item in sublist]
+        all_tasks = [item for sublist in all_tasks for item in sublist]
         
         return all_prompts, all_answers, all_tasks
 
@@ -1077,6 +1176,14 @@ class GRPOTrainer(Trainer):
         if return_outputs:
             raise ValueError("The GRPOTrainer does not support returning outputs") 
         mode = "train" if self.model.training else "eval" # type: ignore
+        
+        # Debug logging
+        if hasattr(self, '_step') and self._step < 5:  # Only log first few steps
+            self.logger.info(
+                f"Process {self.accelerator.process_index}: compute_loss called with "
+                f"prompt_ids shape: {inputs['prompt_ids'].shape if 'prompt_ids' in inputs else 'N/A'}, "
+                f"device: {inputs['prompt_ids'].device if 'prompt_ids' in inputs else 'N/A'}"
+            )
         
         # Compute the per-token log probabilities for the model
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
