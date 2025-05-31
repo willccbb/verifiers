@@ -1,6 +1,7 @@
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
 
 import os
+import logging
 import textwrap
 import warnings
 from collections import defaultdict, deque
@@ -153,6 +154,8 @@ class GRPOEnvTrainer(Trainer):
             peft_config: Optional[PeftConfig] = None,
             **kwargs,
     ): 
+        self.logger = logging.getLogger(__name__)
+        
         # Models
         if peft_config is not None:
             model = get_peft_model(model, peft_config) # type: ignore
@@ -190,12 +193,12 @@ class GRPOEnvTrainer(Trainer):
         self.beta = args.beta
         self.sync_ref_model = args.sync_ref_model
         self.generation_batch_size: int = args.generation_batch_size # type: ignore
-        self.steps_per_generation: int = args.steps_per_generation # type: ignore
 
         # Multi-step
         self.num_iterations = args.num_iterations  # = 𝜇 in the GRPO paper
         self.epsilon_low = args.epsilon
         self.epsilon_high = args.epsilon_high if args.epsilon_high is not None else args.epsilon
+        self.gradient_accumulation_steps = args.gradient_accumulation_steps
         self._step = 0
         self._buffered_inputs = None
 
@@ -206,7 +209,7 @@ class GRPOEnvTrainer(Trainer):
         
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
-            print(f"Filtering dataset for prompts with length <= {self.max_prompt_length}")
+            self.logger.info(f"Filtering dataset for prompts with length <= {self.max_prompt_length}")
             max_length = self.max_prompt_length  # Capture for closure
             
             def filter_by_prompt_length(example):
@@ -225,7 +228,7 @@ class GRPOEnvTrainer(Trainer):
             train_dataset = train_dataset.filter(filter_by_prompt_length, num_proc=self.max_num_processes)
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
-                print(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
+                self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
         def data_collator(features):
             return features
@@ -274,7 +277,7 @@ class GRPOEnvTrainer(Trainer):
 
         # maxlen is set to the total number of forward passes per step. This value of `maxlen` ensures we log only the
         # final optimization step.
-        maxlen = self.accelerator.num_processes * args.per_device_train_batch_size * args.steps_per_generation * args.gradient_accumulation_steps
+        maxlen = self.accelerator.num_processes * args.per_device_train_batch_size * args.gradient_accumulation_steps
         self._textual_logs = {
             "prompt": deque(maxlen=maxlen),
             "completion": deque(maxlen=maxlen),
@@ -296,16 +299,12 @@ class GRPOEnvTrainer(Trainer):
         # Only initialize communicator on the main process
         # Other processes will only use the client for non-NCCL operations
         if self.accelerator.is_main_process:
-            # Log NCCL environment variables for debugging
-            nccl_vars = {k: v for k, v in os.environ.items() if k.startswith('NCCL')}
-            if nccl_vars:
-                print(f"[TRAINER] NCCL environment variables: {nccl_vars}")
-            current_device = torch.cuda.current_device() if torch.cuda.is_available() else -1
-            print(f"[TRAINER] Main process initializing NCCL communicator on device {current_device}")
             self.vllm_client.init_communicator()
         
         self._last_loaded_step = 0  # Initialize to 0 since vLLM already has initial weights
         self.model_accepts_loss_kwargs = False 
+        # Weight updates to vLLM happen only when generating new completions
+        # Frequency: every (gradient_accumulation_steps * num_iterations) training steps
         # When using vLLM, the main process is responsible for loading the model weights. This can cause process
         # desynchronization and seems to lead to DeepSpeed hanging during initialization. To prevent this, we
         # synchronize all processes after vLLM has been fully initialized.
@@ -323,24 +322,22 @@ class GRPOEnvTrainer(Trainer):
         # Environment
         self.env = env
 
-        # Async generation setup
-        self.use_async_generation = args.use_async_generation
-        self.async_generator = None
+        # Async generation setup - always use async, num_steps_async=0 means synchronous behavior
         self._next_batch_id = 0
         self._async_started = False
+        self.num_steps_async = args.num_steps_async
         
-        if self.use_async_generation:
-            # Create async generator on all processes for consistent state
-            # Only main process will actually use it for generation
-            self.async_generator = AsyncBatchGenerator(
-                env=self.env,
-                client=self.oai_client,
-                model_name=self._get_model_name(),
-                sampling_args=self._get_sampling_args(),
-                num_steps_ahead=args.num_steps_async,
-                max_queue_size=args.async_max_queue_size,
-                generation_timeout=args.async_generation_timeout,
-            )
+        # Always create async generator
+        # num_steps_async=0 will behave synchronously (submit and wait immediately)
+        self.async_generator = AsyncBatchGenerator(
+            env=self.env,
+            client=self.oai_client,
+            model_name=self._get_model_name(),
+            sampling_args=self._get_sampling_args(),
+            num_steps_ahead=self.num_steps_async,
+            max_queue_size=args.async_max_queue_size,
+            generation_timeout=args.async_generation_timeout,
+        )
 
     def get_train_dataloader(self):
         if self.train_dataset is None:
@@ -353,8 +350,10 @@ class GRPOEnvTrainer(Trainer):
         else:
             data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
 
+        batch_size = self._train_batch_size * self.gradient_accumulation_steps
+
         dataloader_params = {
-            "batch_size": self._train_batch_size * self.args.steps_per_generation, # type: ignore (None case handled by config __post_init__)
+            "batch_size": batch_size, # type: ignore (None case handled by config __post_init__)
             "collate_fn": data_collator,
             "num_workers": self.args.dataloader_num_workers,
             "pin_memory": self.args.dataloader_pin_memory,
@@ -369,16 +368,13 @@ class GRPOEnvTrainer(Trainer):
 
         dataloader = DataLoader(train_dataset, **dataloader_params)
         
-        # Wrap with AsyncDataLoaderWrapper if using async generation
-        if self.use_async_generation:
-            # Store the wrapped dataloader for async access
-            self._async_dataloader = AsyncDataLoaderWrapper(
-                dataloader, 
-                buffer_size=max(5, self.args.num_steps_async * 2)
-            )
-            return self.accelerator.prepare(self._async_dataloader)
-        else:
-            return self.accelerator.prepare(dataloader)
+        # Always wrap with AsyncDataLoaderWrapper for consistent behavior
+        # Store the wrapped dataloader for async access
+        self._async_dataloader = AsyncDataLoaderWrapper(
+            dataloader, 
+            buffer_size=max(5, self.num_steps_async * 2)
+        )
+        return self.accelerator.prepare(self._async_dataloader)
 
     def _get_train_sampler(self, train_dataset = None) -> Sampler:
         # Returns a sampler that
@@ -397,13 +393,13 @@ class GRPOEnvTrainer(Trainer):
         #
         #                 global_step   step    <-───>  num_generations=2
         #                                       <-───────> per_device_train_batch_size=3
-        #  grad_accum    ▲  ▲  0          0     0   0   1   1   2   2   <- Generate for the first `steps_per_generation` (prompts 0 to 11); store the completions; use the first slice to compute the loss
+        #  grad_accum    ▲  ▲  0          0     0   0   1   1   2   2   <- Generate for the first gradient_accumulation_steps (prompts 0 to 11); store the completions; use the first slice to compute the loss
         #     =2         ▼  |  0          1     3   3   4   4   5   5   <- Take the stored generations and use the second slice to compute the loss
         #                   |
         #                   |  1          2     6   6   7   7   8   8   <- Take the stored generations and use the third slice to compute the loss
-        #  steps_per_gen=4  ▼  1          3     9   9  10  10  11  11   <- Take the stored generations and use the fourth slice to compute the loss
+        #  grad_accum=4  ▼  1          3     9   9  10  10  11  11   <- Take the stored generations and use the fourth slice to compute the loss
         #
-        #                      2          4    12  12  13  13  14  14   <- Generate for the second `steps_per_generation` (prompts 12 to 23); store the completions; use the first slice to compute the loss
+        #                      2          4    12  12  13  13  14  14   <- Generate for the second gradient_accumulation_steps (prompts 12 to 23); store the completions; use the first slice to compute the loss
         #                      2          5    15  15  16  16  17  17   <- Take the stored generations and use the second slice to compute the loss
         #                                          ...
 
@@ -411,7 +407,7 @@ class GRPOEnvTrainer(Trainer):
             data_source=self.train_dataset, # type: ignore
             mini_repeat_count=self.num_generations,
             batch_size=self.generation_batch_size // self.num_generations,
-            repeat_count=self.num_iterations * self.steps_per_generation,
+            repeat_count=self.num_iterations * self.gradient_accumulation_steps,
             shuffle=self.shuffle_dataset,
             seed=self.args.seed,
         )
@@ -483,18 +479,6 @@ class GRPOEnvTrainer(Trainer):
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
 
-        # Only main process does server communication
-        if self.accelerator.is_main_process:
-            print(f"[TRAINER] Starting weight update to vLLM")
-            # Debug: Check if we can reach the vLLM server
-            try:
-                print(f"[TRAINER] Testing vLLM server connection at {self.vllm_client.host}:{self.vllm_client.server_port}")
-                import requests
-                response = requests.get(f"http://{self.vllm_client.host}:{self.vllm_client.server_port}/health/", timeout=5)
-                print(f"[TRAINER] vLLM server health check: {response.status_code}")
-            except Exception as e:
-                print(f"[TRAINER] Failed to reach vLLM server: {e}")
-
         # ALL processes must participate in model operations for DeepSpeed ZeRO-3
         if is_peft_model(self.model):
             # With PEFT and DeepSpeed ZeRO Stage 3, we must gather the full model at once before merging
@@ -517,7 +501,6 @@ class GRPOEnvTrainer(Trainer):
                 
                 # Only main process sends to vLLM
                 if self.accelerator.is_main_process:
-                    print(f"[TRAINER] Sending {len(all_params)} parameters to vLLM")
                     for name, param_data in all_params:
                         self.vllm_client.update_named_param(name, param_data)
                     
@@ -532,14 +515,10 @@ class GRPOEnvTrainer(Trainer):
                         self.vllm_client.update_named_param(name, param.data)
                         param_count += 1
             
-            if self.accelerator.is_main_process:
-                print(f"[TRAINER] Sent {param_count} parameters to vLLM")
-
         # Reset cache on vLLM (main process only)
         if self.accelerator.is_main_process:
-            print(f"[TRAINER] Resetting vLLM prefix cache")
+            self.logger.info(f"Resetting vLLM prefix cache")
             self.vllm_client.reset_prefix_cache()
-            print(f"[TRAINER] Weight update complete")
         
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
@@ -548,13 +527,12 @@ class GRPOEnvTrainer(Trainer):
         self, inputs: Union[dict[str, Union[torch.Tensor, Any]], list[dict[str, Union[torch.Tensor, Any]]]]
     ) -> dict[str, Union[torch.Tensor, Any]]:
         # Prepares inputs for model training/evaluation by managing completion generation and batch handling.
+        # Always uses async generation (num_steps_async=0 behaves synchronously)
         # During training:
-        #   - Receives the local generation batch (Per-GPU batch size × steps per generation)
-        #     from the modified training dataloader instead of the standard local batch
-        #   - Generates completions once for the entire generation batch and splits it into batches of size
-        #     `per_device_train_batch_size`
+        #   - Receives the local generation batch (Per-GPU batch size × gradient accumulation steps)
+        #   - Generates completions once for the entire generation batch and splits it into batches
         #   - Buffers these completions and returns the appropriate slice for the current accumulation step
-        #   - Optimizes by regenerating completions only periodically (every steps_per_generation * num_iterations)
+        #   - Optimizes by regenerating completions only periodically (every gradient_accumulation_steps * num_iterations)
         # During evaluation:
         #   - The input is treated as a standard local batch (no accumulation, no multiple iterations)
         #   - Completions are generated for each batch without buffering or reuse
@@ -565,194 +543,332 @@ class GRPOEnvTrainer(Trainer):
         
         mode = "train" if self.model.training else "eval"
         if mode == "train":
-            generate_every = self.steps_per_generation * self.num_iterations
-            if self._step % generate_every == 0 or self._buffered_inputs is None:
-                if self.use_async_generation:
-                    # Async generation path
-                    processed_batch = self._handle_async_generation(generation_batch)
-                else:
-                    # Sync generation path (original behavior)
-                    processed_batch = self._generate_and_score_completions(generation_batch)
+            generate_every = self.gradient_accumulation_steps * self.num_iterations
+            
+            # Prime the async pipeline on first use (dummy round)
+            if self._step == 0 and self.async_generator is not None and self.async_generator.num_steps_ahead > 0:
+                # All processes must participate in priming to avoid deadlock
+                num_batches_to_prime = self.async_generator.num_steps_ahead
+                
+                if self.accelerator.is_main_process:
+                    self.logger.info(f"Priming async pipeline with {num_batches_to_prime} batches")
                     
+                    # Start the async generator
+                    self.async_generator.start()
+                    self._async_started = True
+                
+                # Submit initial batches (all processes participate in gather operations)
+                for i in range(num_batches_to_prime):
+                    # Main process peeks at future batches
+                    future_batch = None
+                    batch_exists = False
+                    
+                    if self.accelerator.is_main_process:
+                        future_batches = self._async_dataloader.peek_ahead(i + 1)
+                        if future_batches and len(future_batches) > i:
+                            future_batch = future_batches[i]
+                            if isinstance(future_batch, dict):
+                                future_batch = [future_batch]
+                            batch_exists = True
+                    
+                    # Broadcast whether batch exists to all processes
+                    batch_exists_list = [batch_exists]
+                    broadcast_object_list(batch_exists_list, from_process=0)
+                    batch_exists = batch_exists_list[0]
+                    
+                    if not batch_exists:
+                        break  # No more batches available
+                    
+                    # ALL processes must participate in gather
+                    if self.accelerator.is_main_process and future_batch is not None:
+                        prompts = [x['prompt'] for x in future_batch]
+                        answers = [x['answer'] for x in future_batch]
+                        tasks = [x.get('task', 'default') for x in future_batch]
+                    else:
+                        prompts = []
+                        answers = []
+                        tasks = []
+                    
+                    all_prompts = gather_object(prompts)
+                    all_answers = gather_object(answers)
+                    all_tasks = gather_object(tasks)
+                    
+                    # Only main process submits
+                    if self.accelerator.is_main_process:
+                        request = BatchRequest(
+                            batch_id=i,
+                            env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                            processing_class=self.processing_class,
+                            mask_env_responses=self.mask_env_responses,
+                            max_concurrent=self.max_concurrent,
+                            device=self.accelerator.device,
+                            accelerator=self.accelerator,
+                            process_index=self.accelerator.process_index,
+                            num_processes=self.accelerator.num_processes,
+                            local_batch_size=len(future_batch),
+                        )
+                        self.async_generator.submit_batch(request)
+                        self._next_batch_id = i + 1
+                
+                if self.accelerator.is_main_process:
+                    self.logger.info(f"Submitted {self._next_batch_id} batches to prime the pipeline")
+                
+                # All processes wait for priming to complete
+                self.accelerator.wait_for_everyone()
+            
+            if self._step % generate_every == 0 or self._buffered_inputs is None:
+                # Update weights to vLLM before generating new completions
+                # Only update if we've made progress since last generation
+                if self.state.global_step > self._last_loaded_step:
+                    self.logger.info(f"Syncing weights to vLLM at step {self.state.global_step} before generation")
+                    self._move_model_to_vllm()
+                    self._last_loaded_step = self.state.global_step
+                    self.logger.info(f"Weight sync complete")
+                
+                # Always use async generation path
+                processed_batch = self._handle_async_generation(generation_batch)
                 processed_batch = shuffle_tensor_dict(processed_batch)
-                self._buffered_inputs = split_tensor_dict(processed_batch, self.steps_per_generation)
-            result = self._buffered_inputs[self._step % self.steps_per_generation]
+                self._buffered_inputs = split_tensor_dict(processed_batch, self.gradient_accumulation_steps)
+            result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
             self._step += 1
         else:
-            # In evaluation, there is neither batch grouping for generation, nor multiple iterations, hence
-            # local generation batch == local eval batch
-            result = self._generate_and_score_completions(generation_batch)
+            # In evaluation, generate without buffering
+            # Still use async path for consistency
+            result = self._handle_async_generation(generation_batch)
         return result
 
     def _handle_async_generation(self, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
-        """Handle async generation for training with proper multi-process coordination"""
+        """
+        Handle async generation with aggressive consolidation:
+        - PRIMARY process does ALL processing (generation, token processing, advantages)
+        - NON-PRIMARY processes just contribute data and wait for results
+        """
+        device = self.accelerator.device
         
-        # Step 1: Initialize async generator on first use (main process only)
-        if self._next_batch_id == 0 and self.accelerator.is_main_process:
-            if self.async_generator is not None:
-                self.async_generator.start()
-                self._async_started = True
-        
-        # Ensure all processes are synchronized after initialization
-        if self._next_batch_id == 0:
-            self.accelerator.wait_for_everyone()
-        
-        # Step 2: Gather data from all processes for current batch
+        # Step 1: Gather batch inputs from all processes
         all_prompts, all_answers, all_tasks = self._gather_batch_inputs(generation_batch)
         
-        # Step 3: Determine if we need to submit batches (coordinated decision)
-        should_submit_batches = False
-        num_future_batches = 0
-        
+        # From here, only PRIMARY process does work, others wait
         if self.accelerator.is_main_process:
-            # Main process decides based on async generator state
+            # Initialize async generator on first use (if not already done in priming)
+            if not self._async_started and self.async_generator is not None:
+                self.async_generator.start()
+                self._async_started = True
+            
+            # Determine current batch ID to retrieve
+            # We generate once every (gradient_accumulation_steps * num_iterations) steps
+            # So batch 0 is for steps 0-3, batch 1 is for steps 4-7, etc.
+            batch_id_to_retrieve = self._step // (self.gradient_accumulation_steps * self.num_iterations)
+            
+            # Determine if we need to submit more batches
             if self.async_generator is not None:
-                should_submit_batches = (
-                    self._next_batch_id == 0 or 
-                    self.async_generator.get_pending_count() < 2
-                )
-                if should_submit_batches and hasattr(self, '_async_dataloader'):
-                    num_future_batches = min(2, self.async_generator.num_steps_ahead - 1)
-        
-        # Broadcast decisions to all processes
-        decisions = [should_submit_batches, num_future_batches]
-        broadcast_object_list(decisions, from_process=0)
-        should_submit_batches, num_future_batches = decisions
-        
-        # Step 4: Submit current batch if needed (main process only)
-        if should_submit_batches and self.accelerator.is_main_process:
-            if self.async_generator is not None:
-                request = BatchRequest(
-                    batch_id=self._next_batch_id,
-                    env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
-                    processing_class=self.processing_class,
-                    mask_env_responses=self.mask_env_responses,
-                    max_concurrent=self.max_concurrent,
-                    device=self.accelerator.device,
-                    accelerator=self.accelerator,
-                    process_index=self.accelerator.process_index,
-                    num_processes=self.accelerator.num_processes,
-                    local_batch_size=len(generation_batch),
-                )
-                self.async_generator.submit_batch(request)
-        
-        # Step 5: Submit future batches for look-ahead (if applicable)
-        if should_submit_batches and num_future_batches > 0 and hasattr(self, '_async_dataloader'):
-            for i in range(num_future_batches):
-                # All processes peek at future batches
-                future_batches = self._async_dataloader.peek_ahead(i + 1)
-                if not future_batches or len(future_batches) <= i:
-                    break
+                pending_count = self.async_generator.get_pending_count()
+                completed_count = self.async_generator.get_completed_count()
+                total_in_pipeline = pending_count + completed_count
                 
-                future_batch = future_batches[i]
-                if isinstance(future_batch, dict):
-                    future_batch = [future_batch]
+                # Calculate how many batches ahead we should be
+                # We want to stay num_steps_ahead batches ahead of what we're retrieving
+                target_batch_id = batch_id_to_retrieve + self.async_generator.num_steps_ahead
                 
-                # Extract and gather future batch data using helper
-                all_future_prompts, all_future_answers, all_future_tasks = self._gather_batch_inputs(future_batch)
+                # Submit batches to reach our target
+                while self._next_batch_id <= target_batch_id:
+                    # Check if we have data for this batch
+                    batch_offset = self._next_batch_id - batch_id_to_retrieve
+                    if batch_offset < 0:
+                        # This batch should have been pre-submitted during priming
+                        self._next_batch_id += 1
+                        continue
+                        
+                    # For current batch (offset 0), use the provided data
+                    if batch_offset == 0:
+                        request = BatchRequest(
+                            batch_id=self._next_batch_id,
+                            env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
+                            processing_class=self.processing_class,
+                            mask_env_responses=self.mask_env_responses,
+                            max_concurrent=self.max_concurrent,
+                            device=device,
+                            accelerator=self.accelerator,
+                            process_index=self.accelerator.process_index,
+                            num_processes=self.accelerator.num_processes,
+                            local_batch_size=len(generation_batch),
+                        )
+                        self.async_generator.submit_batch(request)
+                        self._next_batch_id += 1
+                    else:
+                        # For future batches, peek ahead in the dataloader
+                        # ALL processes must participate in gather operations
+                        future_batch_data = None
+                        has_future_batch = False
+                        
+                        if self.accelerator.is_main_process:
+                            if hasattr(self, '_async_dataloader'):
+                                future_batches = self._async_dataloader.peek_ahead(batch_offset)
+                                if future_batches and len(future_batches) > batch_offset - 1:
+                                    future_batch = future_batches[batch_offset - 1]
+                                    if isinstance(future_batch, dict):
+                                        future_batch = [future_batch]
+                                    has_future_batch = True
+                                    future_batch_data = {
+                                        'prompts': [x['prompt'] for x in future_batch],
+                                        'answers': [x['answer'] for x in future_batch],
+                                        'tasks': [x.get('task', 'default') for x in future_batch],
+                                        'batch_size': len(future_batch)
+                                    }
+                        
+                        # Broadcast whether we have a future batch to all processes
+                        has_future_batch_list = [has_future_batch]
+                        broadcast_object_list(has_future_batch_list, from_process=0)
+                        has_future_batch = has_future_batch_list[0]
+                        
+                        if not has_future_batch:
+                            break  # No more data available
+                        
+                        # Broadcast future batch data
+                        future_batch_data_list = [future_batch_data]
+                        broadcast_object_list(future_batch_data_list, from_process=0)
+                        future_batch_data = future_batch_data_list[0]
+                        
+                        # ALL processes participate in gather
+                        if self.accelerator.is_main_process:
+                            prompts = future_batch_data['prompts']
+                            answers = future_batch_data['answers']
+                            tasks = future_batch_data['tasks']
+                        else:
+                            prompts = []
+                            answers = []
+                            tasks = []
+                        
+                        all_future_prompts = gather_object(prompts)
+                        all_future_answers = gather_object(answers)
+                        all_future_tasks = gather_object(tasks)
+                        
+                        # Only main process submits
+                        if self.accelerator.is_main_process:
+                            future_request = BatchRequest(
+                                batch_id=self._next_batch_id,
+                                env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
+                                processing_class=self.processing_class,
+                                mask_env_responses=self.mask_env_responses,
+                                max_concurrent=self.max_concurrent,
+                                device=device,
+                                accelerator=self.accelerator,
+                                process_index=self.accelerator.process_index,
+                                num_processes=self.accelerator.num_processes,
+                                local_batch_size=future_batch_data['batch_size'],
+                            )
+                            self.async_generator.submit_batch(future_request)
+                            self._next_batch_id += 1
                 
-                # Main process submits
-                if self.accelerator.is_main_process and self.async_generator is not None:
-                    future_request = BatchRequest(
-                        batch_id=self._next_batch_id + i + 1,
-                        env_inputs={'prompt': all_future_prompts, 'answer': all_future_answers, 'task': all_future_tasks},
-                        processing_class=self.processing_class,
-                        mask_env_responses=self.mask_env_responses,
-                        max_concurrent=self.max_concurrent,
-                        device=self.accelerator.device,
-                        accelerator=self.accelerator,
-                        process_index=self.accelerator.process_index,
-                        num_processes=self.accelerator.num_processes,
-                        local_batch_size=len(future_batch),
-                    )
-                    self.async_generator.submit_batch(future_request)
-        
-        # Step 6: Wait for and retrieve current batch result
-        batch_result = None
-        error = None
-        
-        if self.accelerator.is_main_process:
-            if self.async_generator is not None:
+                # Get the batch result we need
                 try:
-                    batch_result = self.async_generator.get_batch(self._next_batch_id)
+                    batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                     if batch_result.error:
-                        error = batch_result.error
+                        raise batch_result.error
                 except Exception as e:
-                    error = e
+                    raise RuntimeError(f"Async generation failed for batch {batch_id_to_retrieve}: {e}")
             else:
-                error = RuntimeError("Async generator not initialized on main process")
+                raise RuntimeError("Async generator not initialized on main process")
+            
+            # Process everything on primary
+            processed_results = batch_result.processed_results
+            
+            # Convert rewards and compute advantages using FULL batch
+            all_rewards = processed_results['rewards']
+            all_rewards = torch.tensor(all_rewards, device=device) if not isinstance(all_rewards, torch.Tensor) else all_rewards
+            all_advantages = self._compute_advantages(all_rewards)
+            
+            # Process all token sequences
+            all_prompt_ids = []
+            all_prompt_mask = []
+            all_completion_ids = []
+            all_completion_mask = []
+            
+            for i in range(len(processed_results['prompt_ids'])):
+                prompt_ids = torch.tensor(processed_results['prompt_ids'][i], device=device)
+                prompt_mask = torch.tensor(processed_results['prompt_mask'][i], device=device)
+                completion_ids = torch.tensor(processed_results['completion_ids'][i], device=device)
+                completion_mask = torch.tensor(processed_results['completion_mask'][i], device=device)
+                
+                all_prompt_ids.append(prompt_ids)
+                all_prompt_mask.append(prompt_mask)
+                all_completion_ids.append(completion_ids)
+                all_completion_mask.append(completion_mask)
+            
+            # Pad all sequences
+            all_prompt_ids = pad(all_prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left')
+            all_prompt_mask = pad(all_prompt_mask, padding_side='left')
+            all_completion_ids = pad(all_completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right')
+            all_completion_mask = pad(all_completion_mask)
+            
+            # Truncate if needed
+            if self.max_prompt_length is not None and all_prompt_ids.size(1) > self.max_prompt_length:
+                all_prompt_ids = all_prompt_ids[:, -self.max_prompt_length:]
+                all_prompt_mask = all_prompt_mask[:, -self.max_prompt_length:]
+            
+            if self.max_completion_length is not None and all_completion_ids.size(1) > self.max_completion_length:
+                all_completion_ids = all_completion_ids[:, :self.max_completion_length]
+                all_completion_mask = all_completion_mask[:, :self.max_completion_length]
+            
+            # Log metrics and textual data
+            all_reward_dict = batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']}
+            all_completions = batch_result.completions if hasattr(batch_result, 'completions') else []
+            
+            self._log_generation_metrics_primary(
+                mode="train",
+                all_reward_dict=all_reward_dict,
+                all_rewards=all_rewards,
+                generation_batch_size=len(generation_batch) * self.accelerator.num_processes
+            )
+            
+            self._log_textual_data_primary(
+                all_prompts=all_prompts,
+                all_completions=all_completions,
+                all_reward_dict=all_reward_dict
+            )
+            
+            # Package everything for broadcast
+            broadcast_data = {
+                'prompt_ids': all_prompt_ids,
+                'prompt_mask': all_prompt_mask,
+                'completion_ids': all_completion_ids,
+                'completion_mask': all_completion_mask,
+                'advantages': all_advantages,
+                'rewards': all_rewards,
+            }
+        else:
+            # Non-primary processes just wait
+            broadcast_data = None
         
-        # Step 7: Broadcast result or error to all processes
-        result_data = [batch_result, error]
-        broadcast_object_list(result_data, from_process=0)
-        batch_result, error = result_data
+        # Step 2: Broadcast all processed data to other processes
+        broadcast_list = [broadcast_data]
+        broadcast_object_list(broadcast_list, from_process=0)
+        broadcast_data = broadcast_list[0]
         
-        if error is not None:
-            raise RuntimeError(f"Async generation failed for batch {self._next_batch_id}: {error}")
-        
-        if batch_result is None:
-            raise RuntimeError("Failed to get batch result from main process")
-        
-        # Step 8: Process the result
-        processed_batch = self._process_async_result(batch_result, generation_batch)
-        
-        # Step 9: Increment batch ID for next iteration
-        self._next_batch_id += 1
-        
-        # Ensure all processes have the same batch ID (sanity check)
-        batch_ids = [self._next_batch_id]
-        gathered_ids = gather_object(batch_ids)
-        if self.accelerator.is_main_process and len(set(gathered_ids)) > 1:
-            print(f"WARNING: Batch ID mismatch detected: {gathered_ids}")
-        
-        return processed_batch
-
-    def _process_async_result(self, batch_result: BatchResult, generation_batch: list[dict[str, Union[torch.Tensor, Any]]]) -> dict[str, Union[torch.Tensor, Any]]:
-        """Process async generation result and convert to expected format"""
-        device = self.accelerator.device
-        processed_results = batch_result.processed_results
-        
-        # Get all reward scores from the batch result
-        all_reward_dict = batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']}
-        
-        # Slice data for this process
+        # Step 3: Each process takes its slice
         process_slice = slice(
             self.accelerator.process_index * len(generation_batch),
             (self.accelerator.process_index + 1) * len(generation_batch),
         )
         
-        for key, value in processed_results.items():
-            processed_results[key] = value[process_slice]
+        prompt_ids = broadcast_data['prompt_ids'][process_slice]
+        prompt_mask = broadcast_data['prompt_mask'][process_slice]
+        completion_ids = broadcast_data['completion_ids'][process_slice]
+        completion_mask = broadcast_data['completion_mask'][process_slice]
+        advantages = broadcast_data['advantages'][process_slice]
         
-        # Use helper to process token sequences
-        prompt_ids, prompt_mask, completion_ids, completion_mask = self._process_token_sequences(
-            processed_results, device
-        )
-        
-        # Convert rewards to tensor if needed
-        rewards = processed_results['rewards']
-        rewards = torch.tensor(rewards, device=device) if not isinstance(rewards, torch.Tensor) else rewards
-        
-        # Use helper to compute advantages
-        advantages = self._compute_advantages(rewards, full_batch=True)
-        
-        # Store prompt_mask for metrics logging (used in _log_generation_metrics)
+        # Store for local metrics if needed
         self._current_prompt_mask = prompt_mask
         
-        # Use helper to log metrics
-        self._log_generation_metrics(
-            mode="train",  # async generation is only used in training
+        # Log local completion metrics
+        self._log_local_completion_metrics(
+            mode="train",
             completion_mask=completion_mask,
             completion_ids=completion_ids,
-            rewards=rewards,
-            all_reward_dict=all_reward_dict,
-            process_slice=process_slice
+            prompt_mask=prompt_mask
         )
         
-        # Use helper to log textual data
-        completions = batch_result.completions[process_slice] if hasattr(batch_result, 'completions') else []
-        prompts = [x['prompt'] for x in generation_batch]
-        self._log_textual_data(prompts, completions, all_reward_dict, process_slice)
+        # Note: Don't increment _step here, that happens in _prepare_inputs
         
         return {
             "prompt_ids": prompt_ids,
@@ -777,54 +893,14 @@ class GRPOEnvTrainer(Trainer):
         
         return all_prompts, all_answers, all_tasks
 
-    def _process_token_sequences(
-        self, 
-        processed_results: Dict[str, List],
-        device: torch.device
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Convert lists to tensors, pad, and truncate sequences."""
-        # Convert lists to tensors
-        prompt_ids = [torch.tensor(prompt_ids, device=device)
-                      for prompt_ids in processed_results['prompt_ids']]
-        prompt_mask = [torch.tensor(prompt_mask, device=device)
-                       for prompt_mask in processed_results['prompt_mask']]
-        completion_ids = [torch.tensor(completion_ids, device=device)
-                          for completion_ids in processed_results['completion_ids']]
-        completion_mask = [torch.tensor(completion_mask, device=device)
-                           for completion_mask in processed_results['completion_mask']]
-        
-        # Pad sequences
-        prompt_ids = pad(prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left')
-        prompt_mask = pad(prompt_mask, padding_side='left')
-        completion_ids = pad(completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right')
-        completion_mask = pad(completion_mask)
-        
-        # Truncate prompts from the left if they exceed max_prompt_length
-        if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
-            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
-            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
-        
-        # Truncate completions from the right if they exceed max_completion_length
-        if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
-            completion_ids = completion_ids[:, :self.max_completion_length]
-            completion_mask = completion_mask[:, :self.max_completion_length]
-        
-        return prompt_ids, prompt_mask, completion_ids, completion_mask
-
     def _compute_advantages(
         self,
         rewards: torch.Tensor,
-        full_batch: bool = True
     ) -> torch.Tensor:
-        """Compute advantages from rewards with optional normalization."""
-        if full_batch:
-            # Use full batch statistics
-            mean_grouped = rewards.view(-1, self.num_generations).mean(dim=1)
-            std_grouped = rewards.view(-1, self.num_generations).std(dim=1)
-        else:
-            # Use local batch statistics (for potential future use)
-            mean_grouped = rewards.mean()
-            std_grouped = rewards.std()
+        """Compute advantages from rewards with normalization using full batch statistics."""
+        # Always use full batch statistics
+        mean_grouped = rewards.view(-1, self.num_generations).mean(dim=1)
+        std_grouped = rewards.view(-1, self.num_generations).std(dim=1)
         
         # Normalize the rewards to compute advantages
         mean_grouped = mean_grouped.repeat_interleave(self.num_generations, dim=0)
@@ -836,24 +912,74 @@ class GRPOEnvTrainer(Trainer):
         
         return advantages
 
-    def _log_generation_metrics(
+    # ========== End of helper methods ==========
+
+    def _log_generation_metrics_primary(
+        self,
+        mode: str,
+        all_reward_dict: Dict[str, Any],
+        all_rewards: torch.Tensor,
+        generation_batch_size: int
+    ) -> None:
+        """
+        Log generation metrics (PRIMARY PROCESS ONLY).
+        This handles reward statistics and per-reward-function metrics using the full batch data.
+        """
+        # Log reward statistics using full batch
+        mean_rewards = all_rewards.view(-1, self.num_generations).mean(dim=1)
+        std_rewards = all_rewards.view(-1, self.num_generations).std(dim=1)
+        self._metrics[mode]["reward"].append(mean_rewards.mean().item())
+        self._metrics[mode]["reward_std"].append(std_rewards.mean().item())
+        
+        # Log individual reward function scores as metrics
+        for reward_key in all_reward_dict:
+            if reward_key != 'reward':  # Skip the consolidated reward
+                reward_values = all_reward_dict[reward_key]
+                if isinstance(reward_values, list):
+                    reward_tensor = torch.tensor(reward_values, device=all_rewards.device)
+                else:
+                    reward_tensor = reward_values
+                mean_reward = reward_tensor.mean().item()
+                self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
+
+    def _log_textual_data_primary(
+        self,
+        all_prompts: List[str],
+        all_completions: List[str],
+        all_reward_dict: Dict[str, Any]
+    ) -> None:
+        """
+        Log textual data for wandb (PRIMARY PROCESS ONLY).
+        This logs the full batch of prompts, completions, and rewards.
+        """
+        self._textual_logs["prompt"].extend(all_prompts)
+        self._textual_logs["completion"].extend(all_completions)
+        
+        # Log all reward scores - both individual functions and consolidated
+        for reward_key in all_reward_dict:
+            reward_values = all_reward_dict[reward_key]
+            self._textual_logs["rewards"][reward_key].extend(
+                reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values
+            )
+
+    def _log_local_completion_metrics(
         self,
         mode: str,
         completion_mask: torch.Tensor,
         completion_ids: torch.Tensor,
-        rewards: torch.Tensor,
-        all_reward_dict: Dict[str, Any],
-        process_slice: slice
+        prompt_mask: torch.Tensor
     ) -> None:
-        """Log all generation-related metrics."""
+        """
+        Log completion-related metrics (ALL PROCESSES).
+        These metrics need local data and will be gathered later by accelerator.gather_for_metrics.
+        """
         # Log token count
         if mode == "train":
-            prompt_mask = self._current_prompt_mask  # We'll need to store this
             attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
             self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
         self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
         
-        # Log completion lengths
+        # Log completion lengths - gather_for_metrics will aggregate across processes
         agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
         self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item())
         self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item())
@@ -872,44 +998,6 @@ class GRPOEnvTrainer(Trainer):
         self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
         self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
         self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
-        
-        # Log reward statistics
-        mean_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
-        std_rewards = rewards.view(-1, self.num_generations).std(dim=1)
-        self._metrics[mode]["reward"].append(mean_rewards.mean().item())
-        self._metrics[mode]["reward_std"].append(std_rewards.mean().item())
-        
-        # Log individual reward function scores as metrics
-        for reward_key in all_reward_dict:
-            if reward_key != 'reward':  # Skip the consolidated reward
-                reward_values = all_reward_dict[reward_key][process_slice]
-                if isinstance(reward_values, list):
-                    reward_tensor = torch.tensor(reward_values, device=rewards.device)
-                else:
-                    reward_tensor = reward_values
-                mean_reward = reward_tensor.mean().item()
-                self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
-
-    def _log_textual_data(
-        self,
-        prompts: List[str],
-        completions: List[str],
-        all_reward_dict: Dict[str, Any],
-        process_slice: slice
-    ) -> None:
-        """Log textual data for wandb."""
-        self._textual_logs["prompt"].extend(gather_object(prompts))
-        self._textual_logs["completion"].extend(gather_object(completions))
-        
-        # Log all reward scores - both individual functions and consolidated
-        for reward_key in all_reward_dict:
-            # Slice rewards for this process
-            reward_values = all_reward_dict[reward_key][process_slice]
-            self._textual_logs["rewards"][reward_key].extend(
-                gather_object(reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values)
-            )
-
-    # ========== End of helper methods ==========
 
     def _get_sampling_args(self) -> Dict[str, Any]:
         """Get sampling arguments for Environment generation."""
@@ -957,132 +1045,6 @@ class GRPOEnvTrainer(Trainer):
             'mask': mask
         }
 
-    def _generate_and_score_completions(
-        self, inputs: list[dict[str, Union[torch.Tensor, Any]]]   
-    ) -> dict[str, Union[torch.Tensor, Any]]:
-        """
-        Main generation method using Environment.
-        
-        Data Flow:
-        1. Convert trainer inputs to Environment format
-        2. Call Environment.generate() (happens on main process)
-        3. Process results using process_environment_results() (main process only, creates tensors on GPU)
-        4. Broadcast final processed tensors to all processes
-        5. Slice data for each process
-        6. Compute advantages from rewards
-        
-        This method handles all device placement and accelerator distribution.
-        """
-        device = self.accelerator.device
-        mode = "train" if self.model.training else "eval" # type: ignore
-        
-        # Use helper to gather inputs from all processes
-        all_prompts, all_answers, all_tasks = self._gather_batch_inputs(inputs)
-
-        # generate via Environment (main process only)
-        object_keys = ['prompt_ids', 'prompt_mask', 'completion_ids', 'completion_mask', 'rewards']
-        all_completions = []  # To store completions for logging
-        all_reward_dict = {}  # To store all reward scores for logging
-        if self.accelerator.is_main_process:
-            env_inputs = {'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks} 
-            env_results = self.env.generate(
-                env_inputs,
-                client=self.oai_client,
-                model=self._get_model_name(),
-                sampling_args=self._get_sampling_args(),
-                score_rollouts=True,
-                max_concurrent=self.max_concurrent,
-            ) # prompts, completions, states, rewards
-
-            # Store completions for logging
-            all_completions = env_results['completion']
-            
-            # Extract all reward-related keys (individual functions + consolidated 'reward')
-            reward_keys = [k for k in env_results.keys() if k.endswith('_func') or k == 'reward']
-            for key in reward_keys:
-                all_reward_dict[key] = env_results[key]
-
-            processed_results = self.env.process_env_results(
-                env_results['prompt'],
-                env_results['completion'],
-                env_results['state'],
-                env_results['reward'],  # Use consolidated reward for training
-                processing_class=self.processing_class, # type: ignore
-                mask_env_responses=self.mask_env_responses
-            ) # prompt_ids, prompt_mask, completion_ids, completion_mask, rewards
-        else:
-            env_results = None
-            processed_results = {}
-
-        # Broadcast completions for logging
-        completions_list = [all_completions] if self.accelerator.is_main_process else [None]
-        broadcast_object_list(completions_list, from_process=0)
-        all_completions = completions_list[0] if completions_list[0] is not None else []
-        
-        # Broadcast all reward scores for logging
-        reward_dict_list = [all_reward_dict] if self.accelerator.is_main_process else [None]
-        broadcast_object_list(reward_dict_list, from_process=0)
-        all_reward_dict = reward_dict_list[0] if reward_dict_list[0] is not None else {}
-
-        # Step 4: Broadcast final processed tensors to all processes
-        for key in object_keys:
-            if self.accelerator.is_main_process:
-                object_list = [processed_results.get(key, None)]
-            else:
-                object_list = [None]
-            broadcast_object_list(object_list, from_process=0)
-            if object_list[0] is not None:
-                processed_results[key] = object_list[0]
-        
-        # Compute advantages BEFORE process slicing to use the full reward batch
-        all_rewards = torch.tensor(processed_results['rewards'], device=device)
-        all_advantages = self._compute_advantages(all_rewards, full_batch=True)
-        
-        # Step 5: Slice data for this process
-        process_slice = slice(
-            self.accelerator.process_index * len(inputs),
-            (self.accelerator.process_index + 1) * len(inputs),
-        )
-        
-        for key, value in processed_results.items():
-            processed_results[key] = value[process_slice]
-        
-        # Slice advantages, completions, and rewards for this process
-        advantages = all_advantages[process_slice]
-        completions = all_completions[process_slice] if all_completions else []
-        rewards = all_rewards[process_slice]
-
-        # Use helper to process token sequences
-        prompt_ids, prompt_mask, completion_ids, completion_mask = self._process_token_sequences(
-            processed_results, device
-        )
-        
-        # Store prompt_mask for metrics logging (used in _log_generation_metrics)
-        self._current_prompt_mask = prompt_mask
-        
-        # Use helper to log metrics
-        self._log_generation_metrics(
-            mode=mode,
-            completion_mask=completion_mask,
-            completion_ids=completion_ids,
-            rewards=rewards,
-            all_reward_dict=all_reward_dict,
-            process_slice=process_slice
-        )
-        
-        # Use helper to log textual data
-        prompts = [x['prompt'] for x in inputs]
-        self._log_textual_data(prompts, completions, all_reward_dict, process_slice)
-        
-        return {
-            "prompt_ids": prompt_ids,
-            "prompt_mask": prompt_mask,
-            "completion_ids": completion_ids,
-            "completion_mask": completion_mask,
-            "old_per_token_logps": None,
-            "advantages": advantages,
-        }
-
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         if return_outputs:
             raise ValueError("The GRPOTrainer does not support returning outputs") 
@@ -1098,9 +1060,8 @@ class GRPOEnvTrainer(Trainer):
 
         # Compute the loss
         advantages = inputs["advantages"]
-        # When using num_iterations == 1 and steps_per_generation <= gradient_accumulation_steps
-        # old_per_token_logps == per_token_logps, so we can skip it's computation
-        # (see _generate_and_score_completions) and use per_token_logps.detach() instead.
+        # When using num_iterations == 1, old_per_token_logps == per_token_logps,
+        # so we can skip it's computation (see _generate_and_score_completions) and use per_token_logps.detach() instead.
         old_per_token_logps = (
             per_token_logps.detach() if inputs["old_per_token_logps"] is None else inputs["old_per_token_logps"]
         )
@@ -1189,12 +1150,13 @@ class GRPOEnvTrainer(Trainer):
         self._metrics[mode].clear()
 
         if self.accelerator.is_main_process and self.log_completions:
-            print_prompt_completions_sample(
-                self._textual_logs["prompt"],
-                self._textual_logs["completion"],
-                self._textual_logs["rewards"],
-                self.state.global_step,
-            )
+            if len(self._textual_logs["prompt"]) > 0:
+                print_prompt_completions_sample(
+                    self._textual_logs["prompt"],
+                    self._textual_logs["completion"],
+                    self._textual_logs["rewards"],
+                    self.state.global_step,
+                )
 
             if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
                 import pandas as pd
@@ -1218,14 +1180,7 @@ class GRPOEnvTrainer(Trainer):
 
     def training_step(self, model, inputs, num_items_in_batch=None):
         """Override training_step to ensure async generation is properly managed"""
-        # Sync model weights to vLLM if needed
-        # Skip step 0 since vLLM already has the initial weights
-        if self.state.global_step > 0 and self._last_loaded_step != self.state.global_step:
-            print(f"[TRAINER] Syncing weights to vLLM at step {self.state.global_step} (last loaded: {self._last_loaded_step})")
-            self._move_model_to_vllm()
-            self._last_loaded_step = self.state.global_step
-            print(f"[TRAINER] Weight sync complete")
-            
+        # Weight updates now happen in _prepare_inputs right before generation
         # Continue with normal training
         return super().training_step(model, inputs, num_items_in_batch)
     

@@ -38,7 +38,7 @@ args = vf.grpo_defaults(run_name='reverse_text_warmup')
 args.num_iterations = 2
 args.per_device_train_batch_size = 8
 args.num_generations = 8
-args.gradient_accumulation_steps = 2
+args.gradient_accumulation_steps = 4
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOEnvTrainer(

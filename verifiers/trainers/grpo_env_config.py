@@ -155,32 +155,25 @@ class GRPOEnvConfig(TrainingArguments):
         metadata={"help": "Maximum number of concurrent requests to the environment."},
     )
     # Async generation parameters
-    use_async_generation: bool = field(
-        default=True,
-        metadata={
-            "help": "Whether to use asynchronous generation. When enabled, generation happens in a separate thread "
-            "while training continues, improving GPU utilization."
-        },
-    )
     num_steps_async: int = field(
         default=1,
         metadata={
-            "help": "Number of batches to generate ahead when using async generation. Higher values can improve "
-            "GPU utilization but use more memory. Only used when use_async_generation=True."
+            "help": "Number of batches to generate ahead. Higher values can improve GPU utilization but use more memory. "
+            "Set to 0 for synchronous generation (submit and wait immediately, no look-ahead)."
         },
     )
     async_generation_timeout: float = field(
         default=300.0,
         metadata={
             "help": "Timeout in seconds for async generation. If a batch doesn't complete within this time, "
-            "a TimeoutError is raised. Only used when use_async_generation=True."
+            "a TimeoutError is raised."
         },
     )
     async_max_queue_size: Optional[int] = field(
         default=None,
         metadata={
             "help": "Maximum number of batches that can be queued for async generation. If None, defaults to "
-            "2 * num_steps_async. Only used when use_async_generation=True."
+            "2 * num_steps_async."
         },
     )
 

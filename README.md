@@ -11,7 +11,7 @@ New features for this release:
 - Overlapped training + inference (via off-policy steps)
 - Rollout-level reward functions by default (with weight=0.0 supported)
 - Direct support for API evaluation + synthetic data collection 
-- Complete workflow for API eval -> data collection -> SFT -> RL (GRPO)
+- Complete workflow for API eval -> data collection -> SFT -> RL (GRPO) -> trained model eval
 - Full decoupling of rollout + reward logic from GRPOEnvTrainer
 - `transformers` Trainer as the base (replacing TRL's GRPO)
 - Direct support for LLM judges via JudgeRubric
@@ -94,7 +94,6 @@ uv venv --python 3.11 (or 3.12)
 uv add verifiers # optionally, "verifiers[tools]"
 uv pip install flash-attn --no-build-isolation
 ```
-
 
 To use the latest `main` branch, do:
 ```bash
