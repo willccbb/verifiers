@@ -9,7 +9,7 @@ vf_env = vf.SingleTurnEnv(
     dataset=load_dataset("willcb/my-dataset", data_files="train"), # HF dataset with "question" and "answer" columns
     system_prompt="You are a helpful assistant.",
     rubric=rubric
-) 
+)
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-trainer = vf.GRPOEnvTrainer(env=vf_env, model=model, processing_class=tokenizer, args=vf.grpo_defaults(run_name="self_reward"))
+trainer = vf.GRPOTrainer(env=vf_env, model=model, processing_class=tokenizer, args=vf.grpo_defaults(run_name="self_reward"))
 trainer.train()

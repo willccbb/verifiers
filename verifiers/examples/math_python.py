@@ -1,6 +1,3 @@
-from datasets import concatenate_datasets
-from trl import GRPOConfig
-
 import verifiers as vf
 from verifiers.tools import python
 from verifiers.utils import load_example_dataset
@@ -70,13 +67,10 @@ training_args.per_device_train_batch_size=8
 training_args.num_generations=8
 training_args.gradient_accumulation_steps=2
 
-trainer = vf.GRPOEnvTrainer(
+trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
-    reward_funcs=vf_env.get_reward_funcs(),
     env=vf_env,
     args=training_args,
-    train_dataset=vf_env.get_dataset(),
-    eval_dataset=vf_env.get_eval_dataset()
 )
 trainer.train() 

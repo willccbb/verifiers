@@ -14,7 +14,7 @@ vf_env = vf.DoubleCheckEnv(
 )
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 args = vf.grpo_defaults(run_name="doublecheck-{}".format(model_name.split("/")[-1].lower()))
-trainer = vf.GRPOEnvTrainer(
+trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
