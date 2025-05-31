@@ -564,8 +564,19 @@ class GRPOTrainer(Trainer):
                                 future_batch = [future_batch]
                             batch_exists = True
                     
-                    # Broadcast whether batch exists to all processes (from main process)
-                    batch_exists_list = [batch_exists] if self.accelerator.is_main_process else [None]
+                    # All processes need to agree on whether we have batches
+                    # Gather from all processes to check if ANY process has data
+                    batch_exists_list = [batch_exists]
+                    all_batch_exists = gather_object(batch_exists_list)
+                    
+                    # If any process has a batch, we continue (main process decides)
+                    if self.accelerator.is_main_process:
+                        batch_exists = any(all_batch_exists)
+                    else:
+                        batch_exists = None
+                    
+                    # Broadcast the decision from main process
+                    batch_exists_list = [batch_exists]
                     broadcast_object_list(batch_exists_list, from_process=0)
                     batch_exists = batch_exists_list[0]
                     
@@ -716,8 +727,19 @@ class GRPOTrainer(Trainer):
                             future_batch = [future_batch]
                         has_future_batch = True
                 
-                # Broadcast whether we have a future batch to all processes (from main process)
-                has_future_batch_list = [has_future_batch] if self.accelerator.is_main_process else [None]
+                # All processes need to agree on whether we have future batches
+                # Gather from all processes to check if ANY process has data
+                has_future_batch_list = [has_future_batch]
+                all_has_future_batch = gather_object(has_future_batch_list)
+                
+                # If any process has a future batch, we continue (main process decides)
+                if self.accelerator.is_main_process:
+                    has_future_batch = any(all_has_future_batch)
+                else:
+                    has_future_batch = None
+                
+                # Broadcast the decision from main process
+                has_future_batch_list = [has_future_batch]
                 broadcast_object_list(has_future_batch_list, from_process=0)
                 has_future_batch = has_future_batch_list[0]
                 
