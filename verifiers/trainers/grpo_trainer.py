@@ -542,6 +542,7 @@ class GRPOTrainer(Trainer):
         # Returns a single local batch in both cases.
 
         # Handle both dict and list inputs
+        print(inputs)
         generation_batch = inputs if isinstance(inputs, list) else [inputs]
         
         mode = "train" if self.model.training else "eval"
@@ -1131,8 +1132,8 @@ class GRPOTrainer(Trainer):
 
     def _log_textual_data_primary(
         self,
-        all_prompts: List[str],
-        all_completions: List[str],
+        all_prompts: List[Union[str, List[Dict[str, Any]]]],
+        all_completions: List[Union[str, List[Dict[str, Any]]]],
         all_reward_dict: Dict[str, Any]
     ) -> None:
         """
