@@ -705,42 +705,30 @@ class GRPOTrainer(Trainer):
             else:
                 # For future batches, peek ahead in the dataloader
                 # ALL processes must participate in gather operations
-                future_batch_data = None
+                future_batch = None
                 has_future_batch = False
                 
-                if self.accelerator.is_main_process:
-                    if hasattr(self, '_async_dataloader'):
-                        future_batches = self._async_dataloader.peek_ahead(batch_offset)
-                        if future_batches and len(future_batches) > batch_offset - 1:
-                            future_batch = future_batches[batch_offset - 1]
-                            if isinstance(future_batch, dict):
-                                future_batch = [future_batch]
-                            has_future_batch = True
-                            future_batch_data = {
-                                'prompts': [x['prompt'] for x in future_batch],
-                                'answers': [x['answer'] for x in future_batch],
-                                'tasks': [x.get('task', 'default') for x in future_batch],
-                                'batch_size': len(future_batch)
-                            }
+                if hasattr(self, '_async_dataloader'):
+                    future_batches = self._async_dataloader.peek_ahead(batch_offset)
+                    if future_batches and len(future_batches) > batch_offset - 1:
+                        future_batch = future_batches[batch_offset - 1]
+                        if isinstance(future_batch, dict):
+                            future_batch = [future_batch]
+                        has_future_batch = True
                 
-                # Broadcast whether we have a future batch to all processes
-                has_future_batch_list = [has_future_batch]
+                # Broadcast whether we have a future batch to all processes (from main process)
+                has_future_batch_list = [has_future_batch] if self.accelerator.is_main_process else [None]
                 broadcast_object_list(has_future_batch_list, from_process=0)
                 has_future_batch = has_future_batch_list[0]
                 
                 if not has_future_batch:
                     continue  # Skip this iteration, but all processes do it together
                 
-                # Broadcast future batch data
-                future_batch_data_list = [future_batch_data]
-                broadcast_object_list(future_batch_data_list, from_process=0)
-                future_batch_data = future_batch_data_list[0]
-                
-                # ALL processes participate in gather
-                if self.accelerator.is_main_process:
-                    prompts = future_batch_data['prompts']
-                    answers = future_batch_data['answers']
-                    tasks = future_batch_data['tasks']
+                # ALL processes contribute their local data
+                if future_batch is not None:
+                    prompts = [x['prompt'] for x in future_batch]
+                    answers = [x['answer'] for x in future_batch]
+                    tasks = [x.get('task', 'default') for x in future_batch]
                 else:
                     prompts = []
                     answers = []
@@ -762,7 +750,7 @@ class GRPOTrainer(Trainer):
                         accelerator=self.accelerator,
                         process_index=self.accelerator.process_index,
                         num_processes=self.accelerator.num_processes,
-                        local_batch_size=future_batch_data['batch_size'],
+                        local_batch_size=len(generation_batch),
                     )
                     self.async_generator.submit_batch(future_request)
         
