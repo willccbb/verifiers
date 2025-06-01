@@ -312,7 +312,7 @@ class GRPOTrainer(Trainer):
             else:
                 self.ref_model = self.accelerator.prepare_model(self.ref_model, evaluation_mode=True)
         if self.sync_ref_model:
-            self.add_callback(SyncRefModelCallback(ref_model=self.ref_model, accelerator=self.accelerator)) 
+            self.add_callback(SyncRefModelCallback(ref_model=self.ref_model, accelerator=self.accelerator)) # type: ignore
 
         # Environment
         self.env = env
@@ -344,7 +344,7 @@ class GRPOTrainer(Trainer):
         else:
             data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
 
-        batch_size = self._train_batch_size * self.gradient_accumulation_steps
+        batch_size = self._train_batch_size * self.gradient_accumulation_steps # type: ignore
 
         dataloader_params = {
             "batch_size": batch_size, # type: ignore (None case handled by config __post_init__)
@@ -360,7 +360,7 @@ class GRPOTrainer(Trainer):
             dataloader_params["worker_init_fn"] = seed_worker
             dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
 
-        dataloader = DataLoader(train_dataset, **dataloader_params)
+        dataloader = DataLoader(train_dataset, **dataloader_params) # type: ignore
         
         # Always wrap with AsyncDataLoaderWrapper for consistent behavior
         # Store the wrapped dataloader for async access
@@ -607,6 +607,11 @@ class GRPOTrainer(Trainer):
                 if batches_submitted > 0:
                     self.logger.info(f"Submitted {batches_submitted} batches, next_batch_id now {self._next_batch_id}")
             
+            # Synchronize next_batch_id across all processes
+            next_batch_id_list = [self._next_batch_id if self.accelerator.is_main_process else None]
+            broadcast_object_list(next_batch_id_list, from_process=0)
+            self._next_batch_id = next_batch_id_list[0]
+            
             self.accelerator.wait_for_everyone()
             
             # Now retrieve the batch we need for this step
@@ -697,11 +702,11 @@ class GRPOTrainer(Trainer):
                 (self.accelerator.process_index + 1) * len(inputs),
             )
  
-            prompt_ids = broadcast_data['prompt_ids'][process_slice]
-            prompt_mask = broadcast_data['prompt_mask'][process_slice]
-            completion_ids = broadcast_data['completion_ids'][process_slice]
-            completion_mask = broadcast_data['completion_mask'][process_slice]
-            advantages = broadcast_data['advantages'][process_slice]
+            prompt_ids = broadcast_data['prompt_ids'][process_slice] # type: ignore
+            prompt_mask = broadcast_data['prompt_mask'][process_slice] # type: ignore
+            completion_ids = broadcast_data['completion_ids'][process_slice] # type: ignore
+            completion_mask = broadcast_data['completion_mask'][process_slice] # type: ignore
+            advantages = broadcast_data['advantages'][process_slice] # type: ignore
             
             # Log local metrics
             self._log_local_completion_metrics(
@@ -713,12 +718,12 @@ class GRPOTrainer(Trainer):
             
             # Concatenate all data for shuffling
             full_batch = {
-                "prompt_ids": broadcast_data['prompt_ids'],
-                "prompt_mask": broadcast_data['prompt_mask'],
-                "completion_ids": broadcast_data['completion_ids'],
-                "completion_mask": broadcast_data['completion_mask'],
+                "prompt_ids": broadcast_data['prompt_ids'], # type: ignore
+                "prompt_mask": broadcast_data['prompt_mask'], # type: ignore
+                "completion_ids": broadcast_data['completion_ids'], # type: ignore
+                "completion_mask": broadcast_data['completion_mask'], # type: ignore
                 "old_per_token_logps": None,
-                "advantages": broadcast_data['advantages'],
+                "advantages": broadcast_data['advantages'], # type: ignore
             }
             
             # Shuffle and split for gradient accumulation
@@ -940,7 +945,7 @@ class GRPOTrainer(Trainer):
         elif self.loss_type == "bnpo":
             loss = (per_token_loss * completion_mask).sum() / completion_mask.sum().clamp(min=1.0)
         elif self.loss_type == "dr_grpo":
-            loss = (per_token_loss * completion_mask).sum() / (per_token_loss.size(0) * self.max_completion_length)
+            loss = (per_token_loss * completion_mask).sum() / (per_token_loss.size(0) * self.max_completion_length) # type: ignore
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
 
