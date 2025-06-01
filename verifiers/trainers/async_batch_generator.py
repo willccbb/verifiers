@@ -28,10 +28,10 @@ class BatchResult:
     """Result from batch generation"""
     batch_id: int
     processed_results: Dict[str, Any]
-    error: Optional[Exception] = None
     generation_time: float = 0.0
     all_reward_dict: Dict[str, List[float]] = field(default_factory=dict)  # All reward scores
     completions: List[Any] = field(default_factory=list)  # Store completions for logging
+    prompts: List[Any] = field(default_factory=list)  # Store prompts for logging
 
 
 class AsyncBatchGenerator:
@@ -49,7 +49,7 @@ class AsyncBatchGenerator:
         client,
         model_name: str,
         sampling_args: Dict[str, Any],
-        num_steps_ahead: int = 1,
+        num_batches_ahead: int = 1,
         max_queue_size: Optional[int] = None,
         generation_timeout: float = 300.0,  # 5 minutes default
     ):
@@ -57,8 +57,8 @@ class AsyncBatchGenerator:
         self.client = client
         self.model_name = model_name
         self.sampling_args = sampling_args
-        self.num_steps_ahead = num_steps_ahead
-        self.max_queue_size = max_queue_size or max(num_steps_ahead * 2, 4)
+        self.num_batches_ahead = num_batches_ahead
+        self.max_queue_size = max_queue_size or max(num_batches_ahead * 2, 4)
         self.generation_timeout = generation_timeout
         
         # Queues for communication
@@ -75,8 +75,6 @@ class AsyncBatchGenerator:
         self.worker_thread = None
         self.stop_event = threading.Event()
         self.started = False
-        self.error_count = 0
-        self.max_errors = 10
         
         # Synchronization
         self._lock = threading.Lock()
@@ -193,7 +191,7 @@ class AsyncBatchGenerator:
         """Check if we should submit more batches for generation"""
         with self._lock:
             total_pending = len(self.pending_batches) + len(self.completed_batches)
-            return total_pending < self.num_steps_ahead
+            return total_pending < self.num_batches_ahead
             
     def _generation_worker(self):
         """Worker thread that processes generation requests"""
@@ -206,35 +204,16 @@ class AsyncBatchGenerator:
                     
                 # Generate batch
                 start_time = time.time()
-                try:
-                    result = self._generate_batch(request)
-                    generation_time = time.time() - start_time
-                    result.generation_time = generation_time
-                    self.generation_times.append(generation_time)
-                    self.error_count = 0  # Reset error count on success
-                    
-                except Exception as e:
-                    # Create error result
-                    result = BatchResult(
-                        batch_id=request.batch_id,
-                        processed_results={},
-                        error=e,
-                        generation_time=time.time() - start_time
-                    )
-                    self.error_count += 1
-                    
-                    if self.error_count >= self.max_errors:
-                        print(f"AsyncBatchGenerator: Too many errors ({self.error_count}), stopping")
-                        self.stop_event.set()
+                result = self._generate_batch(request)
+                generation_time = time.time() - start_time
+                result.generation_time = generation_time
+                self.generation_times.append(generation_time)
                         
                 # Put result in queue
                 self.result_queue.put(result)
                 
             except queue.Empty:
                 continue
-            except Exception as e:
-                print(f"AsyncBatchGenerator worker error: {e}")
-                traceback.print_exc()
 
     def _generate_batch(self, request: BatchRequest) -> BatchResult:
         """
@@ -270,5 +249,6 @@ class AsyncBatchGenerator:
             batch_id=request.batch_id,
             processed_results=processed_results,
             all_reward_dict=all_reward_dict,
-            completions=env_results['completion']
+            completions=env_results['completion'],
+            prompts=env_results['prompt']
         ) 

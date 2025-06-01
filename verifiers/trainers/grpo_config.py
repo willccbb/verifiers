@@ -155,7 +155,7 @@ class GRPOConfig(TrainingArguments):
         metadata={"help": "Maximum number of concurrent requests to the environment."},
     )
     # Async generation parameters
-    num_steps_async: int = field(
+    num_batches_ahead: int = field(
         default=1,
         metadata={
             "help": "Number of batches to generate ahead. Higher values can improve GPU utilization but use more memory. "
@@ -173,7 +173,7 @@ class GRPOConfig(TrainingArguments):
         default=None,
         metadata={
             "help": "Maximum number of batches that can be queued for async generation. If None, defaults to "
-            "2 * num_steps_async."
+            "2 * num_batches_ahead."
         },
     )
 

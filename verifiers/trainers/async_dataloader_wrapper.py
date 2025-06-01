@@ -21,12 +21,14 @@ class AsyncDataLoaderWrapper:
         self._lock = threading.Lock()
         self._exhausted = False
         self._current_epoch = 0
+        self._current_batch = None  # Track the current batch
         
     def __iter__(self):
         """Reset and return iterator"""
         self._iterator = iter(self.dataloader)
         self._buffer.clear()
         self._exhausted = False
+        self._current_batch = None
         return self
         
     def __next__(self):
@@ -39,14 +41,21 @@ class AsyncDataLoaderWrapper:
             if not self._buffer:
                 raise StopIteration
                 
-            return self._buffer.popleft()
+            # Store current batch before returning
+            self._current_batch = self._buffer.popleft()
+            return self._current_batch
             
     def peek_ahead(self, n: int = 1) -> List[Any]:
         """
         Peek at the next n batches without consuming them.
+        If n=0, returns the current batch (if available).
         Returns fewer batches if not enough are available.
         """
         with self._lock:
+            if n == 0:
+                # Return current batch if available
+                return [self._current_batch] if self._current_batch is not None else []
+            
             # Ensure buffer has enough items
             while len(self._buffer) < n and not self._exhausted:
                 self._fill_buffer_single()
