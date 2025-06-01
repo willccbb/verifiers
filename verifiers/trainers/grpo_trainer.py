@@ -549,8 +549,8 @@ class GRPOTrainer(Trainer):
         3. On subsequent calls, submit new batches to maintain the pipeline
         """
         # Ensure all processes are synchronized at the start
+        print(f"WAIT 0 (process {self.accelerator.process_index}, step {self._step})")
         self.accelerator.wait_for_everyone()
-        print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
         
         # inputs = list of dicts for all gradient accumulation steps 
         generate_every = self.gradient_accumulation_steps * self.num_iterations
@@ -566,7 +566,8 @@ class GRPOTrainer(Trainer):
             # Start async generator if not started
             if not self._async_started and self.accelerator.is_main_process:
                 self.async_generator.start()
-                self._async_started = True
+            self._async_started = True
+            print(f"WAIT 1 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
             
             # Calculate which batch we need for this step
@@ -604,6 +605,7 @@ class GRPOTrainer(Trainer):
                     self.async_generator.submit_batch(request)
                     self.logger.info(f"Submitted batch {batch_id} with {len(all_prompts)} prompts (num processes: {self.accelerator.num_processes})")
                     batches_submitted += 1
+                print(f"WAIT 2 (process {self.accelerator.process_index}, step {self._step})")
                 self.accelerator.wait_for_everyone()
 
             # Update next batch id
@@ -611,11 +613,13 @@ class GRPOTrainer(Trainer):
                 self._next_batch_id = self._next_batch_id + batches_submitted
                 if batches_submitted > 0:
                     self.logger.info(f"Submitted {batches_submitted} batches, next_batch_id now {self._next_batch_id}")
+            print(f"WAIT 3 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
             # Synchronize next_batch_id across all processes
             next_batch_id_list = [self._next_batch_id if self.accelerator.is_main_process else 0]
             broadcast_object_list(next_batch_id_list, from_process=0)
             self._next_batch_id = next_batch_id_list[0]
+            print(f"WAIT 4 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
             
             # Now retrieve the batch we need for this step
@@ -692,13 +696,14 @@ class GRPOTrainer(Trainer):
                 }
             else:
                 broadcast_data = None
-            
+            print(f"WAIT 5 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
             
             # Broadcast processed data
             broadcast_list = [broadcast_data]
             broadcast_object_list(broadcast_list, from_process=0)
             broadcast_data = broadcast_list[0]
+            print(f"WAIT 6 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
             # Each process takes its slice
             process_slice = slice(
@@ -733,13 +738,13 @@ class GRPOTrainer(Trainer):
             # Shuffle and split for gradient accumulation
             full_batch = shuffle_tensor_dict(full_batch)
             self._buffered_inputs = split_tensor_dict(full_batch, self.gradient_accumulation_steps)
+            print(f"WAIT 7 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
-            print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
         # Return appropriate slice from buffer
         result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
         self._step += 1
+        print(f"WAIT 8 (process {self.accelerator.process_index}, step {self._step})")
         self.accelerator.wait_for_everyone()
-        print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
         return result
 
     def _compute_advantages(
