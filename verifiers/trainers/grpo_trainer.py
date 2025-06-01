@@ -191,7 +191,7 @@ class GRPOTrainer(Trainer):
         self.epsilon_high = args.epsilon_high if args.epsilon_high is not None else args.epsilon
         self.gradient_accumulation_steps = args.gradient_accumulation_steps
         self._step = 0
-        self._buffered_inputs = None
+        self._buffered_inputs: Optional[List[Dict[str, Optional[torch.Tensor]]]] = None
 
         # Data 
         self.shuffle_dataset = args.shuffle_dataset 
@@ -318,7 +318,7 @@ class GRPOTrainer(Trainer):
         self.env = env
 
         # Async generation setup 
-        self._next_batch_id = 0
+        self._next_batch_id: int = 0
         self._async_started = False
         self.num_batches_ahead = args.num_batches_ahead
         
@@ -548,9 +548,13 @@ class GRPOTrainer(Trainer):
         2. On first calls, prime by submitting num_batches_ahead batches before retrieving any
         3. On subsequent calls, submit new batches to maintain the pipeline
         """
+        # Ensure all processes are synchronized at the start
+        self.accelerator.wait_for_everyone()
+        print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
+        
         # inputs = list of dicts for all gradient accumulation steps 
         generate_every = self.gradient_accumulation_steps * self.num_iterations
-        
+ 
         # Check if we need to generate new completions
         if self._step % generate_every == 0 or self._buffered_inputs is None:
             # Update weights to vLLM if needed
@@ -563,7 +567,8 @@ class GRPOTrainer(Trainer):
             if not self._async_started and self.accelerator.is_main_process:
                 self.async_generator.start()
                 self._async_started = True
-
+            self.accelerator.wait_for_everyone()
+            
             # Calculate which batch we need for this step
             batch_id_to_retrieve = self._step // generate_every
             
@@ -579,8 +584,7 @@ class GRPOTrainer(Trainer):
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_answers, all_tasks = self._gather_batch_data(batch_offset)
-                print(all_prompts[0])
-
+                
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
                 
                 # Submit batch (main process only)
@@ -600,18 +604,18 @@ class GRPOTrainer(Trainer):
                     self.async_generator.submit_batch(request)
                     self.logger.info(f"Submitted batch {batch_id} with {len(all_prompts)} prompts (num processes: {self.accelerator.num_processes})")
                     batches_submitted += 1
-            
+                self.accelerator.wait_for_everyone()
+
             # Update next batch id
             if self.accelerator.is_main_process:
                 self._next_batch_id = self._next_batch_id + batches_submitted
                 if batches_submitted > 0:
                     self.logger.info(f"Submitted {batches_submitted} batches, next_batch_id now {self._next_batch_id}")
-            
+            self.accelerator.wait_for_everyone()
             # Synchronize next_batch_id across all processes
-            next_batch_id_list = [self._next_batch_id if self.accelerator.is_main_process else None]
+            next_batch_id_list = [self._next_batch_id if self.accelerator.is_main_process else 0]
             broadcast_object_list(next_batch_id_list, from_process=0)
             self._next_batch_id = next_batch_id_list[0]
-            
             self.accelerator.wait_for_everyone()
             
             # Now retrieve the batch we need for this step
@@ -695,7 +699,7 @@ class GRPOTrainer(Trainer):
             broadcast_list = [broadcast_data]
             broadcast_object_list(broadcast_list, from_process=0)
             broadcast_data = broadcast_list[0]
-            
+            self.accelerator.wait_for_everyone()
             # Each process takes its slice
             process_slice = slice(
                 self.accelerator.process_index * len(inputs),
@@ -729,10 +733,13 @@ class GRPOTrainer(Trainer):
             # Shuffle and split for gradient accumulation
             full_batch = shuffle_tensor_dict(full_batch)
             self._buffered_inputs = split_tensor_dict(full_batch, self.gradient_accumulation_steps)
-        
+            self.accelerator.wait_for_everyone()
+            print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
         # Return appropriate slice from buffer
         result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
         self._step += 1
+        self.accelerator.wait_for_everyone()
+        print(f"Step (process): {self._step} ({self.accelerator.process_index})") 
         return result
 
     def _compute_advantages(
