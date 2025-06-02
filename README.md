@@ -1,41 +1,13 @@
 # Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
-TODO: GitHub header stuff, test coverage, [PyPI](https://pypi.org/project/verifiers/), general release prep
-
-## Roadmap for v0.1 Release (very soon)
-
-New features for this release:
-- Async inference support via OpenAI-compatible vLLM server (with weight syncing enabled)
-- Async execution for rollouts + rubrics
-- Native support for [reasoning-gym](https://github.com/open-thought/reasoning-gym) environments
-- Overlapped training + inference (via off-policy steps)
-- Rollout-level reward functions by default (with weight=0.0 supported)
-- Direct support for API evaluation + synthetic data collection 
-- Complete workflow for API eval -> data collection -> SFT -> RL (GRPO) -> trained model eval
-- Full decoupling of rollout + reward logic from GRPOEnvTrainer
-- `transformers` Trainer as the base (replacing TRL's GRPO)
-- Direct support for LLM judges via JudgeRubric
-Included, but could use more testing:
-- Data-parallel vLLM workers
-- Multi-node training
-Not included, but planned for later releases:
-- TextArena environments
-- Enigmata environments
-- Native MCP tool support
-- Multimodal support (image-in, via /v1/chat/completions)
-- Tokenizer endpoint exposed for better token-level + turn-level mechanics (edge case handling, token-level rewards)
-- More flexible abstractions for dynamic batch construction + rollout reuse
-- FSDP (via prime-rl) 
-
 ## Overview
 
-`verifiers` is a set of tools and abstractions for training LLMs with reinforcement learning in **verifiable multi-turn environments** via Group-Relative Policy Optimization ([GRPO](https://huggingface.co/docs/trl/main/en/grpo_trainer)). In addition, `verifiers` includes support for synthetic data generation, SFT warmup on filtered traces, and offline evaluation with API clients.
+`verifiers` is a set of tools and abstractions for training LLMs with reinforcement learning in **verifiable multi-turn environments** via Group-Relative Policy Optimization. Our implementation of GRPO builds upon the base `transformers` Trainer, and is optimized for efficient async multi-turn inference and training with off-policy overlapping. In addition, `verifiers` includes support for synthetic data generation, SFT warmup on filtered rollouts, and offline evaluation with API clients.
 
 **Core principles**:
 RL environments and algorithms should be modular, reusable, and hackable.
 
-
-- Client (Actor): 
+- actor = client = OpenAI-compatible LLM endpoint
 - environment = instructions + tasks + interaction protocol + rubric
 - instructions = system prompts
 - tasks = datasets + verifiable targets
@@ -44,33 +16,33 @@ RL environments and algorithms should be modular, reusable, and hackable.
 - environments = synthetic data engines = RL trainers = eval harnesses
 
 **Key features:**
-- First-class support for multi-turn tool use and agentic RL via `GRPOEnvTrainer`, built on top of Transformers.
-- Direct compatibility with API clients for synthetic data generation and evaluation, in addition to RL training with vLLM clients.
+- First-class support for multi-turn tool use and agentic RL via `vf.GRPOTrainer`, built on top of `transformers`.
+- Direct integration with OpenAI-compatible API clients for synthetic data generation and evaluation, in addition to RL training.
 - Utilities for SFT warmup/"cold start" data (see `examples/warmup` scripts)
-- Emphasis on OpenAI/`chat`-compatible messages rather than plaintext.
+- Support for both `chat` (messages) and `completion` (text) requests in your rollouts
 - `Parser` classes (e.g. `XMLParser`) for standardizing your prompt formats and text extraction.
 - `Rubric` classes for managing sets of reward functions.
 - `Environment` classes for encapsulating your tasks, parsers, rollout logic, and reward functions, including:
 	- `SingleTurnEnv` for "R1-style" reasoning via vLLM's `chat()` method.
-	- `SimpleEnv` for single-turn completion-style rollouts using vLLM's `generate()` method.
-  - `SimpleEnv` for completion-style resp
 	- `ToolEnv` for multi-turn tool use with custom Python functions.
 	- `SmolaToolEnv` for multi-turn tool use with Hugging Face [smolagents](https://huggingface.co/docs/smolagents/en/index) tools.
-	- `CodeEnv` for interactive Python execution.
-	- `MultiTurnEnv` abstract class for implementing custom multi-turn rollout logic on top of vLLM's `chat()` method -- just override `env_response(list[dict]) -> dict` and `is_completed(list[dict]) -> bool` and you're good to go.
+	- `CodeMathEnv` for interactive Python execution.
+	- `MultiTurnEnv` abstract class for implementing custom multi-turn rollout logic on top of vLLM's `chat()` method -- just override `env_response` and `is_completed` and you're good to go.
+	- `ReasoningGymEnv` -- direct training for any [reasoning-gym](https://github.com/open-thought/reasoning-gym/tree/main/reasoning_gym) task.
 	- `Environment` abstract class for implementing whatever rollout logic you can imagine (go nuts!)
 
-Basic usage for a `GRPOEnvTrainer` training script with 4 GPUs (2 inference + 2 training):
+Basic usage for a GRPO training script with 4 GPUs (2 inference + 2 training):
 
 ```bash
 # launch inference server
-CUDA_VISIBLE_DEVICES=0,1 uv run -m verifiers.inference.vllm_openai --model 'Qwen/Qwen2.5-7B-Instruct'
+CUDA_VISIBLE_DEVICES=0,1 vf-vllm --model 'Qwen/Qwen2.5-1.5B-Instruct' --tensor-parallel-size 2
 
 # launch training script; copy zero3.yaml or set values globally with `accelerate config`
 CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num-processes 2 --config-file configs/zero3.yaml train.py
 ```
 
-The included `train.py` mirrors `verifiers/examples/reverse_text.py` and is configured for 4xH200 GPUs (2 inference + 2 training). See [GRPO Rules of Thumb](#grpo-rules-of-thumb) for further discussion of hyperparameters and best practices; the easiest way to reduce memory requirements is by reducing `per_device_train_batch_size` and increasing `gradient_accumulation_steps` accordingly.
+See [GRPO Rules of Thumb](#grpo-rules-of-thumb) for further discussion of hyperparameters and best practices; the easiest way to reduce memory requirements is by reducing `per_device_train_batch_size` and increasing `gradient_accumulation_steps` accordingly.
+
 ### Citation
 
 If you use this code in your research, please cite:
@@ -87,28 +59,18 @@ If you use this code in your research, please cite:
 
 ### Setup 
 
-`verifiers` is available via PyPI (TODO), and we recommend installation with `uv`:
-
-```
-uv venv --python 3.11 (or 3.12)
-uv add verifiers # optionally, "verifiers[tools]"
-uv pip install flash-attn --no-build-isolation
-```
-
 To use the latest `main` branch, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
-uv sync
-uv pip install flash-attn --no-build-isolation
-uv pip install -e ".[jupyter,tools,extras]"
+uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e ".[all]"
 ```
 
 **Troubleshooting:**
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).
 - On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) during vLLM weight syncing. This can usually be alleviated by setting `NCCL_P2P_DISABLE=1` in your environment.
-- Confirm that you are able to run standalone TRL GRPO training scripts (see `examples/trl_grpo.py`)
 - If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
+
 ### Resource Requirements
 
 `verifiers` currently uses `transformers` Trainer as its primary training backend via `accelerate` (like Hugging Face's [TRL](https://github.com/huggingface/trl/tree/main/trl)), and is optimized for setups with at least 2 GPUs, scaling up to multiple 8xH100 nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be [rented](https://app.primeintellect.ai/dashboard/create-cluster?image=ubuntu_22_cuda_12) for <$1/hr.
@@ -121,7 +83,6 @@ We aim to include support for additional trainers backends in the future, and ar
  
 **Level 0:** Inspect and run the included examples for simple training tasks:
 - `verifiers/examples/reverse_text.py`  (`SingleTurnEnv`)
-- `verifiers/examples/
 - `verifiers/examples/math_python.py` (`ToolEnv`)
 
 **Level 1:** Implement your own reasoning task with verifiable rewards using `SingleTurnEnv`:
@@ -161,7 +122,7 @@ dataset_dsv3.push_to_hub("...")
 
 **Level 2.5 (Optional, but recommended for <7B models):** SFT warmup on synthetic data
 
-See `verifiers/examples/warmup/sft_reverse.py` for an example script using TRL's SFTTrainer.
+See `verifiers/examples/sft/reverse_text.py` for an example script using TRL's SFTTrainer.
 
 **Level 3:** Train a model in your environment using GRPO:
 
@@ -169,7 +130,7 @@ See `verifiers/examples/warmup/sft_reverse.py` for an example script using TRL's
 # train.py
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-trainer = vf.GRPOEnvTrainer(
+trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
@@ -211,20 +172,11 @@ class YourCustomEnv(Environment):
 
 ```
 
-Ideas: 
-- MCP Environments
-- Multi-Player Game Environments
-- Computer-use agents via tool-calling to a VLM
-- Anything else you can think of!
-
-
 ### GRPO Rules of Thumb
-- RL is [notoriously](https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/) sensitive to implementation details, and this applies to LLM GRPO as well. The default hyperparameter config in `vf.grpo_defaults()` is intended as a starting point which should be relatively stable for a broad variety of medium-difficulty tasks, informed by my own experimentation as well as broader community findings. Particularly for 
-- Always start by evaluating the performance of your model and 
-	- The `vf_env.eval_api()` and `vf_env.make_api_dataset()` methods provide convenient interfaces 
-	- If your model struggles to get non-zero rewards in 10+ trials, the task is likely too hard. Consider adjusting your prompts
-	- If a 
-	- If your model already gets 80%+ on a task without training, the dataset is likely too easy. Consider prefiltering for questions 
+- RL is [notoriously](https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/) sensitive to implementation details, and this applies to LLM GRPO as well. The default hyperparameter config in `vf.grpo_defaults()` is intended as a starting point which should be relatively stable for a broad variety of medium-difficulty tasks, informed by my own experimentation as well as broader community findings. 
+- Always start by evaluating the performance of your model and/or API models in your environment 
+	- If your model struggles to get non-zero rewards in 10+ trials, the task is likely too hard (consider simplifying, SFT warmup, or adjusting prompts)
+	- If your model already gets 80%+ on a task without training, the dataset is likely too easy (consider prefiltering) 
 - Tricks which may increase performance/speed, at the cost of risking "collapse":
 	- Setting the KL penalty `beta = 0` (removes the reference model)
 	- Increasing the learning rate
@@ -234,23 +186,48 @@ Ideas:
 	- Increasing prompts per batch (`per_device_train_batch_size`, `gradient_accumulation_steps`)
 	- Decreasing `max_grad_norm` (clipping)
 	- Using larger models (14B+)
-	- Using more num
+	- Using more `num_generations` (larger group size)
 	- Using LoRA adapters
 - Tricks whose benefit remains up-for-debate or context-dependent:
-	- High `beta` values (`0.2+`)
+	- High `beta` values (`0.1+`)
 	- Dr. GRPO vs GRPO
 	- Overlong filtering
 	- Masking tool call responses (`mask_env_response` in  `MultiStepEnv`)
 - Tricks which are likely a "free lunch":
 	- Learning rate warm-up of at least 10-20 steps (`warmup_steps`)
 	- Periodically updating reference models (`sync_ref_model`, `ref_model_sync_steps`) if using a reference model, particularly for 500+ step runs
-- For successful training, you generally want diversity of reward scores within each group of responses for a prompt (see DAPO [paper](https://arxiv.org/pdf/2503.14476), Sec. 3.2).
-- The *best* way to increase diversity is 
-- See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings.
+	- One-step off-policy training (overlapping training + inference)
+- For successful training, you generally want diversity of reward scores within each group of responses for a prompt (see DAPO [paper](https://arxiv.org/pdf/2503.14476), Sec. 3.2)
+- The *best* way to increase diversity is to ensure that your tasks are of an appropriate difficulty for your model (not too easy, not too hard)
+- See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings
 
 
+### Roadmap for v0.1 Release (very soon)
 
+TODO: GitHub header stuff, test coverage, [PyPI](https://pypi.org/project/verifiers/), general release prep
 
+New features for this release:
+- Async inference support via OpenAI-compatible vLLM server (with weight syncing enabled)
+- Async execution for rollouts + rubrics
+- Native support for [reasoning-gym](https://github.com/open-thought/reasoning-gym) environments
+- Overlapped training + inference (via off-policy steps)
+- Rollout-level reward functions by default (with weight=0.0 supported)
+- Direct support for API evaluation + synthetic data collection 
+- Complete workflow for API eval -> data collection -> SFT -> RL (GRPO) -> trained model eval
+- Full decoupling of rollout + reward logic from GRPOTrainer
+- `transformers` Trainer as the base (replacing TRL's GRPO)
+- Direct support for LLM judges via JudgeRubric
+Included, but could use more testing:
+- Data-parallel vLLM workers
+- Multi-node training
+Not included, but planned for later releases:
+- TextArena environments
+- Enigmata environments
+- Native MCP tool support
+- Multimodal support (image-in, via /v1/chat/completions)
+- Tokenizer endpoint exposed for better token-level + turn-level mechanics (edge case handling, token-level rewards)
+- More flexible abstractions for dynamic batch construction + rollout reuse
+- FSDP (via prime-rl) 
 
 
 
