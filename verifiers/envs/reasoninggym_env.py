@@ -58,7 +58,7 @@ class ReasoningGymEnv(SingleTurnEnv):
         dataset_specs = []
         for dataset_config in gym:
             if isinstance(dataset_config, str):
-                dataset_specs.append(DatasetSpec(name=dataset_config))
+                dataset_specs.append(DatasetSpec(name=dataset_config, weight=1.0, config={}))
             elif isinstance(dataset_config, dict):
                 dataset_specs.append(DatasetSpec(**dataset_config))
             else:
