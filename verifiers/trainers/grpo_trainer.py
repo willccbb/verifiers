@@ -171,8 +171,12 @@ class GRPOTrainer(Trainer):
         model.warnings_issued["estimate_tokens"] = True 
 
         # Tokenizer pad token
-        if processing_class.pad_token is None: # type: ignore
-            processing_class.pad_token = processing_class.eos_token # type: ignore
+        if hasattr(processing_class, "tokenizer"):
+            if processing_class.tokenizer.pad_token is None:
+                processing_class.tokenizer.pad_token = processing_class.tokenizer.eos_token # type: ignore
+        else:
+            if processing_class.pad_token is None: # type: ignore
+                processing_class.pad_token = processing_class.eos_token # type: ignore
 
         # Training arguments
         self.per_device_train_batch_size = args.per_device_train_batch_size
@@ -227,7 +231,11 @@ class GRPOTrainer(Trainer):
                 else:
                     # Completion format
                     prompt_text = prompt
-                prompt_ids = processing_class.encode(prompt_text) # type: ignore
+                if hasattr(processing_class, "tokenizer"):
+                    encode = processing_class.tokenizer.encode
+                else:
+                    encode = processing_class.encode
+                prompt_ids = encode(prompt_text) # type: ignore
                 return len(prompt_ids) <= max_length
             
             original_size = len(train_dataset)
@@ -743,10 +751,14 @@ class GRPOTrainer(Trainer):
                 completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
             # Pad sequences
-            prompt_ids = pad(prompt_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
+            if hasattr(self.processing_class, "tokenizer"):
+                pad_token_id = self.processing_class.tokenizer.pad_token_id
+            else:
+                pad_token_id = self.processing_class.pad_token_id
+            prompt_ids = pad(prompt_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
-            completion_ids = pad(completion_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-            completion_mask = pad(completion_mask_list)
+            completion_ids = pad(completion_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
+            completion_mask = pad(completion_mask_list, padding_side="left")
             
             # Truncate if needed
             if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
@@ -951,7 +963,11 @@ class GRPOTrainer(Trainer):
             completions = eval_results['completion']
             if isinstance(completions[0], str):
                 # Completion format - directly tokenize strings
-                completion_lengths = [len(self.processing_class.encode(c)) for c in completions] # type: ignore
+                if hasattr(self.processing_class, "tokenizer"):
+                    encode = self.processing_class.tokenizer.encode
+                else:
+                    encode = self.processing_class.encode
+                completion_lengths = [len(encode(c)) for c in completions] # type: ignore
             else:
                 # Chat format - use apply_chat_template
                 completion_lengths = []
@@ -1127,8 +1143,12 @@ class GRPOTrainer(Trainer):
         
         # Check for EOS tokens  
         term_lengths = []
+        if hasattr(self.processing_class, "tokenizer"):
+            eos_token_id = self.processing_class.tokenizer.eos_token_id
+        else:
+            eos_token_id = self.processing_class.eos_token_id
         for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
-            has_eos = any(token == self.processing_class.eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
+            has_eos = any(token == eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
             if has_eos:
                 term_lengths.append(sum(comp_mask))
         

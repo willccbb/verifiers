@@ -344,7 +344,11 @@ class Environment(ABC):
         # tokenize just the prompt
         prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
         assert isinstance(prompt_text, str)
-        prompt_ids = processing_class.encode(prompt_text)
+        if hasattr(processing_class, "tokenizer"):
+            encode = processing_class.tokenizer.encode
+        else:
+            encode = processing_class.encode
+        prompt_ids = encode(prompt_text)
         prompt_mask = [1] * len(prompt_ids)
         
         # track completion tokens and masks by processing incrementally
@@ -366,7 +370,7 @@ class Environment(ABC):
                 add_generation_prompt=False,
             )
             assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
-            current_ids = processing_class.encode(prefix_text)
+            current_ids = encode(prefix_text)
             assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
             
             # add new tokens to completion tokens
@@ -409,11 +413,15 @@ class Environment(ABC):
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
         # Tokenize prompt
-        prompt_ids = processing_class.encode(prompt)
+        if hasattr(processing_class, "tokenizer"):
+            encode = processing_class.tokenizer.encode
+        else:
+            encode = processing_class.encode
+        prompt_ids = encode(prompt)
         prompt_mask = [1] * len(prompt_ids)
         
         # Tokenize completion
-        completion_ids = processing_class.encode(completion)
+        completion_ids = encode(completion)
         completion_mask = [1] * len(completion_ids)
         
         return prompt_ids, prompt_mask, completion_ids, completion_mask
