@@ -8,7 +8,7 @@ description = "Verifiers for reinforcement learning with LLMs"
 license = {text = "MIT"}
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "torch>=2.6.0",
+    "torch==2.6.0",
     "liger-kernel>=0.5.10",
     "setuptools",
     "deepspeed",
