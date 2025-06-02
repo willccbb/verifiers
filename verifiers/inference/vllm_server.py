@@ -353,7 +353,7 @@ class ScriptArguments:
             "determined based on the model configuration. Find the supported values in the vLLM documentation."
         },
     )
-    max_model_len: Optional[int] = field(
+    max_model_len: int = field(
         default=8192,
         metadata={
             "help": "If set, the `max_model_len` to use for vLLM. This can be useful when running with reduced "
@@ -727,7 +727,7 @@ async def batch_processing_loop(
                     vllm_sampling_params = SamplingParams(
                         **kwargs_for_sampling_params,
                         n=1, # Generate one sequence continuation per request in the chunk
-                        truncate_prompt_tokens=-1, # Truncate prompt to max_model_len
+                        truncate_prompt_tokens=script_args.max_model_len - 1, # Truncate prompt to max_model_len
                         max_tokens=chunk_size, # Use calculated chunk size
                         # Ensure guided_decoding is correctly set up if present in extra_body
                         guided_decoding=GuidedDecodingParams(backend="outlines", regex=sig_extra_body_dict["guided_decoding_regex"]) if "guided_decoding_regex" in sig_extra_body_dict else None,
