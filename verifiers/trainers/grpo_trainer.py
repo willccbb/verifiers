@@ -630,76 +630,16 @@ class GRPOTrainer(Trainer):
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve) 
                 processed_results = batch_result.processed_results
                 
-                # Convert rewards and compute advantages
-                all_rewards = processed_results['rewards']
-                all_rewards = torch.tensor(all_rewards, device=self.accelerator.device) if not isinstance(all_rewards, torch.Tensor) else all_rewards
-                all_advantages = self._compute_advantages(all_rewards)
-                
-                # Process token sequences
-                all_prompt_ids = []
-                all_prompt_mask = []
-                all_completion_ids = []
-                all_completion_mask = []
-                
-                for i in range(len(processed_results['prompt_ids'])):
-                    prompt_ids = torch.tensor(processed_results['prompt_ids'][i], device=self.accelerator.device)
-                    prompt_mask = torch.tensor(processed_results['prompt_mask'][i], device=self.accelerator.device)
-                    completion_ids = torch.tensor(processed_results['completion_ids'][i], device=self.accelerator.device)
-                    completion_mask = torch.tensor(processed_results['completion_mask'][i], device=self.accelerator.device)
-                    
-                    all_prompt_ids.append(prompt_ids)
-                    all_prompt_mask.append(prompt_mask)
-                    all_completion_ids.append(completion_ids)
-                    all_completion_mask.append(completion_mask)
-                
-                # Pad sequences
-                all_prompt_ids = pad(all_prompt_ids, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
-                all_prompt_mask = pad(all_prompt_mask, padding_side='left') # type: ignore
-                all_completion_ids = pad(all_completion_ids, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-                all_completion_mask = pad(all_completion_mask)
-                
-                # Truncate if needed
-                if self.max_prompt_length is not None and all_prompt_ids.size(1) > self.max_prompt_length:
-                    all_prompt_ids = all_prompt_ids[:, -self.max_prompt_length:]
-                    all_prompt_mask = all_prompt_mask[:, -self.max_prompt_length:]
-                
-                if self.max_completion_length is not None and all_completion_ids.size(1) > self.max_completion_length:
-                    all_completion_ids = all_completion_ids[:, :self.max_completion_length]
-                    all_completion_mask = all_completion_mask[:, :self.max_completion_length]
-                
-                # Log metrics
-                all_reward_dict = batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']}
-                all_completions = batch_result.completions if hasattr(batch_result, 'completions') else []
-                all_prompts_for_logging = batch_result.prompts if hasattr(batch_result, 'prompts') else []
-                
-                self._log_reward_metrics_primary(
-                    mode="train",
-                    all_reward_dict=all_reward_dict,
-                    all_rewards=all_rewards,
-                    generation_batch_size=len(all_rewards)
-                )
-                
-                self._log_textual_data_primary(
-                    all_prompts=all_prompts_for_logging,
-                    all_completions=all_completions,
-                    all_reward_dict=all_reward_dict
-                )
-                
-                self._log_completion_metrics_primary(
-                    mode="train",
-                    all_completion_mask=all_completion_mask,
-                    all_completion_ids=all_completion_ids,
-                    all_prompt_mask=all_prompt_mask
-                )
-                
-                # Package for broadcast
+                # Package raw data for broadcast (not tensors yet)
                 broadcast_data = {
-                    'prompt_ids': all_prompt_ids,
-                    'prompt_mask': all_prompt_mask,
-                    'completion_ids': all_completion_ids,
-                    'completion_mask': all_completion_mask,
-                    'advantages': all_advantages,
-                    'rewards': all_rewards,
+                    'prompt_ids': processed_results['prompt_ids'],
+                    'prompt_mask': processed_results['prompt_mask'],
+                    'completion_ids': processed_results['completion_ids'],
+                    'completion_mask': processed_results['completion_mask'],
+                    'rewards': processed_results['rewards'],
+                    'all_reward_dict': batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']},
+                    'completions': batch_result.completions if hasattr(batch_result, 'completions') else [],
+                    'prompts': batch_result.prompts if hasattr(batch_result, 'prompts') else [],
                 }
             else:
                 broadcast_data = None
@@ -718,12 +658,68 @@ class GRPOTrainer(Trainer):
                 self.accelerator.process_index * len(inputs),
                 (self.accelerator.process_index + 1) * len(inputs),
             )
- 
-            prompt_ids = broadcast_data['prompt_ids'][process_slice] # type: ignore
-            prompt_mask = broadcast_data['prompt_mask'][process_slice] # type: ignore
-            completion_ids = broadcast_data['completion_ids'][process_slice] # type: ignore
-            completion_mask = broadcast_data['completion_mask'][process_slice] # type: ignore
-            advantages = broadcast_data['advantages'][process_slice] # type: ignore
+            
+            # Create rewards tensor and compute advantages using full batch
+            assert broadcast_data is not None  # After broadcast, all processes have data
+            all_rewards = torch.tensor(broadcast_data['rewards'], device=self.accelerator.device)
+            all_advantages = self._compute_advantages(all_rewards)
+            
+            # Now create tensors only for this process's slice
+            prompt_ids_list = []
+            prompt_mask_list = []
+            completion_ids_list = []
+            completion_mask_list = []
+            
+            for i in range(process_slice.start, process_slice.stop):
+                prompt_ids_list.append(torch.tensor(broadcast_data['prompt_ids'][i], device=self.accelerator.device))
+                prompt_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i], device=self.accelerator.device))
+                completion_ids_list.append(torch.tensor(broadcast_data['completion_ids'][i], device=self.accelerator.device))
+                completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
+            
+            # Pad sequences
+            prompt_ids = pad(prompt_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
+            prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
+            completion_ids = pad(completion_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
+            completion_mask = pad(completion_mask_list)
+            
+            # Truncate if needed
+            if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
+                prompt_ids = prompt_ids[:, -self.max_prompt_length:]
+                prompt_mask = prompt_mask[:, -self.max_prompt_length:]
+            
+            if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
+                completion_ids = completion_ids[:, :self.max_completion_length]
+                completion_mask = completion_mask[:, :self.max_completion_length]
+            
+            # Take this process's slice of advantages
+            advantages = all_advantages[process_slice]
+            
+            # Log metrics on main process only
+            if self.accelerator.is_main_process:
+                self._log_reward_metrics_primary(
+                    mode="train",
+                    all_reward_dict=broadcast_data['all_reward_dict'],
+                    all_rewards=all_rewards,
+                    generation_batch_size=len(all_rewards)
+                )
+                
+                self._log_textual_data_primary(
+                    all_prompts=broadcast_data['prompts'],
+                    all_completions=broadcast_data['completions'],
+                    all_reward_dict=broadcast_data['all_reward_dict']
+                )
+                
+                # Log completion metrics using full batch data on CPU to save memory
+                self._log_completion_metrics_primary(
+                    mode="train",
+                    all_completion_mask=broadcast_data['completion_mask'],
+                    all_completion_ids=broadcast_data['completion_ids'], 
+                    all_prompt_mask=broadcast_data['prompt_mask']
+                )
+            
+            # Free the broadcast data to save memory
+            del broadcast_data
+            del broadcast_list
             
             # Concatenate all data for shuffling
             full_batch = {
@@ -734,11 +730,6 @@ class GRPOTrainer(Trainer):
                 "old_per_token_logps": None,
                 "advantages": advantages,
             }
-            
-            # Move full batch tensors to the correct device for this process
-            for key in full_batch:
-                if full_batch[key] is not None and isinstance(full_batch[key], torch.Tensor):
-                    full_batch[key] = full_batch[key].to(self.accelerator.device)
             
             # Shuffle and split for gradient accumulation
             full_batch = shuffle_tensor_dict(full_batch)
@@ -824,9 +815,9 @@ class GRPOTrainer(Trainer):
     def _log_completion_metrics_primary(
         self,
         mode: str,
-        all_completion_mask: torch.Tensor,
-        all_completion_ids: torch.Tensor,
-        all_prompt_mask: torch.Tensor
+        all_completion_mask: List[List[int]],
+        all_completion_ids: List[List[int]],
+        all_prompt_mask: List[List[int]]
     ) -> None:
         """
         Log completion-related metrics (PRIMARY PROCESS ONLY).
@@ -834,29 +825,31 @@ class GRPOTrainer(Trainer):
         """
         # Log token count
         if mode == "train":
-            attention_mask = torch.cat([all_prompt_mask, all_completion_mask], dim=1)
-            self.state.num_input_tokens_seen += int(attention_mask.sum().item())
+            total_tokens = sum(len(pm) + len(cm) for pm, cm in zip(all_prompt_mask, all_completion_mask))
+            self.state.num_input_tokens_seen += total_tokens
         self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
         
         # Log completion lengths
-        completion_lengths = all_completion_mask.sum(1)
-        self._metrics[mode]["completions/mean_length"].append(completion_lengths.float().mean().item())
-        self._metrics[mode]["completions/min_length"].append(completion_lengths.float().min().item())
-        self._metrics[mode]["completions/max_length"].append(completion_lengths.float().max().item())
+        completion_lengths = [sum(mask) for mask in all_completion_mask]
+        self._metrics[mode]["completions/mean_length"].append(float(sum(completion_lengths)) / len(completion_lengths))
+        self._metrics[mode]["completions/min_length"].append(float(min(completion_lengths)))
+        self._metrics[mode]["completions/max_length"].append(float(max(completion_lengths)))
         
-        # Check for EOS tokens and log terminated sequence lengths
-        is_eos: torch.Tensor = all_completion_ids == self.processing_class.eos_token_id # type: ignore
-        terminated_with_eos = is_eos.any(dim=1)
-        term_completion_mask = completion_lengths[terminated_with_eos]
-        clipped_completions_ratio = 1 - len(term_completion_mask) / len(completion_lengths)
+        # Check for EOS tokens  
+        term_lengths = []
+        for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
+            has_eos = any(token == self.processing_class.eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
+            if has_eos:
+                term_lengths.append(sum(comp_mask))
+        
+        clipped_completions_ratio = 1 - len(term_lengths) / len(completion_lengths)
         self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
         
-        if len(term_completion_mask) == 0:
-            # edge case where no completed sequences are found
-            term_completion_mask = torch.zeros(1, device=all_completion_mask.device)
-        self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
-        self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
-        self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
+        if len(term_lengths) == 0:
+            term_lengths = [0]
+        self._metrics[mode]["completions/mean_terminated_length"].append(float(sum(term_lengths)) / len(term_lengths))
+        self._metrics[mode]["completions/min_terminated_length"].append(float(min(term_lengths)))
+        self._metrics[mode]["completions/max_terminated_length"].append(float(max(term_lengths)))
 
     def _get_sampling_args(self) -> Dict[str, Any]:
         """Get sampling arguments for Environment generation."""
