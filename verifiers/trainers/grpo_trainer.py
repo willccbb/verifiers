@@ -995,9 +995,9 @@ class GRPOTrainer(Trainer):
  
                 table = {
                     "step": [str(self.state.global_step)] * len(self._textual_logs["prompt"]),
-                    "prompt": self._textual_logs["prompt"],
-                    "completion": self._textual_logs["completion"],
-                    **self._textual_logs["rewards"],
+                    "prompt": list(self._textual_logs["prompt"]),
+                    "completion": list(self._textual_logs["completion"]),
+                    **{k: list(v) for k, v in self._textual_logs["rewards"].items()},
                 }
                 print(table)
                 df = pd.DataFrame(table)
