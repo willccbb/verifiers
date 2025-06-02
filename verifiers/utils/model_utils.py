@@ -1,8 +1,9 @@
 from importlib.util import find_spec
+from importlib import import_module
 from typing import Dict, Any, Union, Tuple, Callable
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer # type: ignore
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, PreTrainedModel # type: ignore
 
 import torch.nn as nn
 
@@ -59,6 +60,43 @@ class _ForwardRedirection:
 def is_liger_available() -> bool:
     return find_spec("liger_kernel") is not None
 
+def generic_model_loader(model_id: str, **model_kwargs) -> PreTrainedModel:
+    cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    for arch in cfg.architectures or []:
+        try:
+            cls = getattr(import_module("transformers"), arch)
+            return cls.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                **model_kwargs,
+            )
+        except (AttributeError, ImportError, ValueError):
+            pass
+
+    from transformers import (
+        AutoModel,
+        AutoModelForCausalLM,
+        AutoModelForSeq2SeqLM,
+        AutoModelForVision2Seq,
+    )
+
+    for auto_cls in (
+        AutoModelForCausalLM,
+        AutoModelForSeq2SeqLM,
+        AutoModelForVision2Seq,
+        AutoModel,
+    ):
+        try:
+            return auto_cls.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                **model_kwargs,
+            )
+        except ValueError:
+            continue
+
+    raise RuntimeError(f"No suitable loader found for model type {cfg.model_type!r}")
+
 def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Any:
     if model_kwargs is None:
         model_kwargs = dict(
@@ -71,7 +109,7 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
         from liger_kernel.transformers import AutoLigerKernelForCausalLM # type: ignore
         return AutoLigerKernelForCausalLM.from_pretrained(model_name, **model_kwargs)
     else:
-        return AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        return generic_model_loader(model_name, **model_kwargs)
     
 def get_tokenizer(model_name: str) -> Any:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
