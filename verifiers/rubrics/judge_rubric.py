@@ -26,8 +26,8 @@ Respond either "yes" or "no" only."""
 
 class JudgeRubric(Rubric):
     def __init__(self,
-                 judge_client: OpenAI = OpenAI(base_url="https://???.com/v1", api_key=os.getenv("FREE_100RPM_API_KEY", "local")),
-                 judge_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
+                 judge_client: OpenAI = OpenAI(),
+                 judge_model: str = "gpt-4.1-nano",
                  judge_prompt: str = DEFAULT_JUDGE_PROMPT,
                  parser: Parser = Parser(),
                  **kwargs):
