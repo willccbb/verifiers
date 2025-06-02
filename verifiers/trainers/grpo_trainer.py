@@ -724,6 +724,13 @@ class GRPOTrainer(Trainer):
             completion_mask = broadcast_data['completion_mask'][process_slice] # type: ignore
             advantages = broadcast_data['advantages'][process_slice] # type: ignore
             
+            # Move tensors to the correct device for this process
+            prompt_ids = prompt_ids.to(self.accelerator.device)
+            prompt_mask = prompt_mask.to(self.accelerator.device)
+            completion_ids = completion_ids.to(self.accelerator.device)
+            completion_mask = completion_mask.to(self.accelerator.device)
+            advantages = advantages.to(self.accelerator.device)
+            
             # Concatenate all data for shuffling
             full_batch = {
                 "prompt_ids": broadcast_data['prompt_ids'], # type: ignore
