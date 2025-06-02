@@ -160,13 +160,14 @@ class YourMultiTurnEnv(MultiTurnEnv):
                  system_prompt: str | None, 
                  parser: Parser | None,
                  rubric: Rubric | None,
+				 max_turns: int,
                  **kwargs):
 	
-  def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
+  def is_completed(self, messages: list[dict], state: dict, **kwargs: Any) -> bool
     # return whether or not rollout is completed
 
-  def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
-    # return environment response for a message-dict sequence
+  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[dict, dict]
+    # return environment response + updated state for a message-dict sequence
 
 class YourCustomEnv(Environment):
 
@@ -217,9 +218,11 @@ New features for this release:
 - Full decoupling of rollout + reward logic from GRPOTrainer
 - `transformers` Trainer as the base (replacing TRL's GRPO)
 - Direct support for LLM judges via JudgeRubric
+
 Included, but could use more testing:
 - Data-parallel vLLM workers
 - Multi-node training
+
 Not included, but planned for later releases:
 - TextArena environments
 - Enigmata environments
