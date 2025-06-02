@@ -77,7 +77,7 @@ uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e "
 
 Depending on your goals, there are other RL frameworks with native support for multi-turn tool use which you may be interested in exploring as well. If you are looking for maximum efficiency on a single GPU, consider OpenPipe's [ART](https://github.com/OpenPipe/ART) framework, which builds on top of [Unsloth](https://github.com/unslothai/unsloth). If you are seeking to maximize absolute performance at large scales, consider Nvidia's [NeMo-RL](https://github.com/NVIDIA/NeMo-RL) or ByteDance's [veRL](https://github.com/volcengine/verl) (which powers many agent RL projects like [RAGEN](https://github.com/RAGEN-AI/RAGEN) and [SkyRL](https://github.com/NovaSky-AI/SkyRL/tree/main)).
 
-We aim to include support for additional trainers backends in the future, and are open to PRs. Our first-order objective is maintaining ease of use for users (and LLMs), and any potential contributions will be considered with this in mind. 
+We aim to include support for additional trainer backends in the future, and are open to PRs. Our first-order objective is maintaining ease of use for users (and LLMs), and any potential contributions will be considered with this in mind. 
 
 ### Levels of Exploration
  
