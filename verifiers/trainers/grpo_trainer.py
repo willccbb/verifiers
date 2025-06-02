@@ -649,6 +649,8 @@ class GRPOTrainer(Trainer):
                         env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
+                        max_completion_length=self.max_completion_length,
+                        mask_truncated_completions=self.mask_truncated_completions,
                         max_concurrent=self.max_concurrent,
                         device=self.accelerator.device,
                         accelerator=self.accelerator,
@@ -724,7 +726,7 @@ class GRPOTrainer(Trainer):
                 prompt_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i], device=self.accelerator.device))
                 completion_ids_list.append(torch.tensor(broadcast_data['completion_ids'][i], device=self.accelerator.device))
                 completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
-            
+
             # Pad sequences
             prompt_ids = pad(prompt_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore

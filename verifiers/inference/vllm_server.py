@@ -354,7 +354,7 @@ class ScriptArguments:
         },
     )
     max_model_len: int = field(
-        default=8192,
+        default=32768,
         metadata={
             "help": "If set, the `max_model_len` to use for vLLM. This can be useful when running with reduced "
             "`vllm_gpu_memory_utilization`, leading to a reduced KV cache size. If not set, vLLM will use the model "

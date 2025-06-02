@@ -22,7 +22,7 @@ class GRPOConfig(TrainingArguments):
     """
 
     if version.parse(transformers.__version__) <= version.parse("4.50.3"):
-        from transformers.training_args import _VALID_DICT_FIELDS
+        from transformers.training_args import _VALID_DICT_FIELDS # type: ignore    
 
         _VALID_DICT_FIELDS.append("model_init_kwargs")
     else:
@@ -69,7 +69,7 @@ class GRPOConfig(TrainingArguments):
             "* gradient_accumulation_steps) must be evenly divisible by this value."
         },
     )
-    max_completion_length: Optional[int] = field(
+    max_completion_length: int = field(
         default=1024,
         metadata={"help": "Maximum length of the generated completion."},
     )

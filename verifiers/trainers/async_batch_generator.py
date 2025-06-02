@@ -15,6 +15,8 @@ class BatchRequest:
     env_inputs: Dict[str, List[Any]]
     processing_class: Any
     mask_env_responses: bool
+    max_completion_length: int
+    mask_truncated_completions: bool
     max_concurrent: int
     device: torch.device
     accelerator: Any
@@ -242,7 +244,9 @@ class AsyncBatchGenerator:
             env_results['state'],
             env_results['reward'],
             processing_class=request.processing_class,
-            mask_env_responses=request.mask_env_responses
+            mask_env_responses=request.mask_env_responses,
+            max_completion_length=request.max_completion_length,
+            mask_truncated_completions=request.mask_truncated_completions
         )
         
         return BatchResult(

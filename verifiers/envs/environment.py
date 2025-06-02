@@ -341,27 +341,25 @@ class Environment(ABC):
         Returns:
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
-        # Tokenize just the prompt
+        # tokenize just the prompt
         prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
         assert isinstance(prompt_text, str)
         prompt_ids = processing_class.encode(prompt_text)
         prompt_mask = [1] * len(prompt_ids)
         
-        # Track completion tokens and masks by processing incrementally
+        # track completion tokens and masks by processing incrementally
         completion_ids = []
         completion_mask = []
         
-        # Previous tokenization (starts with just prompt)
+        # previous tokenization (starts with just prompt)
         prev_ids = prompt_ids
         
-        # TODO: carefully track EOS token handling for Qwen + Llama + Gemma
-
-        # Process each completion message incrementally
+        # process each completion message incrementally
         for i, msg in enumerate(completion):
-            # Create conversation prefix: prompt + completion[:i+1]
+            # create conversation prefix: prompt + completion[:i+1]
             conversation_prefix = prompt + completion[:i+1]
             
-            # Tokenize the full prefix
+            # tokenize the full prefix
             prefix_text = processing_class.apply_chat_template(
                 conversation_prefix, 
                 tokenize=False, 
@@ -371,19 +369,19 @@ class Environment(ABC):
             current_ids = processing_class.encode(prefix_text)
             assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
             
-            # Add new tokens to completion tokens
+            # add new tokens to completion tokens
             new_tokens = current_ids[len(prev_ids):] 
             assert len(new_tokens) > 0, f"No new tokens in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
             completion_ids.extend(new_tokens)
 
-            # Create mask for this message
+            # create mask
             if msg["role"] == "assistant":
                 msg_mask = [1] * len(new_tokens)
             elif msg["role"] != "assistant" and mask_env_responses:
-                # Mask intermediate 'user' and/or 'tool' messages 
+                # mask intermediate 'user' and/or 'tool' messages 
                 msg_mask = [0] * len(new_tokens)
             else:
-                # Default to not masking
+                # default to not masking
                 msg_mask = [1] * len(new_tokens)
             
             completion_mask.extend(msg_mask)
@@ -428,6 +426,8 @@ class Environment(ABC):
         rewards: List[float],
         processing_class: PreTrainedTokenizerBase,
         mask_env_responses: bool = False,
+        max_completion_length: int = -1,
+        mask_truncated_completions: bool = False,
     ) -> Dict[str, List[Any]]:
         """
         Main tokenization pipeline that handles both chat and completion formats.
@@ -457,6 +457,9 @@ class Environment(ABC):
                 prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
                     prompt, completion, processing_class
                 )
+            if mask_truncated_completions and max_completion_length > 0 and len(completion_ids) > max_completion_length:
+                completion_ids = completion_ids[:max_completion_length]
+                completion_mask = [0] * len(completion_ids)
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
