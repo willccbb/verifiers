@@ -810,16 +810,22 @@ async def batch_processing_loop(
                                 length_filtered_inputs = []
                                 
                                 if proxy_tokenizer is not None:
-                                    for i, (req_state, messages) in enumerate(zip(active_first_states, active_first_inputs)):
-                                        # Apply chat template and tokenize
+                                    # First, apply chat templates to all messages
+                                    prompts_to_tokenize = []
+                                    for messages in active_first_inputs:
                                         prompt = proxy_tokenizer.apply_chat_template(
                                             messages,
                                             tokenize=False,
                                             add_generation_prompt=True
                                         )
-                                        tokens = proxy_tokenizer.encode(prompt, add_special_tokens=False)
-                                        token_count = len(tokens)
-                                        
+                                        prompts_to_tokenize.append(prompt)
+                                    
+                                    # Batch tokenize all prompts at once
+                                    tokenized = proxy_tokenizer(prompts_to_tokenize, return_tensors=None, add_special_tokens=False)
+                                    token_counts = [len(tokens) for tokens in tokenized['input_ids']]
+                                    
+                                    # Check lengths and filter
+                                    for i, (req_state, messages, token_count) in enumerate(zip(active_first_states, active_first_inputs, token_counts)):
                                         # Check if prompt would exceed model's max length after leaving room for generation
                                         max_prompt_tokens = script_args.max_model_len - chunk_size
                                         if token_count > max_prompt_tokens:
@@ -906,17 +912,23 @@ async def batch_processing_loop(
                                     length_filtered_states = []
                                     length_filtered_inputs = []
                                     
-                                    for i, (req_state, messages) in enumerate(zip(active_continue_states, continue_chunk_inputs)):
-                                        # Apply chat template and tokenize
+                                    # First, apply chat templates to all messages
+                                    prompts_to_tokenize = []
+                                    for messages in continue_chunk_inputs:
                                         prompt = proxy_tokenizer.apply_chat_template(
                                             messages,
                                             tokenize=False,
                                             add_generation_prompt=False,
                                             continue_final_message=True
                                         )
-                                        tokens = proxy_tokenizer.encode(prompt, add_special_tokens=False)
-                                        token_count = len(tokens)
-                                        
+                                        prompts_to_tokenize.append(prompt)
+                                    
+                                    # Batch tokenize all prompts at once
+                                    tokenized = proxy_tokenizer(prompts_to_tokenize, return_tensors=None, add_special_tokens=False)
+                                    token_counts = [len(tokens) for tokens in tokenized['input_ids']]
+                                    
+                                    # Check lengths and filter
+                                    for i, (req_state, messages, token_count) in enumerate(zip(active_continue_states, continue_chunk_inputs, token_counts)):
                                         # Check if prompt would exceed model's max length after leaving room for generation
                                         max_prompt_tokens = script_args.max_model_len - chunk_size
                                         if token_count > max_prompt_tokens:
@@ -981,10 +993,12 @@ async def batch_processing_loop(
                             length_filtered_states = []
                             length_filtered_prompts = []
                             
-                            for i, (req_state, prompt) in enumerate(zip(sub_batch_to_process, prompts_for_vllm)):
-                                tokens = proxy_tokenizer.encode(prompt, add_special_tokens=True)
-                                token_count = len(tokens)
-                                
+                            # Batch tokenize all prompts at once
+                            tokenized = proxy_tokenizer(prompts_for_vllm, return_tensors=None, add_special_tokens=True)
+                            token_counts = [len(tokens) for tokens in tokenized['input_ids']]
+                            
+                            # Check lengths and filter
+                            for i, (req_state, prompt, token_count) in enumerate(zip(sub_batch_to_process, prompts_for_vllm, token_counts)):
                                 # Check if prompt would exceed model's max length after leaving room for generation
                                 max_prompt_tokens = script_args.max_model_len - chunk_size
                                 if token_count > max_prompt_tokens:
