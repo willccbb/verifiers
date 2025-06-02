@@ -113,7 +113,7 @@ class ToolEnv(MultiTurnEnv):
                      **kwargs: Any) -> bool:
         return self.parser.parse_answer(messages) is not None
 
-    def call_tool(self, tool_json: str, **kwargs: Any) -> str:
+    def call_tool(self, tool_json: str, max_chars: int = 1024, **kwargs: Any) -> str:
         """Call a tool based on JSON command."""
         try:
             command = json.loads(tool_json)
@@ -135,6 +135,8 @@ class ToolEnv(MultiTurnEnv):
             
             # Call the tool function with arguments
             result = tool_func(**tool_args)
+            if max_chars > 0 and len(str(result)) > max_chars:
+                result = str(result)[:max_chars] + "..."
             return str(result)
         except Exception as e:
             return f"Error: {str(e)}. " + "Please format your tool call as '{{\"name\": \"tool_name\", \"args\": {{\"arg1\": \"value1\", \"arg2\": \"value2\"}}}}'"
