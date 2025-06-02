@@ -7,7 +7,7 @@ accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/e
 """
 
 # convenience function for FA2 initialization
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct", use_liger=False)
+model, tokenizer = vf.get_model_and_processor("Qwen/Qwen2.5-7B-Instruct", use_liger=False)
 dataset = load_dataset('willcb/V3-gsm8k-python-test', split='train')
 
 tok_counts = []

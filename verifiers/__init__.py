@@ -27,7 +27,7 @@ from .utils.logging_utils import setup_logging, print_prompt_completions_sample
 from .trainers.grpo_trainer import GRPOTrainer
 from .trainers.grpo_config import GRPOConfig
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
-from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
+from .utils.model_utils import get_model, get_processor, get_model_and_processor
 from .utils.config_utils import grpo_defaults, lora_defaults
 
 __version__ = "0.1.0"
@@ -53,8 +53,8 @@ __all__ = [
     "GRPOConfig",
     "VLLMClient",
     "get_model",
-    "get_tokenizer",
-    "get_model_and_tokenizer",
+    "get_processor",
+    "get_model_and_processor",
     "grpo_defaults",
     "lora_defaults",
     "extract_boxed_answer",

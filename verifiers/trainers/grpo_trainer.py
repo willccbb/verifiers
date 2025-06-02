@@ -1,5 +1,6 @@
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
 
+import inspect
 import logging
 from collections import defaultdict, deque
 from contextlib import nullcontext
@@ -36,6 +37,18 @@ from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchR
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
 from verifiers.utils.trainer_utils import RepeatSampler
+
+def _accepts_logits_to_keep(model) -> bool:
+    forward = (
+        model.get_base_model().forward
+        if hasattr(model, "get_base_model")
+        else model.forward
+    )
+    try:
+        inspect.signature(forward).bind_partial(**{"logits_to_keep": None})
+        return True
+    except TypeError:
+        return False
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
@@ -447,16 +460,18 @@ class GRPOTrainer(Trainer):
         return last_hidden_state
 
     # Get the per-token log probabilities for the completions for the model and the reference model
-    def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None) -> torch.Tensor:
+    def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None, **model_kwargs) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
         all_logps = []
+        if _accepts_logits_to_keep(model):
+            model_kwargs["logits_to_keep"] = logits_to_keep + 1
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
 
             # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
             logits = model(
-                input_ids=input_ids_batch, attention_mask=attention_mask_batch, logits_to_keep=logits_to_keep + 1
+                input_ids=input_ids_batch, attention_mask=attention_mask_batch, **model_kwargs
             ).logits
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
             input_ids_batch = input_ids_batch[:, -logits_to_keep:]
@@ -820,7 +835,15 @@ class GRPOTrainer(Trainer):
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
+        model_kwarg_keys = (
+            inspect.signature(model.forward).parameters.keys()
+            if not hasattr(model, "get_base_model")
+            else inspect.signature(
+                model.get_base_model().forward
+            ).parameters.keys()
+        )
+        model_kwargs = {k: inputs[k] for k in model_kwarg_keys if k in inputs}
+        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep, **model_kwargs)
 
         # Compute the loss
         advantages = inputs["advantages"]
@@ -847,12 +870,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep
+                        self.ref_model, input_ids, attention_mask, logits_to_keep, **model_kwargs
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter(): # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep
+                            self.model, input_ids, attention_mask, logits_to_keep, **model_kwargs
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1

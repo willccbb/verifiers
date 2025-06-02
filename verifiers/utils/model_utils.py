@@ -3,7 +3,7 @@ from importlib import import_module
 from typing import Dict, Any, Union, Tuple, Callable
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, PreTrainedModel # type: ignore
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig, PreTrainedModel # type: ignore
 
 import torch.nn as nn
 
@@ -111,15 +111,16 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
     else:
         return generic_model_loader(model_name, **model_kwargs)
     
-def get_tokenizer(model_name: str) -> Any:
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+def get_processor(model_name: str, padding_side: str = "left") -> Any:
+    processor = AutoProcessor.from_pretrained(model_name, padding_side=padding_side)
+    tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
     if not hasattr(tokenizer, "chat_template"):
         raise ValueError(f"Tokenizer for model {model_name} does not have chat_template attribute, \
                             and could not find a tokenizer with the same name as the model with suffix \
                             '-Instruct'. Please provide a tokenizer with the chat_template attribute.")
-    return tokenizer
+    return processor
             
-def get_model_and_tokenizer(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
+def get_model_and_processor(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
     model = get_model(model_name, use_liger, model_kwargs)
-    tokenizer = get_tokenizer(model_name)
+    tokenizer = get_processor(model_name)
     return model, tokenizer
