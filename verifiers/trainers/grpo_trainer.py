@@ -712,6 +712,7 @@ class GRPOTrainer(Trainer):
             broadcast_data = broadcast_list[0]
             print(f"WAIT 6 (process {self.accelerator.process_index}, step {self._step})")
             self.accelerator.wait_for_everyone()
+            
             # Each process takes its slice
             process_slice = slice(
                 self.accelerator.process_index * len(inputs),
@@ -724,22 +725,20 @@ class GRPOTrainer(Trainer):
             completion_mask = broadcast_data['completion_mask'][process_slice] # type: ignore
             advantages = broadcast_data['advantages'][process_slice] # type: ignore
             
-            # Move tensors to the correct device for this process
-            prompt_ids = prompt_ids.to(self.accelerator.device)
-            prompt_mask = prompt_mask.to(self.accelerator.device)
-            completion_ids = completion_ids.to(self.accelerator.device)
-            completion_mask = completion_mask.to(self.accelerator.device)
-            advantages = advantages.to(self.accelerator.device)
-            
             # Concatenate all data for shuffling
             full_batch = {
-                "prompt_ids": broadcast_data['prompt_ids'], # type: ignore
-                "prompt_mask": broadcast_data['prompt_mask'], # type: ignore
-                "completion_ids": broadcast_data['completion_ids'], # type: ignore
-                "completion_mask": broadcast_data['completion_mask'], # type: ignore
+                "prompt_ids": prompt_ids,
+                "prompt_mask": prompt_mask,
+                "completion_ids": completion_ids,
+                "completion_mask": completion_mask,
                 "old_per_token_logps": None,
-                "advantages": broadcast_data['advantages'], # type: ignore
+                "advantages": advantages,
             }
+            
+            # Move full batch tensors to the correct device for this process
+            for key in full_batch:
+                if full_batch[key] is not None and isinstance(full_batch[key], torch.Tensor):
+                    full_batch[key] = full_batch[key].to(self.accelerator.device)
             
             # Shuffle and split for gradient accumulation
             full_batch = shuffle_tensor_dict(full_batch)
