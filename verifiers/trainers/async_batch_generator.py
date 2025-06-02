@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 import time
 import torch
 from collections import deque
-import traceback
 
 
 @dataclass
