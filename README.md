@@ -150,7 +150,7 @@ vf_env = vf.ToolEnv(
 )
 ```
 
-**Level 5+:** Implement custom interaction protocols using `MultiTurnEnv` or `Environment`
+**Level 5+:** Implement custom interaction protocols using `MultiTurnEnv`, `MultiTurnCompletionEnv`, or `Environment`
 
 ```python
 
@@ -163,14 +163,14 @@ class YourMultiTurnEnv(MultiTurnEnv):
 				 max_turns: int,
                  **kwargs):
 	
-  def is_completed(self, messages: list[dict], state: dict, **kwargs: Any) -> bool
+  def is_completed(self, messages: list[dict], state: dict, **kwargs: Any) -> bool:
     # return whether or not rollout is completed
 
-  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[dict, dict]
+  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[dict, dict]:
     # return environment response + updated state for a message-dict sequence
 
 class YourCustomEnv(Environment):
-
+	...
 ```
 
 ### GRPO Rules of Thumb
@@ -189,6 +189,7 @@ class YourCustomEnv(Environment):
 	- Using larger models (14B+)
 	- Using more `num_generations` (larger group size)
 	- Using LoRA adapters
+	- Difficulty filtering (expensive up front)
 - Tricks whose benefit remains up-for-debate or context-dependent:
 	- High `beta` values (`0.1+`)
 	- Dr. GRPO vs GRPO
@@ -197,7 +198,7 @@ class YourCustomEnv(Environment):
 - Tricks which are likely a "free lunch":
 	- Learning rate warm-up of at least 10-20 steps (`warmup_steps`)
 	- Periodically updating reference models (`sync_ref_model`, `ref_model_sync_steps`) if using a reference model, particularly for 500+ step runs
-	- One-step off-policy training (overlapping training + inference)
+	- One-step off-policy training (overlapping training + inference) 
 - For successful training, you generally want diversity of reward scores within each group of responses for a prompt (see DAPO [paper](https://arxiv.org/pdf/2503.14476), Sec. 3.2)
 - The *best* way to increase diversity is to ensure that your tasks are of an appropriate difficulty for your model (not too easy, not too hard)
 - See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings
