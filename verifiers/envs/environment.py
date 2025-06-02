@@ -425,9 +425,9 @@ class Environment(ABC):
         states: List[Dict[str, Any]],
         rewards: List[float],
         processing_class: PreTrainedTokenizerBase,
-        mask_env_responses: bool = False,
         max_completion_length: int = -1,
         mask_truncated_completions: bool = False,
+        mask_env_responses: bool = False,
     ) -> Dict[str, List[Any]]:
         """
         Main tokenization pipeline that handles both chat and completion formats.
