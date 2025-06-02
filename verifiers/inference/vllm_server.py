@@ -41,6 +41,7 @@ from vllm.distributed.parallel_state import get_world_group
 from vllm.distributed.utils import StatelessProcessGroup
 from vllm.sampling_params import GuidedDecodingParams
 from vllm.utils import get_open_port
+from transformers import AutoTokenizer
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -55,6 +56,9 @@ os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 pipe_lock = threading.Lock()  # Global lock for pipe operations
 request_queue: Optional[asyncio.Queue] = None
 batch_processor_task: Optional[asyncio.Task] = None
+
+# Global tokenizer for pre-checks
+proxy_tokenizer = None
 
 # Generation tracking
 active_generation_count = 0
@@ -801,35 +805,72 @@ async def batch_processing_loop(
                                 processed_states = []
                                 llm_results = []
                             else:
-                                flags = dict(add_generation_prompt=True, continue_final_message=False)
-                                payload = {
-                                    "type": "call",
-                                    "method": "chat",
-                                    "kwargs": {
-                                        "messages": active_first_inputs,
-                                        "sampling_params": vllm_sampling_params,
-                                        **flags,
-                                    },
-                                }
-                                logger_instance.debug(f"Sending first-chunk chat request to LLM with {len(active_first_inputs)} messages")
+                                # Pre-check token lengths before sending to vLLM
+                                length_filtered_states = []
+                                length_filtered_inputs = []
                                 
-                                worker_idx = -1  # Initialize to avoid unbound variable
-                                try:
-                                    worker_idx, worker_conn = await get_next_worker_connection(connections)
-                                    logger_instance.debug(f"Using worker {worker_idx} for first-chunk chat request")
-                                    llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
-                                    logger_instance.debug(f"Received {len(llm_results)} results from LLM for first-chunk chat")
-                                except asyncio.TimeoutError:
-                                    logger_instance.error(f"Worker {worker_idx} timeout for first-chunk chat after 60s")
-                                    for req_state in active_first_states:
-                                        req_state.error = TimeoutError("Worker timeout during generation")
+                                if proxy_tokenizer is not None:
+                                    for i, (req_state, messages) in enumerate(zip(active_first_states, active_first_inputs)):
+                                        # Apply chat template and tokenize
+                                        prompt = proxy_tokenizer.apply_chat_template(
+                                            messages,
+                                            tokenize=False,
+                                            add_generation_prompt=True
+                                        )
+                                        tokens = proxy_tokenizer.encode(prompt, add_special_tokens=False)
+                                        token_count = len(tokens)
+                                        
+                                        # Check if prompt would exceed model's max length after leaving room for generation
+                                        max_prompt_tokens = script_args.max_model_len - chunk_size
+                                        if token_count > max_prompt_tokens:
+                                            logger_instance.info(f"Request {req_state.request_id} prompt too long: {token_count} tokens > {max_prompt_tokens} max. Marking as complete.")
+                                            req_state.finish_reason = "length"
+                                            req_state.error = ValueError(f"Prompt exceeds maximum length: {token_count} tokens > {script_args.max_model_len - chunk_size} allowed")
+                                        else:
+                                            length_filtered_states.append(req_state)
+                                            length_filtered_inputs.append(messages)
+                                    
+                                    # Update to use filtered lists
+                                    active_first_states = length_filtered_states
+                                    active_first_inputs = length_filtered_inputs
+                                else:
+                                    # No tokenizer available, skip pre-check
+                                    logger_instance.debug("Proxy tokenizer not available, skipping length pre-check")
+                                
+                                if not active_first_states:
+                                    logger_instance.debug("All first chunk requests exceeded length limit, skipping LLM call")
+                                    processed_states = []
                                     llm_results = []
-                                except Exception as e:
-                                    logger_instance.error(f"Error calling LLM for first-chunk chat: {e}", exc_info=True)
-                                    for req_state in active_first_states:
-                                        req_state.error = e
-                                    llm_results = []
-                                processed_states = active_first_states
+                                else:
+                                    flags = dict(add_generation_prompt=True, continue_final_message=False)
+                                    payload = {
+                                        "type": "call",
+                                        "method": "chat",
+                                        "kwargs": {
+                                            "messages": active_first_inputs,
+                                            "sampling_params": vllm_sampling_params,
+                                            **flags,
+                                        },
+                                    }
+                                    logger_instance.debug(f"Sending first-chunk chat request to LLM with {len(active_first_inputs)} messages")
+                                    
+                                    worker_idx = -1  # Initialize to avoid unbound variable
+                                    try:
+                                        worker_idx, worker_conn = await get_next_worker_connection(connections)
+                                        logger_instance.debug(f"Using worker {worker_idx} for first-chunk chat request")
+                                        llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
+                                        logger_instance.debug(f"Received {len(llm_results)} results from LLM for first-chunk chat")
+                                    except asyncio.TimeoutError:
+                                        logger_instance.error(f"Worker {worker_idx} timeout for first-chunk chat after 60s")
+                                        for req_state in active_first_states:
+                                            req_state.error = TimeoutError("Worker timeout during generation")
+                                        llm_results = []
+                                    except Exception as e:
+                                        logger_instance.error(f"Error calling LLM for first-chunk chat: {e}", exc_info=True)
+                                        for req_state in active_first_states:
+                                            req_state.error = e
+                                        llm_results = []
+                                    processed_states = active_first_states
                         elif continue_chunk_states:
                             # No first-chunk requests, process continuing requests
                             continue_chunk_inputs = []
@@ -860,35 +901,72 @@ async def batch_processing_loop(
                                 processed_states = []
                                 llm_results = []
                             else:
-                                flags = dict(add_generation_prompt=False, continue_final_message=True)
-                                payload = {
-                                    "type": "call",
-                                    "method": "chat",
-                                    "kwargs": {
-                                        "messages": continue_chunk_inputs,
-                                        "sampling_params": vllm_sampling_params,
-                                        **flags,
-                                    },
-                                }
-                                logger_instance.debug(f"Sending continue-chunk chat request to LLM with {len(continue_chunk_inputs)} messages")
+                                # Pre-check token lengths before sending to vLLM
+                                if proxy_tokenizer is not None:
+                                    length_filtered_states = []
+                                    length_filtered_inputs = []
+                                    
+                                    for i, (req_state, messages) in enumerate(zip(active_continue_states, continue_chunk_inputs)):
+                                        # Apply chat template and tokenize
+                                        prompt = proxy_tokenizer.apply_chat_template(
+                                            messages,
+                                            tokenize=False,
+                                            add_generation_prompt=False,
+                                            continue_final_message=True
+                                        )
+                                        tokens = proxy_tokenizer.encode(prompt, add_special_tokens=False)
+                                        token_count = len(tokens)
+                                        
+                                        # Check if prompt would exceed model's max length after leaving room for generation
+                                        max_prompt_tokens = script_args.max_model_len - chunk_size
+                                        if token_count > max_prompt_tokens:
+                                            logger_instance.info(f"Request {req_state.request_id} continuation prompt too long: {token_count} tokens > {max_prompt_tokens} max. Marking as complete.")
+                                            req_state.finish_reason = "length"
+                                            req_state.error = ValueError(f"Continuation prompt exceeds maximum length: {token_count} tokens > {script_args.max_model_len - chunk_size} allowed")
+                                        else:
+                                            length_filtered_states.append(req_state)
+                                            length_filtered_inputs.append(messages)
+                                    
+                                    # Update to use filtered lists
+                                    active_continue_states = length_filtered_states
+                                    continue_chunk_inputs = length_filtered_inputs
+                                else:
+                                    logger_instance.debug("Proxy tokenizer not available, skipping length pre-check for continuations")
                                 
-                                worker_idx = -1  # Initialize to avoid unbound variable
-                                try:
-                                    worker_idx, worker_conn = await get_next_worker_connection(connections)
-                                    logger_instance.debug(f"Using worker {worker_idx} for continue-chunk chat request")
-                                    llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
-                                    logger_instance.debug(f"Received {len(llm_results)} results from LLM for continue-chunk chat")
-                                except asyncio.TimeoutError:
-                                    logger_instance.error(f"Worker {worker_idx} timeout for continue-chunk chat after 60s")
-                                    for req_state in active_continue_states:
-                                        req_state.error = TimeoutError("Worker timeout during generation")
+                                if not active_continue_states:
+                                    logger_instance.debug("All continue chunk requests exceeded length limit, skipping LLM call")
+                                    processed_states = []
                                     llm_results = []
-                                except Exception as e:
-                                    logger_instance.error(f"Error calling LLM for continue-chunk chat: {e}", exc_info=True)
-                                    for req_state in active_continue_states:
-                                        req_state.error = e
-                                    llm_results = []
-                                processed_states = active_continue_states
+                                else:
+                                    flags = dict(add_generation_prompt=False, continue_final_message=True)
+                                    payload = {
+                                        "type": "call",
+                                        "method": "chat",
+                                        "kwargs": {
+                                            "messages": continue_chunk_inputs,
+                                            "sampling_params": vllm_sampling_params,
+                                            **flags,
+                                        },
+                                    }
+                                    logger_instance.debug(f"Sending continue-chunk chat request to LLM with {len(continue_chunk_inputs)} messages")
+                                    
+                                    worker_idx = -1  # Initialize to avoid unbound variable
+                                    try:
+                                        worker_idx, worker_conn = await get_next_worker_connection(connections)
+                                        logger_instance.debug(f"Using worker {worker_idx} for continue-chunk chat request")
+                                        llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
+                                        logger_instance.debug(f"Received {len(llm_results)} results from LLM for continue-chunk chat")
+                                    except asyncio.TimeoutError:
+                                        logger_instance.error(f"Worker {worker_idx} timeout for continue-chunk chat after 60s")
+                                        for req_state in active_continue_states:
+                                            req_state.error = TimeoutError("Worker timeout during generation")
+                                        llm_results = []
+                                    except Exception as e:
+                                        logger_instance.error(f"Error calling LLM for continue-chunk chat: {e}", exc_info=True)
+                                        for req_state in active_continue_states:
+                                            req_state.error = e
+                                        llm_results = []
+                                    processed_states = active_continue_states
                         else:
                             # No requests to process in this iteration
                             logger_instance.debug("No chat requests to process in this iteration")
@@ -897,29 +975,60 @@ async def batch_processing_loop(
                     else:
                         # completion – unchanged
                         loop = asyncio.get_running_loop()
-                        payload = {
-                            "type": "call",
-                            "method": "generate",
-                            "kwargs": {"prompts": prompts_for_vllm, "sampling_params": vllm_sampling_params},
-                        }
-                        logger_instance.debug(f"Sending completion request to LLM with {len(prompts_for_vllm)} prompts")
-                        worker_idx = -1  # Initialize to avoid unbound variable
-                        try:
-                            worker_idx, worker_conn = await get_next_worker_connection(connections)
-                            logger_instance.debug(f"Using worker {worker_idx} for completion request")
-                            llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
-                            logger_instance.debug(f"Received {len(llm_results)} results from LLM for completion")
-                        except asyncio.TimeoutError:
-                            logger_instance.error(f"Worker {worker_idx} timeout for completion after 60s")
-                            for req_state in sub_batch_to_process:
-                                req_state.error = TimeoutError("Worker timeout during generation")
+                        
+                        # Pre-check token lengths before sending to vLLM
+                        if proxy_tokenizer is not None:
+                            length_filtered_states = []
+                            length_filtered_prompts = []
+                            
+                            for i, (req_state, prompt) in enumerate(zip(sub_batch_to_process, prompts_for_vllm)):
+                                tokens = proxy_tokenizer.encode(prompt, add_special_tokens=True)
+                                token_count = len(tokens)
+                                
+                                # Check if prompt would exceed model's max length after leaving room for generation
+                                max_prompt_tokens = script_args.max_model_len - chunk_size
+                                if token_count > max_prompt_tokens:
+                                    logger_instance.info(f"Request {req_state.request_id} prompt too long: {token_count} tokens > {max_prompt_tokens} max. Marking as complete.")
+                                    req_state.finish_reason = "length"
+                                    req_state.error = ValueError(f"Prompt exceeds maximum length: {token_count} tokens > {script_args.max_model_len - chunk_size} allowed")
+                                else:
+                                    length_filtered_states.append(req_state)
+                                    length_filtered_prompts.append(prompt)
+                            
+                            # Update to use filtered lists
+                            sub_batch_to_process = length_filtered_states
+                            prompts_for_vllm = length_filtered_prompts
+                        else:
+                            logger_instance.debug("Proxy tokenizer not available, skipping length pre-check for completions")
+                        
+                        if not sub_batch_to_process:
+                            logger_instance.debug("All completion requests exceeded length limit, skipping LLM call")
+                            processed_states = []
                             llm_results = []
-                        except Exception as e:
-                            logger_instance.error(f"Error calling LLM for completion: {e}", exc_info=True)
-                            for req_state in sub_batch_to_process:
-                                req_state.error = e
-                            llm_results = []
-                        processed_states = sub_batch_to_process
+                        else:
+                            payload = {
+                                "type": "call",
+                                "method": "generate",
+                                "kwargs": {"prompts": prompts_for_vllm, "sampling_params": vllm_sampling_params},
+                            }
+                            logger_instance.debug(f"Sending completion request to LLM with {len(prompts_for_vllm)} prompts")
+                            worker_idx = -1  # Initialize to avoid unbound variable
+                            try:
+                                worker_idx, worker_conn = await get_next_worker_connection(connections)
+                                logger_instance.debug(f"Using worker {worker_idx} for completion request")
+                                llm_results = await async_send_and_recv(worker_conn, payload, timeout=60.0)
+                                logger_instance.debug(f"Received {len(llm_results)} results from LLM for completion")
+                            except asyncio.TimeoutError:
+                                logger_instance.error(f"Worker {worker_idx} timeout for completion after 60s")
+                                for req_state in sub_batch_to_process:
+                                    req_state.error = TimeoutError("Worker timeout during generation")
+                                llm_results = []
+                            except Exception as e:
+                                logger_instance.error(f"Error calling LLM for completion: {e}", exc_info=True)
+                                for req_state in sub_batch_to_process:
+                                    req_state.error = e
+                                llm_results = []
+                            processed_states = sub_batch_to_process
 
                     # Now, update state for each request in the processed_states
                     temp_failed_requests_in_sub_batch: list[PooledRequestState] = []
@@ -1165,6 +1274,14 @@ async def batch_processing_loop(
 
 def main(script_args: ScriptArguments):
     global request_queue, batch_processor_task # Allow lifespan to assign to these
+    global proxy_tokenizer # Add this global
+
+    # Initialize proxy tokenizer for pre-checks
+    proxy_tokenizer = AutoTokenizer.from_pretrained(
+        script_args.model,
+        revision=script_args.revision,
+        trust_remote_code=True
+    )
 
     # Spawn dp workers, and setup pipes for communication
     master_port = get_open_port()
