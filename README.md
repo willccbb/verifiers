@@ -14,6 +14,7 @@ PyPI [coming soon](https://pypi.org/project/verifiers/), for now just do:
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync
+uv pip install -e .
 uv pip install flash-attn --no-build-isolation
 source .venv/bin/activate
 ```
@@ -30,7 +31,7 @@ See `verifiers/examples/math_train.py` for an example with the ToolEnv environme
 To run on a 8-GPU node with 4 inference GPUs and 4 training GPUs:
 ```bash
 # Launch vLLM inference server from verifiers/, with .venv active
-CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-7B-Instruct" --tensor_parallel_size 4 --max_model_len 8192  --gpu_memory_utilization 0.9 --enable_prefix_caching True
+CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_serve.py --model "Qwen/Qwen2.5-1.5B-Instruct" --tensor_parallel_size 4 --max_model_len 8192  --gpu_memory_utilization 0.9 --enable_prefix_caching True
 ```
 
 ```bash
