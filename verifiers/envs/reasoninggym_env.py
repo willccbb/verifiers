@@ -3,6 +3,8 @@ from typing import Any, Tuple
 from datasets import Dataset
 from openai import OpenAI
 import reasoning_gym as rg
+from reasoning_gym.composite import DatasetSpec
+from reasoning_gym.dataset import ProceduralDataset
 
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
@@ -12,7 +14,7 @@ class ReasoningGymEnv(SingleTurnEnv):
     def __init__(self,
                  client: OpenAI,
                  model: str,
-                 gym: str,
+                 gym: str | list[str | dict],
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,   
                  seed: int = 0,
@@ -22,7 +24,7 @@ class ReasoningGymEnv(SingleTurnEnv):
         self.num_eval_samples = num_eval_samples
         self.seed = seed
         total_samples = num_samples + num_eval_samples
-        self.rg_dataset = rg.create_dataset(gym, size=total_samples, seed=seed)
+        self.rg_dataset = self.build_rg_dataset(gym, num_samples=total_samples, seed=seed)
         dataset, eval_dataset = self.rg_to_hf(self.rg_dataset)
         parser = XMLParser(fields=['think', 'answer'])
         rubric = Rubric(parser=parser) 
@@ -47,6 +49,21 @@ class ReasoningGymEnv(SingleTurnEnv):
         )
         self.parser = parser
         self.rubric = rubric
+
+    def build_rg_dataset(gym: str | list[str | dict], num_samples: int = 1000, seed: int = 0) -> ProceduralDataset:
+        if isinstance(gym, str):
+            return rg.create_dataset(gym, size=num_samples, seed=seed)
+        if not isinstance(gym, list):
+            raise ValueError("'gym' must be str or list")
+        dataset_specs = []
+        for dataset_config in gym:
+            if isinstance(dataset_config, str):
+                dataset_specs.append(DatasetSpec(name=dataset_config))
+            elif isinstance(dataset_config, dict):
+                dataset_specs.append(DatasetSpec(**dataset_config))
+            else:
+                raise ValueError(f"Invalid dataset config: {dataset_config}")
+        return rg.create_dataset("composite", datasets=dataset_specs, size=num_samples, seed=seed)
 
     def rg_to_hf(self, rg_dataset) -> Tuple[Dataset, Dataset]:
         dataset_rows = []
