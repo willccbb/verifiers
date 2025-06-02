@@ -1202,7 +1202,33 @@ async def batch_processing_loop(
                         response_content: OAChatCompletionResponse | OACompletionResponse | JSONResponse
                         if req_state.error:
                             logger_instance.error(f"Request {req_state.request_id} failed with error: {req_state.error}")
-                            response_content = JSONResponse(status_code=500, content={"error": f"Processing error: {str(req_state.error)}", "request_id": req_state.request_id})
+                            # Return a successful response with error content instead of HTTP error
+                            if req_state.request_type == "chat":
+                                error_message = f"[ERROR] {str(req_state.error)}"
+                                final_choices = [OAChatChoice(
+                                    index=0,
+                                    message=OAChatMessage(role="assistant", content=error_message),
+                                    finish_reason=req_state.finish_reason or "error"
+                                )]
+                                response_content = OAChatCompletionResponse(
+                                    id=f"chatcmpl-{uuid4().hex}",
+                                    created=int(datetime.now(tz=timezone.utc).timestamp()),
+                                    model=req_state.original_request.model,
+                                    choices=final_choices
+                                )
+                            else:  # Completion
+                                error_message = f"[ERROR] {str(req_state.error)}"
+                                final_choices = [OACompletionChoice(
+                                    index=0, 
+                                    text=error_message, 
+                                    finish_reason=req_state.finish_reason or "error"
+                                )]
+                                response_content = OACompletionResponse(
+                                    id=f"cmpl-{uuid4().hex}",
+                                    created=int(datetime.now(tz=timezone.utc).timestamp()),
+                                    model=req_state.original_request.model,
+                                    choices=final_choices
+                                )
                         elif req_state.request_type == "chat":
                             final_choices = [OAChatChoice(
                                 index=0,
