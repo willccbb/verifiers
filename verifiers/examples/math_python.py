@@ -46,20 +46,20 @@ Let's submit the answer.
 </answer>
 """
 
-dataset = load_example_dataset("gsm8k", split="train")
+dataset = load_example_dataset("math", split="train")
 
 vf_env = vf.ToolEnv(
     dataset=dataset,
     system_prompt=TOOL_PROMPT,
     few_shot=[],
     tools=[python],
-    max_steps=5
+    max_steps=3
 )
 print(vf_env.system_prompt)
 
 model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-run_name = "gsm8k-grpo_" + model_name.split("/")[-1].lower()
+run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 
 training_args=vf.grpo_defaults(run_name=run_name)
 training_args.num_iterations=2
