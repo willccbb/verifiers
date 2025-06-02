@@ -672,7 +672,7 @@ class GRPOTrainer(Trainer):
                 all_completions = batch_result.completions if hasattr(batch_result, 'completions') else []
                 all_prompts_for_logging = batch_result.prompts if hasattr(batch_result, 'prompts') else []
                 
-                self._log_generation_metrics_primary(
+                self._log_reward_metrics_primary(
                     mode="train",
                     all_reward_dict=all_reward_dict,
                     all_rewards=all_rewards,
@@ -683,6 +683,13 @@ class GRPOTrainer(Trainer):
                     all_prompts=all_prompts_for_logging,
                     all_completions=all_completions,
                     all_reward_dict=all_reward_dict
+                )
+                
+                self._log_completion_metrics_primary(
+                    mode="train",
+                    all_completion_mask=all_completion_mask,
+                    all_completion_ids=all_completion_ids,
+                    all_prompt_mask=all_prompt_mask
                 )
                 
                 # Package for broadcast
@@ -716,14 +723,6 @@ class GRPOTrainer(Trainer):
             completion_ids = broadcast_data['completion_ids'][process_slice] # type: ignore
             completion_mask = broadcast_data['completion_mask'][process_slice] # type: ignore
             advantages = broadcast_data['advantages'][process_slice] # type: ignore
-            
-            # Log local metrics
-            self._log_local_completion_metrics(
-                mode="train",
-                completion_mask=completion_mask,
-                completion_ids=completion_ids,
-                prompt_mask=prompt_mask
-            )
             
             # Concatenate all data for shuffling
             full_batch = {
@@ -768,7 +767,7 @@ class GRPOTrainer(Trainer):
 
     # ========== End of helper methods ==========
 
-    def _log_generation_metrics_primary(
+    def _log_reward_metrics_primary(
         self,
         mode: str,
         all_reward_dict: Dict[str, Any],
@@ -816,39 +815,39 @@ class GRPOTrainer(Trainer):
                 reward_values.tolist() if isinstance(reward_values, torch.Tensor) else reward_values
             )
 
-    def _log_local_completion_metrics(
+    def _log_completion_metrics_primary(
         self,
         mode: str,
-        completion_mask: torch.Tensor,
-        completion_ids: torch.Tensor,
-        prompt_mask: torch.Tensor
+        all_completion_mask: torch.Tensor,
+        all_completion_ids: torch.Tensor,
+        all_prompt_mask: torch.Tensor
     ) -> None:
         """
-        Log completion-related metrics (ALL PROCESSES).
-        These metrics need local data and will be gathered later by accelerator.gather_for_metrics.
+        Log completion-related metrics (PRIMARY PROCESS ONLY).
+        This handles completion length statistics using the full batch data.
         """
         # Log token count
         if mode == "train":
-            attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
-            self.state.num_input_tokens_seen += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item() # type: ignore
+            attention_mask = torch.cat([all_prompt_mask, all_completion_mask], dim=1)
+            self.state.num_input_tokens_seen += int(attention_mask.sum().item())
         self._metrics[mode]["num_tokens"] = [self.state.num_input_tokens_seen]
         
-        # Log completion lengths - gather_for_metrics will aggregate across processes
-        agg_completion_mask = self.accelerator.gather_for_metrics(completion_mask.sum(1))
-        self._metrics[mode]["completions/mean_length"].append(agg_completion_mask.float().mean().item()) # type: ignore
-        self._metrics[mode]["completions/min_length"].append(agg_completion_mask.float().min().item()) # type: ignore
-        self._metrics[mode]["completions/max_length"].append(agg_completion_mask.float().max().item()) # type: ignore
+        # Log completion lengths
+        completion_lengths = all_completion_mask.sum(1)
+        self._metrics[mode]["completions/mean_length"].append(completion_lengths.float().mean().item())
+        self._metrics[mode]["completions/min_length"].append(completion_lengths.float().min().item())
+        self._metrics[mode]["completions/max_length"].append(completion_lengths.float().max().item())
         
         # Check for EOS tokens and log terminated sequence lengths
-        is_eos = completion_ids == self.processing_class.eos_token_id # type: ignore
-        agg_terminated_with_eos = self.accelerator.gather_for_metrics(is_eos.any(dim=1)) # type: ignore
-        term_completion_mask = agg_completion_mask[agg_terminated_with_eos] # type: ignore
-        clipped_completions_ratio = 1 - len(term_completion_mask) / len(agg_completion_mask)
+        is_eos: torch.Tensor = all_completion_ids == self.processing_class.eos_token_id # type: ignore
+        terminated_with_eos = is_eos.any(dim=1)
+        term_completion_mask = completion_lengths[terminated_with_eos]
+        clipped_completions_ratio = 1 - len(term_completion_mask) / len(completion_lengths)
         self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
         
         if len(term_completion_mask) == 0:
             # edge case where no completed sequences are found
-            term_completion_mask = torch.zeros(1, device=completion_mask.device)
+            term_completion_mask = torch.zeros(1, device=all_completion_mask.device)
         self._metrics[mode]["completions/mean_terminated_length"].append(term_completion_mask.float().mean().item())
         self._metrics[mode]["completions/min_terminated_length"].append(term_completion_mask.float().min().item())
         self._metrics[mode]["completions/max_terminated_length"].append(term_completion_mask.float().max().item())
