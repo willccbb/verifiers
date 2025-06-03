@@ -8,7 +8,7 @@ accelerate launch --config-file configs/zero3.yaml --num-processes 8 verifiers/e
 
 # convenience function for FA2 initialization
 model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct", use_liger=False)
-dataset = load_dataset('willcb/V3-wordle', split='train')
+dataset = load_dataset('willcb/V3-arc_1d-100', split='train')
 
 tok_counts = []
 for row in dataset:
@@ -29,23 +29,23 @@ print(f"Median tokens: {sorted(tok_counts)[len(tok_counts) // 2]}")
 
 args = SFTConfig(
     max_length=8192,
-    output_dir="sft-wordle",
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=2,
+    output_dir="outputs/sft-arc_1d",
+    per_device_train_batch_size=2,
+    gradient_accumulation_steps=1,
     gradient_checkpointing=True,
     bf16=True,
     learning_rate=2e-5,
-    num_train_epochs=3,
+    num_train_epochs=10,
     weight_decay=0.01,
     max_grad_norm=0.1,
     report_to="wandb",
-    save_strategy="epoch",
+    save_strategy="no",
     save_total_limit=1,
     logging_steps=1,
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen2.5-7B-Arc-1D-SFT",
+    hub_model_id="Qwen2.5-7B-Arc-1D-SFT-v1",
 )
 
 trainer = SFTTrainer(
