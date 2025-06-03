@@ -32,6 +32,8 @@ all = [
     "brave-search",
     "reasoning-gym",
     "smolagents>=1.15.0",
+    "textarena",
+    "nltk"
 ]
 
 [project.scripts]
