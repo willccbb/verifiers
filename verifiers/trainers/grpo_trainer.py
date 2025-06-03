@@ -267,8 +267,8 @@ class GRPOTrainer(Trainer):
         self.num_completions_to_print = args.num_completions_to_print
 
         # Environment integration parameters
-        self.mask_env_responses = getattr(args, 'mask_env_responses', False)
-        self.env_max_concurrent = getattr(args, 'env_max_concurrent', 32)
+        self.mask_env_responses = args.mask_env_responses
+        self.max_concurrent = args.max_concurrent
 
         # maxlen is set to the total number of forward passes per step. This value of `maxlen` ensures we log only the
         # final optimization step.
@@ -902,7 +902,7 @@ class GRPOTrainer(Trainer):
             client=self.oai_client,
             model=self._get_model_name(),
             sampling_args=self._get_sampling_args(),
-            max_concurrent=self.env_max_concurrent,
+            max_concurrent=self.max_concurrent,
         )
         
         # Process results to compute metrics

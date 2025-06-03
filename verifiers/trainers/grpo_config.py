@@ -259,6 +259,13 @@ class GRPOConfig(TrainingArguments):
             "`max_completion_length`."
         },
     )
+    mask_env_responses: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to mask the environment responses. If `True`, the environment responses are masked, "
+            "preventing them from being incorrectly penalized and introducing noise during training."
+        },
+    )
     mask_truncated_completions: bool = field(
         default=False,
         metadata={

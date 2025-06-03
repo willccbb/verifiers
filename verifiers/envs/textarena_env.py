@@ -3,8 +3,8 @@ from typing import Tuple, List, Dict, Any
 
 from datasets import Dataset
 import nltk 
-nltk.download('words')
-nltk.download('averaged_perceptron_tagger_eng')
+nltk.download('words', quiet=True)
+nltk.download('averaged_perceptron_tagger_eng', quiet=True)
 import textarena as ta 
 
 from verifiers import MultiTurnEnv
