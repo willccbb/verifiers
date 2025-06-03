@@ -29,8 +29,6 @@ class TextArenaEnv(MultiTurnEnv):
     - Hangman-v0
     """
     def __init__(self,
-                 client: OpenAI,
-                 model: str,
                  game: str = "Wordle-v0",
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,

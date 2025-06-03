@@ -1,14 +1,11 @@
 import os
 from openai import OpenAI
-from datasets import load_dataset
 
 import verifiers as vf
 from verifiers.envs.textarena_env import TextArenaEnv
 
 client = OpenAI()
 vf_env = TextArenaEnv(
-    client=client, 
-    model="gpt-4.1", 
     game="Wordle-v0",
     num_samples=2000, 
     num_eval_samples=2000,
