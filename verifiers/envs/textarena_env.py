@@ -1,9 +1,7 @@
 import random
 from typing import Tuple, List, Dict, Any
-from copy import deepcopy
 
 from datasets import Dataset
-from openai import OpenAI
 import nltk 
 nltk.download('words')
 nltk.download('averaged_perceptron_tagger_eng')
@@ -53,8 +51,6 @@ class TextArenaEnv(MultiTurnEnv):
         rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
 
         super().__init__(
-            client=client,
-            model=model,
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=GUESS_SYSTEM_PROMPT,
