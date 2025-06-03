@@ -10,6 +10,8 @@ TODO:
     - check completions format, not just chat
     - what happens if dataset is already formatted?
     - fix wandb log
+NOTES:
+    - transformers seems to be having an issue, so it's pinned for now: https://github.com/volcengine/verl/issues/1710
 """
 
 def preprocess_docvqa(x):
@@ -42,7 +44,7 @@ vf_env = vf.SingleTurnEnv(
 )
 
 model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
-model, processor = vf.get_model_and_processor(model_name, use_liger=False) # TODO: modify model loading to add liger support
+model, processor = vf.get_model_and_processor(model_name, use_liger=False)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
