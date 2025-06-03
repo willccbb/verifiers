@@ -11,7 +11,7 @@ vf_env = TextArenaEnv(
     model="gpt-4.1", 
     game="Wordle-v0",
     num_samples=2000, 
-    num_eval_samples=20,
+    num_eval_samples=2000,
     max_concurrent=20,
 )
 
@@ -54,7 +54,7 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         # filter to top half of rows by rewards
         dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
         # save to hub
-        dataset_dsv3.push_to_hub("V3-wordle-test")
+        dataset_dsv3.push_to_hub("V3-wordle")
 
 if __name__ == "__main__":
     import argparse
