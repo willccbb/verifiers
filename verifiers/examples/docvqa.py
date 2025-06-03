@@ -9,7 +9,7 @@ TODO:
     - check that generic_model_loader didn't break anything
     - check completions format, not just chat
     - what happens if dataset is already formatted?
-    - fix print completions
+    - fix wandb log
 """
 
 def preprocess_docvqa(x):
@@ -48,7 +48,7 @@ run_name = "docvqa_" + model_name.split("/")[-1].lower()
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size = 4
 training_args.num_generations = 4
-training_args.log_completions = False
+training_args.log_completions = True
 
 trainer = vf.GRPOTrainer(
     model=model,
