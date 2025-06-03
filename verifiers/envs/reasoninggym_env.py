@@ -12,8 +12,6 @@ from verifiers.envs.singleturn_env import SingleTurnEnv
 
 class ReasoningGymEnv(SingleTurnEnv):
     def __init__(self,
-                 client: OpenAI,
-                 model: str,
                  gym: str | List[str | dict],
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,   
@@ -37,8 +35,6 @@ class ReasoningGymEnv(SingleTurnEnv):
         rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
         system_prompt = rg.utils.SYSTEM_PROMPTS["DeepSeekZero"] # type: ignore
         super().__init__(
-            client=client,
-            model=model,
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=system_prompt,

@@ -28,6 +28,7 @@ training_args.num_generations=12
 training_args.gradient_accumulation_steps=4
 training_args.max_prompt_length=1024
 training_args.max_completion_length=4096
+training_args.max_steps=100
 training_args.mask_env_responses=True
 
 trainer = vf.GRPOTrainer(
@@ -37,3 +38,4 @@ trainer = vf.GRPOTrainer(
     args=training_args,
 )
 trainer.train()
+

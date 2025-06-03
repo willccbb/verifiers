@@ -2,19 +2,13 @@ import os
 from openai import OpenAI
 
 import verifiers as vf
-from verifiers.envs.textarena_env import TextArenaEnv
+from verifiers.envs.reasoninggym_env import ReasoningGymEnv
 
-# first time:
-import nltk
-nltk.download('words', quiet=True)
-nltk.download('averaged_perceptron_tagger_eng', quiet=True)
-
-client = OpenAI()
-vf_env = TextArenaEnv(
-    game="Wordle-v0",
-    num_samples=2000, 
+vf_env = ReasoningGymEnv(
+    gym="arc_1d",
+    num_samples=1000, 
     num_eval_samples=2000,
-    max_concurrent=20,
+    max_concurrent=256,
 )
 
 def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
@@ -56,7 +50,7 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         # filter to top half of rows by rewards
         dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
         # save to hub
-        dataset_dsv3.push_to_hub("V3-wordle")
+        dataset_dsv3.push_to_hub("V3-arc_1d")
 
 if __name__ == "__main__":
     import argparse
