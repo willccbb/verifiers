@@ -201,6 +201,7 @@ class Environment(ABC):
                 client: OpenAI,
                 model: str,
                 prompt: str | List[Dict[str, Any]],
+                answer: str,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
         """
@@ -214,6 +215,7 @@ class Environment(ABC):
                           client: OpenAI,
                           model: str,
                           prompt: str | List[Dict[str, Any]],
+                          answer: str,
                           sampling_args: Dict[str, Any] = {},
                           **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
         """
@@ -221,12 +223,13 @@ class Environment(ABC):
         Returns a tuple of (completion, state).
         """
         async with semaphore:
-            return await asyncio.to_thread(self.rollout, client, model, prompt, sampling_args, **kwargs)
+            return await asyncio.to_thread(self.rollout, client, model, prompt, answer, sampling_args, **kwargs)
 
     async def _run_all(self,
                        client: OpenAI,
                        model: str,
                        prompts: List[str | List[Dict[str, str]]],
+                       answers: List[str],
                        sampling_args: Dict[str, Any] = {},
                        max_concurrent: int = 32,
                        **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
@@ -236,8 +239,8 @@ class Environment(ABC):
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
         rollout_tasks = [
-            self._run_single(semaphore, client, model, prompt, sampling_args, **kwargs)
-            for prompt in prompts
+            self._run_single(semaphore, client, model, prompt, answer, sampling_args, **kwargs)
+            for prompt, answer in zip(prompts, answers)
         ]
         return await tqdm_asyncio.gather(
             *rollout_tasks,
@@ -246,9 +249,10 @@ class Environment(ABC):
         )
 
     def run_rollouts(self,
-                     prompts: List[Union[str, List[Dict[str, Any]]]],
                      client: OpenAI,
                      model: str,
+                     prompts: List[Union[str, List[Dict[str, Any]]]],
+                     answers: List[str],
                      sampling_args: Dict[str, Any] = {},
                      max_concurrent: int = 32,
                      **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
@@ -256,8 +260,12 @@ class Environment(ABC):
         Run rollouts for a given list of prompts and return the completions.
         """
         coro = self._run_all(
-            prompts=prompts, client=client, model=model,
-            sampling_args=sampling_args, max_concurrent=max_concurrent, 
+            client=client,
+            model=model,
+            prompts=prompts,
+            answers=answers, 
+            sampling_args=sampling_args,
+            max_concurrent=max_concurrent, 
             **kwargs
         )
         try:
@@ -300,6 +308,7 @@ class Environment(ABC):
             results = deepcopy(inputs)
         rollouts = self.run_rollouts(
             prompts=results['prompt'],
+            answers=results['answer'],
             client=client,
             model=model,
             sampling_args=gen_sampling_args,

@@ -1,4 +1,4 @@
-from typing import Any, Tuple
+from typing import Any, Tuple, List
 
 from datasets import Dataset
 from openai import OpenAI
@@ -14,7 +14,7 @@ class ReasoningGymEnv(SingleTurnEnv):
     def __init__(self,
                  client: OpenAI,
                  model: str,
-                 gym: str | list[str | dict],
+                 gym: str | List[str | dict],
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,   
                  seed: int = 0,
@@ -50,7 +50,7 @@ class ReasoningGymEnv(SingleTurnEnv):
         self.parser = parser
         self.rubric = rubric
 
-    def build_rg_dataset(gym: str | list[str | dict], num_samples: int = 1000, seed: int = 0) -> ProceduralDataset:
+    def build_rg_dataset(self, gym: str | List[str | dict], num_samples: int = 1000, seed: int = 0) -> ProceduralDataset:
         if isinstance(gym, str):
             return rg.create_dataset(gym, size=num_samples, seed=seed)
         if not isinstance(gym, list):
@@ -65,7 +65,7 @@ class ReasoningGymEnv(SingleTurnEnv):
                 raise ValueError(f"Invalid dataset config: {dataset_config}")
         return rg.create_dataset("composite", datasets=dataset_specs, size=num_samples, seed=seed)
 
-    def rg_to_hf(self, rg_dataset) -> Tuple[Dataset, Dataset]:
+    def rg_to_hf(self, rg_dataset: ProceduralDataset) -> Tuple[Dataset, Dataset]:
         dataset_rows = []
         eval_rows = []
         for i, x in enumerate(rg_dataset):

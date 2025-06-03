@@ -72,8 +72,8 @@ class XMLParser(Parser):
         else:
             for msg in reversed(self.get_assistant_messages(completion)):
                 parsed = self.parse(msg['content'])
-                if parsed and hasattr(parsed, self.answer_field) and parsed.answer is not None:
-                    return parsed.answer
+                if parsed and hasattr(parsed, self.answer_field) and getattr(parsed, self.answer_field) is not None:
+                    return getattr(parsed, self.answer_field)
         return None
 
     def get_format_str(self) -> str:

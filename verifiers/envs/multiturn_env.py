@@ -33,18 +33,22 @@ class MultiTurnEnv(Environment):
                 client: OpenAI,
                 model: str,
                 prompt: Union[str, List[Dict[str, Any]]],
+                answer: str,
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
         is_completed = False
-        state = {}
+        state = {'answer': answer}
         assert isinstance(prompt, list)
         messages = deepcopy(prompt) 
         completion = []
         turn = 0
         while not is_completed:
+            if self.is_completed(messages, state, **kwargs):
+                is_completed = True
+                break
             response = self.get_model_response(
                 prompt=messages,
                 client=client,
