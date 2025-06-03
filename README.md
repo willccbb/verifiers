@@ -67,7 +67,7 @@ uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e "
 ```
 
 **Troubleshooting:**
-- Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).
+- Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) during vLLM weight syncing. This can usually be alleviated by setting `NCCL_P2P_DISABLE=1` in your environment.
 - If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
 
