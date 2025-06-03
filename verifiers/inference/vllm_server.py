@@ -81,7 +81,7 @@ async def get_next_worker_connection(connections: list[AnyType]) -> tuple[int, A
 # -------- OpenAI /v1/chat/completions Pydantic Models ---------- #
 class OAChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list
 
 class OAChatCompletionRequest(BaseModel):
     model: str

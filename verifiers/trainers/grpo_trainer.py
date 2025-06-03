@@ -590,7 +590,7 @@ class GRPOTrainer(Trainer):
             'mask': mask
         }
 
-    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[List[Any]] | None, List[Any], List[Any]]:
+    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any] | None, List[Any], List[Any]]:
         """
         Gather batch data from all processes.
         
@@ -665,10 +665,8 @@ class GRPOTrainer(Trainer):
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_images, all_answers, all_tasks = self._gather_batch_data(batch_offset)
-                import pdb;pdb.set_trace()
                 
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
-                
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
                     request = BatchRequest(

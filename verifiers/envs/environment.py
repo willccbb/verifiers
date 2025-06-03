@@ -4,6 +4,7 @@ from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, List, Literal, Tuple, Optional, Union
+import base64, io
 
 
 import torch
@@ -12,9 +13,18 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from datasets import Dataset
 from openai import OpenAI
 
+from PIL import Image
+
 from verifiers import RewardFunc
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
+
+def _pil_to_data_url(img: Image.Image, fmt: str | None = None) -> str:
+    buf = io.BytesIO()
+    fmt = (fmt or img.format or "PNG").upper()
+    img.save(buf, format=fmt)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return f"data:image/{fmt.lower()};base64,{b64}"
 
 class Environment(ABC):
     """
@@ -96,26 +106,34 @@ class Environment(ABC):
                        system_prompt: str | None = None,
                        few_shot: List[Dict[str, Any]] | None = None,
                        question_key: str = "question",
-                       answer_key: str = "answer") -> Dataset:
+                       images_key: str = "images") -> Dataset:
         # Extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(prompt: str) -> List[Dict[str, Any]]:
-            messages = []
-            if system_prompt:
-                messages.append({'role': 'system', 'content': system_prompt})
-            if few_shot:
-                messages.extend(few_shot)
-            messages.append({'role': 'user', 'content': prompt})
-            return messages
-        
-        if answer_key == "answer":
-            return dataset.map(lambda x: {
-                "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=self.max_concurrent)
-        else:
-            return dataset.map(lambda x: {
-                "prompt": format_prompt_fn(x[question_key]),
-                "answer": x[answer_key]
-            }, num_proc=self.max_concurrent)
+        def format_prompt_fn(batch) -> Dict[str, List[Any]]:
+            batch_size = len(batch[question_key])
+            formatted_prompts = []
+            for i in range(batch_size):
+                messages = []
+                if system_prompt:
+                    messages.append({'role': 'system', 'content': system_prompt})
+                if few_shot:
+                    messages.extend(few_shot)
+                content_blocks = [
+                    {"type": "text", "text": batch[question_key][i]}
+                ]
+                if images_key in batch.keys():
+                    for img in batch[images_key][i]:
+                        content_blocks.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": _pil_to_data_url(img)},
+                            }
+                        ) 
+                messages.append({"role": "user", "content": content_blocks})
+                formatted_prompts.append(messages)
+            batch["prompt"] = formatted_prompts 
+            return batch 
+
+        return dataset.with_transform(format_prompt_fn)
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
