@@ -6,7 +6,7 @@ from verifiers.envs.reasoninggym_env import ReasoningGymEnv
 
 vf_env = ReasoningGymEnv(
     gym="arc_1d",
-    num_samples=1000, 
+    num_samples=2000, 
     num_eval_samples=2000,
     max_concurrent=256,
 )
