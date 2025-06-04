@@ -2,6 +2,11 @@ import verifiers as vf
 from verifiers.envs.textarena_env import TextArenaEnv
 
 """
+first time:
+import nltk
+nltk.download('words', quiet=True)
+nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+
 inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen2.5-7B-Wordle-SFT --tensor-parallel-size 4
 
