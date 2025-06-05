@@ -59,6 +59,12 @@ If you use this code in your research, please cite:
 
 ### Setup 
 
+To install from PyPI, do:
+
+```bash
+uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
+```
+
 To use the latest `main` branch, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
