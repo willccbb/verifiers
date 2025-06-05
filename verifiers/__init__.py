@@ -17,7 +17,6 @@ from .envs.singleturn_env import SingleTurnEnv
 
 from .envs.codemath_env import CodeMathEnv
 from .envs.doublecheck_env import DoubleCheckEnv
-from .envs.reasoninggym_env import ReasoningGymEnv
 from .envs.tool_env import ToolEnv
 from .envs.smola_tool_env import SmolaToolEnv
 
@@ -46,7 +45,6 @@ __all__ = [
     "SingleTurnEnv",
     "CodeMathEnv",
     "DoubleCheckEnv",
-    "ReasoningGymEnv",
     "ToolEnv",
     "SmolaToolEnv",
     "GRPOTrainer",
@@ -63,3 +61,8 @@ __all__ = [
     "setup_logging",
     "print_prompt_completions_sample",
 ]
+try:
+    from .envs.reasoninggym_env import ReasoningGymEnv
+    __all__.append("ReasoningGymEnv")
+except ImportError:
+    print("Package reasoning_gym not found, ReasoningGymEnv will not be available.")
