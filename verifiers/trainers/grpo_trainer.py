@@ -613,7 +613,7 @@ class GRPOTrainer(Trainer):
         # Check if we need to generate new completions
         if self._step % generate_every == 0 or self._buffered_inputs is None:
             # Update weights to vLLM if needed
-            if self.state.global_step > self._last_loaded_step:
+            if self.state.global_step > self._last_loaded_step: 
                 self.logger.info(f"Syncing weights to vLLM at step {self.state.global_step}")
                 self._move_model_to_vllm()
                 self._last_loaded_step = self.state.global_step
