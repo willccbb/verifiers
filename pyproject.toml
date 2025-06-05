@@ -39,8 +39,10 @@ all = [
 [project.scripts]
 vf-vllm = "verifiers.inference.vllm_server:cli_main"
 
-[tool.setuptools]
-packages = ["verifiers"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["verifiers*"]
+exclude = []
 
 [build-system]
 requires = ["setuptools>=68.0"]
