@@ -5,7 +5,6 @@ from .singleturn_env import SingleTurnEnv
 
 from .codemath_env import CodeMathEnv
 from .doublecheck_env import DoubleCheckEnv
-from .reasoninggym_env import ReasoningGymEnv
 from .tool_env import ToolEnv
 from .smola_tool_env import SmolaToolEnv
 
@@ -15,7 +14,12 @@ __all__ = [
     'SingleTurnEnv',
     'CodeMathEnv',
     'DoubleCheckEnv',
-    'ReasoningGymEnv',
     'ToolEnv',
     'SmolaToolEnv',
 ]
+
+try:
+    from .reasoninggym_env import ReasoningGymEnv
+    __all__.append('ReasoningGymEnv')
+except ImportError:
+    pass
