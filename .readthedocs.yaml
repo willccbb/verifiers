@@ -9,12 +9,6 @@ build:
   os: ubuntu-24.04
   tools:
     python: "3.12"
-  commands:                 # override the default sphinx call
-    - python -m pip install -r docs/requirements.txt
-    - python -m sphinx -T -b html \
-        -d docs/build/doctrees \
-        docs/source/ $READTHEDOCS_OUTPUT/html
-
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
@@ -27,3 +21,5 @@ python:
    install:
      - method: pip
        path: .
+       extra_requirements:
+       - docs
