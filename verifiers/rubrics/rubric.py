@@ -27,7 +27,7 @@ class Rubric:
     def __init__(self, 
                  funcs: List[RewardFunc] = [],
                  weights: List[float] = [],
-                 parser: Parser | None = Parser(),
+                 parser: Parser = Parser(),
                  **kwargs):
         self.logger = logging.getLogger(f"verifiers.rubrics.{self.__class__.__name__}")
         self.parser = parser

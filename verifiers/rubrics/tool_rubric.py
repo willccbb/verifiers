@@ -9,6 +9,7 @@ class ToolRubric(Rubric):
                  parser: Parser = XMLParser(fields=["reasoning", ("tool", "answer")]),
                  env_parser: Parser = XMLParser(fields=["result"]),
                  tools: List[Callable] = []):
+        super().__init__(parser=parser)
         self.parser = parser
         self.env_parser = env_parser
         self.tools = {

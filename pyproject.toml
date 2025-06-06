@@ -32,6 +32,7 @@ dependencies = [
     "openai>=1.81.0",
     "datasets>=3.6.0",
     "transformers",
+    "nest-asyncio>=1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,12 @@ docs = [
     "sphinx",
     "myst-parser",
     "sphinx-rtd-theme"
+]
+
+tests = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.scripts]
