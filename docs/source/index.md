@@ -1,13 +1,54 @@
-# Verifiers
+# verifiers
 
-Verifiers is a Python package for reinforcement learning with LLMs, providing parsers, rubrics, and environments for training and evaluation.
+**Note: Docs written by Claude 4 Opus**
+
+`verifiers` is a flexible framework for reinforcement learning with large language models. It provides modular components for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+
+## What is `verifiers`?
+
+`verifiers` enables you to:
+
+- **Build custom evaluation environments** for any task
+- **Define multi-criteria reward functions** for nuanced evaluation  
+- **Train models using GRPO** (Group Relative Policy Optimization)
+- **Parse structured outputs** reliably with built-in validation
+- **Integrate tools** to extend model capabilities
+
+The framework emphasizes modularity and composability, allowing you to start simple and progressively add complexity as needed.
 
 ## Documentation
 
 ```{toctree}
 :maxdepth: 2
-:caption: Contents:
+:caption: Getting Started:
 
+overview
+examples
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Core Components:
+
+environments
+parsers
+rubrics
+tools
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Training & Advanced:
+
+training
+advanced
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Reference:
+
+api_reference
 testing
 development
 ```
@@ -18,65 +59,83 @@ development
 
 ```bash
 # Install the package
-uv add verifiers
+pip install verifiers
 
-# Install with test dependencies
-uv add verifiers --optional tests
+# Or using uv
+uv add verifiers
 ```
 
-### Basic Usage
+### Basic Example
 
 ```python
+from verifiers.envs import SingleTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
-from verifiers.envs import SingleTurnEnv
+import openai
 
-# Create components
-parser = XMLParser(["reasoning", "answer"])
-rubric = Rubric()
-env = SingleTurnEnv(dataset=dataset, client=client)
+# 1. Define output format
+parser = XMLParser(fields=["think", "answer"])
+
+# 2. Create evaluation criteria
+def correct_answer(completion, answer, **kwargs):
+    parsed = parser.parse(completion)
+    return 1.0 if parsed.answer == answer else 0.0
+
+rubric = Rubric(
+    funcs=[correct_answer, parser.get_format_reward_func()],
+    weights=[0.8, 0.2]
+)
+
+# 3. Set up environment
+env = SingleTurnEnv(
+    dataset=your_dataset, # with 'question' and 'answer' string columns
+    parser=parser,
+    rubric=rubric,
+    system_prompt="Solve the problem step by step.",
+    client=openai.Client()
+)
+
+# 4. Generate training data
+prompts, completions, rewards = env.generate(
+    model="gpt-4",
+    n_samples=100
+)
 ```
 
-## Components
+## Key Concepts
 
-### Parsers
-- **XMLParser** - Parse structured XML responses
-- **SmolaParser** - Enhanced XML parsing with tool support
-- **Parser** - Base parser class
+### 1. **Environments** orchestrate the evaluation process
+- Handle dataset management and prompt formatting
+- Execute model interactions (rollouts)
+- Integrate parsers and rubrics for complete evaluation
 
-### Rubrics  
-- **Rubric** - Base reward function aggregation
-- **ToolRubric** - Tool execution and code evaluation
-- **RubricGroup** - Multiple rubric aggregation
+### 2. **Parsers** extract structured information
+- XMLParser (recommended) for reliable field extraction
+- Built-in format validation and rewards
+- Support for alternative field names
 
-### Environments
-- **SingleTurnEnv** - Single interaction environments
-- **MultiTurnEnv** - Multi-turn conversation environments  
-- **Environment** - Base environment class
+### 3. **Rubrics** define evaluation criteria
+- Combine multiple reward functions with weights
+- Support task-specific and general evaluations
+- Enable sophisticated multi-aspect scoring
 
-## Testing
+### 4. **Tools** extend model capabilities
+- Simple Python functions with clear signatures
+- Automatic discovery and schema generation
+- Safe execution with error handling
 
-The package includes a comprehensive test suite with 133+ tests. See the [Testing Guide](testing.md) for details on running tests, coverage, and contributing.
+## Why Verifiers?
 
-## Development
+- **Modular Design**: Mix and match components for your use case
+- **Production Ready**: Used for training state-of-the-art models
+- **Efficient**: Async operations and batch processing built-in
+- **Flexible**: Support for any OpenAI-compatible API
+- **Extensible**: Easy to add custom environments, parsers, and rubrics
 
-### Running Tests
+## Learn More
 
-```bash
-# Install test dependencies
-uv add --optional tests
-
-# Run all tests
-uv run pytest tests/
-
-# Run with coverage
-uv run pytest tests/ --cov=verifiers
-```
-
-### Contributing
-
-1. Fork the repository
-2. Install development dependencies: `uv add --optional tests`
-3. Make your changes
-4. Run tests: `uv run pytest tests/`
-5. Submit a pull request
+- Start with the [Overview](overview.md) for core concepts
+- Walk through [Examples](examples.md) to see real implementations
+- Deep dive into [Environments](environments.md), [Parsers](parsers.md), and [Rubrics](rubrics.md)
+- Learn about [Training](training.md) models with GRPO
+- Explore [Advanced](advanced.md) patterns for complex use cases
