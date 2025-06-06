@@ -31,7 +31,6 @@ dependencies = [
     "rich",
     "trl>=0.17.0",
     "requests>=2.32.3",
-    "vllm>=0.8.5.post1",
     "openai>=1.81.0",
     "datasets>=3.6.0",
     "transformers",
@@ -39,6 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
+    "vllm>=0.8.5.post1",
     "ipykernel",
     "ipywidgets",
     "duckduckgo-search",

@@ -83,6 +83,6 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
     argparser.add_argument("--num-samples", "-n", type=int, default=10)
-    argparser.add_argument("--max-tokens", "-t", type=int, default=1000)
+    argparser.add_argument("--max-tokens", "-t", type=int, default=4096)
     args = argparser.parse_args()
     main(args.api, args.num_samples, args.max_tokens)
