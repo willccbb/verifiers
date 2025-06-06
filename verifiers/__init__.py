@@ -30,7 +30,10 @@ from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_ex
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
 from .utils.config_utils import grpo_defaults, lora_defaults
 
-__version__ = "0.1.0"
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"
 
 # Setup default logging configuration
 setup_logging()
