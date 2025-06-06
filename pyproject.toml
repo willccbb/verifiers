@@ -49,6 +49,10 @@ all = [
     "nltk"
 ]
 
+docs = [
+    "sphinx"
+]
+
 [project.scripts]
 vf-vllm = "verifiers.inference.vllm_server:cli_main"
 
