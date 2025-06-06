@@ -27,7 +27,7 @@ uv add --optional tests
 
 ```
 verifiers/
-├── verifiers/           # Main package
+├── verifiers/          # Main package
 │   ├── envs/           # Environment classes
 │   ├── parsers/        # Parser classes  
 │   ├── rubrics/        # Rubric classes
@@ -35,8 +35,7 @@ verifiers/
 │   └── utils/          # Utility functions
 ├── tests/              # Test suite
 ├── docs/               # Documentation
-├── pyproject.toml      # Project configuration
-└── CLAUDE.md          # Development rules
+└── pyproject.toml      # Project configuration
 ```
 
 ## Testing

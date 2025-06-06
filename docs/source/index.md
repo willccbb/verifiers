@@ -1,12 +1,12 @@
-# verifiers
+# Verifiers
 
 **Note: Docs written by Claude 4 Opus**
 
-`verifiers` is a flexible framework for reinforcement learning with large language models. It provides modular components for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+Verifiers is a flexible framework for reinforcement learning with large language models. It provides modular components for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
 
-## What is `verifiers`?
+## What does it do?
 
-`verifiers` enables you to:
+Verifiers enables you to:
 
 - **Build custom evaluation environments** for any task
 - **Define multi-criteria reward functions** for nuanced evaluation  
