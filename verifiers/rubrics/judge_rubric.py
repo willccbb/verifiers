@@ -26,13 +26,13 @@ Respond either "yes" or "no" only."""
 
 class JudgeRubric(Rubric):
     def __init__(self,
-                 judge_client: OpenAI = OpenAI(),
+                 judge_client: OpenAI | None = None,
                  judge_model: str = "gpt-4.1-nano",
                  judge_prompt: str = DEFAULT_JUDGE_PROMPT,
                  parser: Parser = Parser(),
                  **kwargs):
         super().__init__(**kwargs)
-        self.judge_client = judge_client
+        self.judge_client = judge_client if judge_client is not None else OpenAI()
         self.judge_model = judge_model
         self.judge_prompt = judge_prompt
         self.parser = parser
