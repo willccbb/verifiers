@@ -51,7 +51,8 @@ all = [
 
 docs = [
     "sphinx",
-    "myst-parser"
+    "myst-parser",
+    "sphinx-rtd-theme"
 ]
 
 [project.scripts]
