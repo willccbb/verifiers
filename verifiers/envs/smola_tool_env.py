@@ -4,11 +4,11 @@ from typing import List, Dict, Any, Callable, Optional, Type
 
 from datasets import Dataset
 
-from verifiers import RewardFunc
-from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers.smola_parser import SmolaParser
-from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
-from verifiers.rubrics.smola_tool_rubric import SmolaToolRubric
+from ...verifiers import RewardFunc
+from .multiturn_env import MultiTurnEnv
+from ..parsers.smola_parser import SmolaParser
+from ..prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
+from ..rubrics.smola_tool_rubric import SmolaToolRubric
 
 class SmolaToolEnv(MultiTurnEnv):
     def __init__(self,

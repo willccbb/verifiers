@@ -12,9 +12,9 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from datasets import Dataset
 from openai import OpenAI
 
-from verifiers import RewardFunc
-from verifiers.parsers import Parser
-from verifiers.rubrics import Rubric
+from ...verifiers import RewardFunc
+from ..parsers import Parser
+from ..rubrics import Rubric
 
 class Environment(ABC):
     """

@@ -5,8 +5,10 @@ import inspect
 import logging
 from typing import List, Dict, Any, Union
 
-from verifiers import RewardFunc
-from verifiers.parsers import Parser
+from ...verifiers import RewardFunc
+#from verifiers import RewardFunc
+#from verifiers.parsers import Parser
+from ..parsers import Parser
 
 
 class Rubric:

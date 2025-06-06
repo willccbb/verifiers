@@ -29,13 +29,13 @@ from trl.trainer.utils import (
 import wandb
 import numpy as np
 
-from verifiers import Environment
-from verifiers.inference import VLLMClient
-from verifiers.trainers.grpo_config import GRPOConfig
-from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
-from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
-from verifiers.utils.logging_utils import print_prompt_completions_sample   
-from verifiers.utils.trainer_utils import RepeatSampler
+from ..envs import Environment
+from ..inference import VLLMClient
+from ..trainers.grpo_config import GRPOConfig
+from ..trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
+from ..trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
+from ..utils.logging_utils import print_prompt_completions_sample   
+from ..utils.trainer_utils import RepeatSampler
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:

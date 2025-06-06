@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Tuple
 
 from openai import OpenAI
 
-from verifiers.envs.environment import Environment
+from ..envs.environment import Environment
 
 
 class MultiTurnCompletionEnv(Environment):

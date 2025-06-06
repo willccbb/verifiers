@@ -6,9 +6,9 @@ import reasoning_gym as rg
 from reasoning_gym.composite import DatasetSpec
 from reasoning_gym.dataset import ProceduralDataset
 
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
-from verifiers.envs.singleturn_env import SingleTurnEnv
+from ..parsers import XMLParser
+from ..rubrics import Rubric
+from .singleturn_env import SingleTurnEnv
 
 class ReasoningGymEnv(SingleTurnEnv):
     def __init__(self,

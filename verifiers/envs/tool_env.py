@@ -2,11 +2,11 @@ import inspect
 import json
 from typing import List, Dict, Any, Callable, Tuple
 
-from verifiers import RewardFunc
-from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
-from verifiers.rubrics import ToolRubric
+from ...verifiers import RewardFunc
+from .multiturn_env import MultiTurnEnv
+from ..parsers import XMLParser
+from ..prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
+from ..rubrics import ToolRubric
 
 def infer_schema_from_function(func: Callable) -> Dict[str, Any]:
     """Infers a tool schema from a function's signature and docstring."""

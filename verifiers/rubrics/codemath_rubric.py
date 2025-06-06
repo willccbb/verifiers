@@ -1,8 +1,8 @@
 from typing import List, Dict
 
-from verifiers import RewardFunc
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import MathRubric
+from ...verifiers import RewardFunc
+from ..parsers import XMLParser
+from .math_rubric import MathRubric
 
 
 class CodeMathRubric(MathRubric):

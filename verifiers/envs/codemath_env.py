@@ -1,10 +1,10 @@
 import subprocess
 from typing import List, Dict, Any, Tuple
 
-from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.prompts import CODE_PROMPT
-from verifiers.rubrics import CodeMathRubric
+from .multiturn_env import MultiTurnEnv
+from ..parsers import XMLParser
+from ..prompts import CODE_PROMPT
+from ..rubrics import CodeMathRubric
 
 class CodeMathEnv(MultiTurnEnv):
     def __init__(self,

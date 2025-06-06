@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 
-from verifiers import RewardFunc
-from verifiers.rubrics.rubric import Rubric
+from ...verifiers import RewardFunc
+from .rubric import Rubric
 
 
 class RubricGroup(Rubric):

@@ -7,9 +7,9 @@ nltk.download('words', quiet=True)
 nltk.download('averaged_perceptron_tagger_eng', quiet=True)
 import textarena as ta 
 
-from verifiers import MultiTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
+from ..envs.multiturn_env import MultiTurnEnv
+from ..parsers import XMLParser
+from ..rubrics import Rubric
 
 
 GUESS_SYSTEM_PROMPT = """You are a competitive game player. \

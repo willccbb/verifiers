@@ -1,6 +1,6 @@
 from peft import LoraConfig
 
-from verifiers.trainers.grpo_config import GRPOConfig
+from ..trainers.grpo_config import GRPOConfig
 
 def grpo_defaults(run_name: str) -> GRPOConfig:
     return GRPOConfig(

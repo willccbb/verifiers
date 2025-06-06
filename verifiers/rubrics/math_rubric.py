@@ -1,8 +1,8 @@
 from typing import List
 
-from verifiers import RewardFunc
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
+from ...verifiers import RewardFunc
+from ..parsers import XMLParser
+from .rubric import Rubric
 
 
 class MathRubric(Rubric):
