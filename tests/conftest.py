@@ -73,3 +73,74 @@ sys.modules.setdefault('torch.nn', torch.nn)
 sys.modules.setdefault('peft', peft)
 sys.modules.setdefault('accelerate', accelerate)
 sys.modules.setdefault('accelerate.utils', accelerate.utils)
+
+# Minimal openai stub
+openai = types.ModuleType('openai')
+class OpenAI:
+    def __init__(self, **kwargs):
+        pass
+openai.OpenAI = OpenAI
+sys.modules.setdefault('openai', openai)
+
+# Minimal transformers stub
+transformers = types.ModuleType('transformers')
+class PreTrainedTokenizerBase:
+    def encode(self, text):
+        return [ord(c) for c in text]
+
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        if isinstance(messages, list):
+            return ''.join(m['content'] for m in messages)
+        return messages
+
+transformers.tokenization_utils_base = types.ModuleType('tokenization_utils_base')
+transformers.tokenization_utils_base.PreTrainedTokenizerBase = PreTrainedTokenizerBase
+sys.modules.setdefault('transformers', transformers)
+sys.modules.setdefault('transformers.tokenization_utils_base', transformers.tokenization_utils_base)
+
+# Minimal datasets stub
+datasets = types.ModuleType('datasets')
+class Dataset(list):
+    def __init__(self, data):
+        super().__init__(data)
+        if data:
+            self.column_names = list(data[0].keys())
+        else:
+            self.column_names = []
+
+    def map(self, func, num_proc=None):
+        return Dataset([func(x) for x in self])
+
+    def select(self, indices):
+        return Dataset([self[i] for i in indices])
+
+    def shuffle(self, seed=0):
+        return self
+
+    @classmethod
+    def from_dict(cls, d):
+        rows = [dict(zip(d.keys(), vals)) for vals in zip(*d.values())]
+        return cls(rows)
+
+datasets.Dataset = Dataset
+datasets.load_dataset = lambda *a, **k: Dataset([])
+datasets.concatenate_datasets = lambda ds_list: Dataset([item for ds in ds_list for item in ds])
+sys.modules.setdefault('datasets', datasets)
+
+# Minimal tqdm stub
+import asyncio
+tqdm_mod = types.ModuleType('tqdm')
+tqdm_asyncio_mod = types.ModuleType('asyncio')
+
+class _TqdmAsync:
+    @classmethod
+    async def gather(cls, *args, **kwargs):
+        kwargs.pop('total', None)
+        kwargs.pop('desc', None)
+        return await asyncio.gather(*args, **kwargs)
+
+tqdm_asyncio_mod.tqdm_asyncio = _TqdmAsync
+tqdm_asyncio_mod.gather = _TqdmAsync.gather
+tqdm_mod.asyncio = tqdm_asyncio_mod
+sys.modules.setdefault('tqdm', tqdm_mod)
+sys.modules.setdefault('tqdm.asyncio', tqdm_asyncio_mod)
