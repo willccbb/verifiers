@@ -1,8 +1,15 @@
+import re
+
 from datasets import load_dataset
+
 import verifiers as vf
 
 """
+# install qwen stuff
+uv pip install qwen-vl-utils
+# inference
 CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' 
+# train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
     - check liger kernel support
@@ -13,6 +20,7 @@ TODO:
 NOTES:
     - transformers seems to be having an issue, so it's pinned for now: https://github.com/volcengine/verl/issues/1710
 """
+
 
 def preprocess_docvqa(x):
     return {
@@ -33,9 +41,49 @@ system_prompt = f"""Answer the questions.
 Respond in the following format:
 {parser.get_format_str()}"""
 
+
+def correctness_reward_func(completion: list[dict[str, str]], **kwargs) -> float:
+    def get_assistant_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [msg for msg in messages if msg.get("role") == "assistant"]
+
+    def parse_xml_content(text: str, tag: str, strip: bool = True) -> str | None:
+        pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            content = match.group(1)
+            return content.strip() if strip else content
+        return None
+
+    assistant_messages = get_assistant_messages(completion)
+    if assistant_messages is None:
+        return 0.0
+    msgs_scores = []
+    for msg in assistant_messages:
+        content = msg.get("content", "")
+        answer = parse_xml_content(content, "answer")
+        if answer is None:
+            continue
+        gt_answers = kwargs["answer"]
+        mean_gt_len = sum([len(gt_answer) for gt_answer in gt_answers]) / len(
+            gt_answers
+        )
+        diff_from_mean = min(mean_gt_len / len(answer), 1.0)  # penalize long answers
+        if answer in gt_answers:
+            msgs_scores.append(2.0)
+        elif answer.lower() in [ans.lower() for ans in gt_answers]:
+            msgs_scores.append(1.0)
+        elif any(ans.lower() in answer.lower() for ans in gt_answers):
+            msgs_scores.append(diff_from_mean)
+    if msgs_scores == []:
+        return 0.0
+    else:
+        return sum(msgs_scores) / len(msgs_scores)
+
+
 rubric = vf.Rubric(
     funcs=[
         parser.get_format_reward_func(),
+        correctness_reward_func,
     ]
 )
 
