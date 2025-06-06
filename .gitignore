@@ -35,4 +35,6 @@ logs/
 wip/
 old/
 tests/
+!verifiers/tests/
+!tests/
 notebooks/
