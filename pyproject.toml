@@ -22,9 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "torch==2.6.0",
-    "liger-kernel>=0.5.10",
     "setuptools",
-    "deepspeed",
     "accelerate",
     "peft",
     "wandb",
@@ -39,6 +37,8 @@ dependencies = [
 [project.optional-dependencies]
 all = [
     "vllm>=0.8.5.post1",
+    "liger-kernel>=0.5.10",
+    "deepspeed",
     "ipykernel",
     "ipywidgets",
     "duckduckgo-search",

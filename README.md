@@ -72,6 +72,12 @@ cd verifiers
 uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e ".[all]"
 ```
 
+For CPU development (API-only, no training), just do:
+```
+uv add verifiers
+```
+and install additional tool + environment dependencies (e.g. `textarena`, `reasoning-gym`, `vllm`) as needed.
+
 **Troubleshooting:**
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) during vLLM weight syncing. This can usually be alleviated by setting `NCCL_P2P_DISABLE=1` in your environment.
