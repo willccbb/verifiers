@@ -210,9 +210,7 @@ class YourCustomEnv(Environment):
 - See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings
 
 
-### Roadmap for v0.1 Release (very soon)
-
-TODO: GitHub header stuff, test coverage, [PyPI](https://pypi.org/project/verifiers/), general release prep
+### Release Notes - v0.1.0 
 
 New features for this release:
 - Async inference support via OpenAI-compatible vLLM server (with weight syncing enabled)

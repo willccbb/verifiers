@@ -17,10 +17,6 @@ class SmolaToolEnv(MultiTurnEnv):
                  tools: List[Any] = [],
                  system_prompt: str = DEFAULT_TOOL_PROMPT_TEMPLATE,
                  few_shot: List[Dict[str, str]] = [],
-                 sampling_args={
-                     "stop": ["</tool>\n", "</answer>\n"],
-                    #  "include_stop_str_in_output": True # include_stop_str_in_output is not OpenAI /chat/completions API compatible
-                 },
                  mask_env_response: bool = True,
                  max_steps: int = 10, **kwargs):
         # Format the system prompt with tool descriptions
