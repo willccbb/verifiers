@@ -1,6 +1,6 @@
 # Verifiers
 
-**Note: Docs written by Claude 4 Opus, they will be gradually improved over time**
+**Note: These docs are mostly written by Claude 4 Opus. Many things are wrong. This is here as a starting point for me to work from, and they will be gradually improved over time.**
 
 Verifiers is a flexible framework for reinforcement learning with large language models. It provides modular components for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
 
