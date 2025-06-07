@@ -8,23 +8,23 @@ The framework is built around three fundamental primitives that work together:
 
 ### 1. Parser: Structured Output Extraction
 
-Parsers extract structured information from model outputs. While you can use plain text, **we strongly recommend using XMLParser** for its reliability and built-in format validation.
+Parsers extract structured information from model outputs, and can expose useful functionalities for response composition. While you can use plain text or create your own parsers, **we generally recommend using XMLParser** for its convenience and reliability, particularly when getting started with `verifiers`.
 
 ```python
 from verifiers.parsers import XMLParser
 
 # Define expected fields
-parser = XMLParser(fields=["reasoning", "answer"])
+parser = XMLParser(fields=["think", "answer"])
 
 # Parse model output
 output = """
-<reasoning>
+<think>
 First, I need to calculate 2+2...
 </reasoning>
-<answer>4</answer>
+<think>4</answer>
 """
 parsed = parser.parse(output)
-print(parsed.reasoning)  # "First, I need to calculate 2+2..."
+print(parsed.think)  # "First, I need to calculate 2+2..."
 print(parsed.answer)     # "4"
 ```
 
