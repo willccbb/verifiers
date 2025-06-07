@@ -47,7 +47,8 @@ all = [
     "reasoning-gym",
     "smolagents>=1.15.0",
     "textarena",
-    "nltk"
+    "nltk",
+    "bleurt-pytorch"
 ]
 
 docs = [
