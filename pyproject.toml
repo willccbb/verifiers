@@ -3,7 +3,7 @@ name = "verifiers"
 authors = [
     {name = "William Brown", email = "williambrown97@gmail.com"},
 ]
-version = "0.1.0"
+dynamic = ["version"]
 description = "Verifiers for reinforcement learning with LLMs"
 readme = "README.md"
 license = {text = "MIT"}
@@ -68,8 +68,12 @@ vf-vllm = "verifiers.inference.vllm_server:cli_main"
 [tool.setuptools]
 packages = ["verifiers"]
 
+[tool.setuptools_scm]
+# Generate version from git tags
+write_to = "verifiers/_version.py"
+
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
