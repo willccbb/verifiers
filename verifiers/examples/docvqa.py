@@ -8,7 +8,7 @@ import verifiers as vf
 # install qwen stuff
 uv pip install qwen-vl-utils
 # inference
-CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' 
+CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --max-model-len 16000
 # train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
@@ -96,8 +96,6 @@ model, processor = vf.get_model_and_processor(model_name, use_liger=False)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
-training_args.per_device_train_batch_size = 4
-training_args.num_generations = 4
 training_args.log_completions = True
 
 trainer = vf.GRPOTrainer(
