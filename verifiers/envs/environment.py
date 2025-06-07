@@ -5,8 +5,6 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, List, Literal, Tuple, Optional, Union
 
-
-import torch
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase 
 
 from datasets import Dataset
