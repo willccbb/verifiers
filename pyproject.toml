@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "torch==2.6.0",
+    "torch>=2.6.0",
     "setuptools",
     "accelerate",
     "peft",
