@@ -29,7 +29,7 @@ print(f"Median tokens: {sorted(tok_counts)[len(tok_counts) // 2]}")
 
 args = SFTConfig(
     max_length=8192,
-    output_dir="outputs/sft-arc_1d",
+    output_dir="sft-arc_1d-14b",
     per_device_train_batch_size=1,
     gradient_accumulation_steps=1,
     gradient_checkpointing=True,
@@ -39,7 +39,7 @@ args = SFTConfig(
     weight_decay=0.01,
     max_grad_norm=0.1,
     report_to="wandb",
-    save_strategy="no",
+    save_strategy="epoch",
     save_total_limit=1,
     logging_steps=1,
     save_only_model=True,
