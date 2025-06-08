@@ -282,7 +282,14 @@ class GRPOTrainer(Trainer):
         host = args.vllm_server_host
         port = args.vllm_server_port
         vllm_base_url = f"http://{host}:{port}/v1"
-        self.oai_client = openai.OpenAI(base_url=vllm_base_url, api_key="EMPTY")
+        import httpx
+        self.oai_client = openai.OpenAI(
+            base_url=vllm_base_url,
+            api_key="EMPTY",
+            http_client=httpx.Client(
+                limits=httpx.Limits(max_connections=args.max_concurrent),
+                timeout=args.async_generation_timeout)
+        )
 
         # vLLM client for weight syncing only; only import if used
         from verifiers.inference.vllm_client import VLLMClient
