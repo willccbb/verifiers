@@ -45,7 +45,7 @@ args = SFTConfig(
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen2.5-7B-Arc-1D-SFT",
+    hub_model_id="Qwen3-8B-Arc-1D-SFT",
 )
 
 trainer = SFTTrainer(
