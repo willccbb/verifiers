@@ -1874,7 +1874,7 @@ def make_parser():
     parser.add_argument("--log-level", type=str, default="info", 
                         choices=["critical", "error", "warning", "info", "debug", "trace"],
                         help="Log level for uvicorn.")
-    parser.add_argument("--max-batch-size", type=int, default=32,
+    parser.add_argument("--max-batch-size", type=int, default=128,
                         help="Maximum number of requests to process in one LLM call from the active pool.")
     parser.add_argument("--batch-request-timeout-seconds", type=int, default=300,
                         help="Timeout in seconds for a single request waiting for its turn and completion.")
