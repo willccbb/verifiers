@@ -108,12 +108,12 @@ class Environment(ABC):
         if answer_key == "answer":
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=self.max_concurrent)
+            }, num_proc=min(self.max_concurrent, 32))
         else:
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
-            }, num_proc=self.max_concurrent)
+            }, num_proc=min(self.max_concurrent, 32))
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:

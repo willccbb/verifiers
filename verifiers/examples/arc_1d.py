@@ -16,7 +16,7 @@ model, tokenizer = vf.get_model_and_tokenizer(model_name)
 vf_env = ReasoningGymEnv(
     gym="arc_1d",
     num_samples=4000,
-    max_concurrent=512,
+    max_concurrent=128,
 )
 
 run_name = f"arc_1d-grpo-{size}"
