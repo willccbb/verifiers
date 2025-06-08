@@ -3,12 +3,13 @@ import re
 from datasets import load_dataset
 
 import verifiers as vf
+from qwen_vl_utils import smart_resize
 
 """
 # install qwen stuff
 uv pip install qwen-vl-utils
 # inference
-CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --max-model-len 16000
+CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct'
 # train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
@@ -25,7 +26,7 @@ NOTES:
 def preprocess_docvqa(x):
     return {
         "question": x["question"],
-        "images": [x["image"]],
+        "images": [x["image"].resize(smart_resize(480, 640))],
         "answer": x["answers"][0],
     }
 
