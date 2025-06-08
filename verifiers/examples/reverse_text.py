@@ -53,7 +53,6 @@ args.num_iterations = 2
 args.per_device_train_batch_size = 8
 args.num_generations = 8
 args.gradient_accumulation_steps = 4
-args.max_concurrent = 512
 args.eval_strategy = "steps"
 args.eval_steps = 10
 args.max_steps = 100
