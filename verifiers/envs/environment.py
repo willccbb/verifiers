@@ -252,7 +252,7 @@ class Environment(ABC):
                      prompts: List[Union[str, List[Dict[str, Any]]]],
                      answers: List[str],
                      sampling_args: Dict[str, Any] = {},
-                     max_concurrent: int = 32,
+                     max_concurrent: int = 128,
                      **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
@@ -486,7 +486,7 @@ class Environment(ABC):
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  num_samples: int = -1,
-                 max_concurrent: int = 32,
+                 max_concurrent: int = 128,
                  **kwargs: Any
                 ) -> Dict[str, Any]:
         """
