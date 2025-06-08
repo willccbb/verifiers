@@ -1,5 +1,6 @@
 import asyncio
 from asyncio import Semaphore
+import concurrent.futures
 
 import inspect
 import logging
@@ -128,7 +129,7 @@ class Rubric:
 
     async def _score_all(
             self, prompts, completions, answers, states, tasks,
-            max_concurrent: int = 32,
+            max_concurrent: int = 128,
             **kwargs) -> Dict[str, List[float]]:
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
@@ -149,7 +150,7 @@ class Rubric:
                        answers: List[Any],
                        states: List[Dict[str, Any]],
                        tasks: List[str],
-                       max_concurrent: int = 32,
+                       max_concurrent: int = 128,
                        **kwargs) -> Dict[str, List[float]]:
         """
         Compute reward scores for a group of rollouts.
@@ -162,16 +163,31 @@ class Rubric:
         - inter-group comparisons (voting, ranking, Elo, etc.)
         - scores computed using global state stored in Rubric class
         """
+        # Set up custom executor for the event loop if needed
+        def setup_executor(loop):
+            if loop._default_executor is None:
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+                loop.set_default_executor(executor)
+        
         coro = self._score_all(
             prompts, completions, answers, states, tasks,
             max_concurrent=max_concurrent,
             **kwargs
         )
         try:
-            return asyncio.run(coro)
+            # Create new event loop with custom executor
+            loop = asyncio.new_event_loop()
+            setup_executor(loop)
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
         except RuntimeError:
-            # Jupyter notebook
-            import nest_asyncio
+            # Jupyter notebook or existing event loop
+            import nest_asyncio 
             nest_asyncio.apply()
             loop = asyncio.get_running_loop()
+            setup_executor(loop)
             return loop.run_until_complete(coro)

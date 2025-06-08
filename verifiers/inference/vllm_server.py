@@ -544,6 +544,7 @@ def llm_worker(
         dtype=script_args.dtype,
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
+        max_num_seqs=script_args.max_batch_size,
         worker_extension_cls="verifiers.inference.vllm_server.WeightSyncWorkerExtension",
     )
 
@@ -1838,7 +1839,8 @@ def main(script_args: ScriptArguments):
         host=script_args.host, 
         port=script_args.port, 
         log_level=script_args.log_level,
-        workers=num_uvicorn_workers
+        workers=num_uvicorn_workers,
+        ws_max_queue=128
     )
 
 

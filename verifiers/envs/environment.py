@@ -4,6 +4,7 @@ from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, List, Literal, Tuple, Optional, Union
+import concurrent.futures
 
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase 
 
@@ -37,6 +38,16 @@ class Environment(ABC):
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         self.max_concurrent = max_concurrent
+        
+        # Ensure asyncio.to_thread doesn't hit default 32 thread limit
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+            loop.set_default_executor(executor)
+        
         if self.message_type == 'chat':
             if dataset is not None:
                 self.dataset = self.format_dataset(dataset, self.system_prompt, self.few_shot)
@@ -257,6 +268,11 @@ class Environment(ABC):
         """
         Run rollouts for a given list of prompts and return the completions.
         """
+        def setup_executor(loop):
+            if loop._default_executor is None:
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+                loop.set_default_executor(executor)
+        
         coro = self._run_all(
             client=client,
             model=model,
@@ -267,12 +283,21 @@ class Environment(ABC):
             **kwargs
         )
         try:
-            return asyncio.run(coro)
+            # Create new event loop with custom executor
+            loop = asyncio.new_event_loop()
+            setup_executor(loop)
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
         except RuntimeError:
-            # Jupyter notebook
+            # Jupyter notebook or existing event loop
             import nest_asyncio
             nest_asyncio.apply()
             loop = asyncio.get_running_loop()
+            setup_executor(loop)
             return loop.run_until_complete(coro)
 
     def generate(self,
