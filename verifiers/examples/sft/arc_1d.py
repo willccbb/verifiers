@@ -7,7 +7,7 @@ accelerate launch --config-file configs/zero3.yaml --num-processes 8 verifiers/e
 """
 
 # convenience function for FA2 initialization
-model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-8B", use_liger=False)
+model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-14B", use_liger=False)
 dataset = load_dataset('willcb/V3-arc_1d', split='train')
 
 tok_counts = []
@@ -45,7 +45,7 @@ args = SFTConfig(
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen3-8B-Arc-1D-SFT",
+    hub_model_id="Qwen3-14B-Arc-1D-SFT",
 )
 
 trainer = SFTTrainer(
