@@ -15,7 +15,7 @@ model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
 vf_env = ReasoningGymEnv(
     gym="arc_1d",
-    num_samples=2000,
+    num_samples=4000,
     max_concurrent=128,
 )
 
@@ -27,7 +27,7 @@ training_args.num_generations=16
 training_args.gradient_accumulation_steps=8
 training_args.max_prompt_length=1024
 training_args.max_completion_length=4096
-training_args.max_steps=125
+training_args.max_steps=500
 
 trainer = vf.GRPOTrainer(
     model=model,

@@ -27,9 +27,11 @@ print(f"Max tokens: {max(tok_counts)}")
 print(f"Mean tokens: {sum(tok_counts) / len(tok_counts)}")
 print(f"Median tokens: {sorted(tok_counts)[len(tok_counts) // 2]}")
 
+run_name = "sft-arc_1d-14b"
 args = SFTConfig(
     max_length=8192,
-    output_dir="sft-arc_1d-14b",
+    output_dir=f"outputs/{run_name}",
+    run_name=run_name,
     per_device_train_batch_size=1,
     gradient_accumulation_steps=1,
     gradient_checkpointing=True,
@@ -39,7 +41,7 @@ args = SFTConfig(
     weight_decay=0.01,
     max_grad_norm=0.1,
     report_to="wandb",
-    save_strategy="epoch",
+    save_strategy="no",
     save_total_limit=1,
     logging_steps=1,
     save_only_model=True,
@@ -54,3 +56,4 @@ trainer = SFTTrainer(
     train_dataset=dataset # type: ignore
 )
 trainer.train()
+trainer.save_model(f"outputs/{run_name}")
