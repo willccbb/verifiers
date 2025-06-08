@@ -17,6 +17,7 @@ vf_env = ReasoningGymEnv(
     gym="arc_1d",
     num_samples=4000,
     max_concurrent=128,
+    seed=1,
 )
 
 run_name = f"arc_1d-grpo-{size}"
