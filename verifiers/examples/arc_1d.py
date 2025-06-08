@@ -3,7 +3,7 @@ from verifiers.envs.reasoninggym_env import ReasoningGymEnv
 
 """
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT --tensor-parallel-size 4
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT --tensor-parallel-size 4 --max-batch-size 128
 
 training:
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/arc_1d.py

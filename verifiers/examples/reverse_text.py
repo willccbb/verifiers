@@ -2,6 +2,15 @@ from datasets import load_dataset
 import verifiers as vf
 
 #model = 'Qwen/Qwen2.5-1.5B-Instruct'
+"""
+inference:
+CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT
+
+training:
+CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/reverse_text.py
+"""
+
+
 model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
 # evaluate on the first 32 examples, train on the rest
@@ -44,6 +53,7 @@ args.num_iterations = 2
 args.per_device_train_batch_size = 8
 args.num_generations = 8
 args.gradient_accumulation_steps = 4
+args.max_concurrent = 512
 args.eval_strategy = "steps"
 args.eval_steps = 10
 args.max_steps = 100

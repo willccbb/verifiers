@@ -394,7 +394,7 @@ class ScriptArguments:
         },
     )
     max_batch_size: int = field(
-        default=32,
+        default=128,
         metadata={"help": "Maximum number of requests to process in one LLM call from the active pool."},
     )
     batch_request_timeout_seconds: int = field(
@@ -402,7 +402,7 @@ class ScriptArguments:
         metadata={"help": "Timeout in seconds for a single request waiting for its turn and completion."},
     )
     token_chunk_size: int = field(
-        default=64,
+        default=128,
         metadata={"help": "Number of tokens to generate per iteration in token-chunk dynamic batching."},
     )
 
