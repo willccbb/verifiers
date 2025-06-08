@@ -28,7 +28,7 @@ class Environment(ABC):
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
                  sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = 32,
+                 max_concurrent: int = 128,
                  message_type: Literal['chat', 'completion'] = 'chat',
                  **kwargs: Any):
         self.client = client
@@ -229,7 +229,7 @@ class Environment(ABC):
                        prompts: List[str | List[Dict[str, str]]],
                        answers: List[str],
                        sampling_args: Dict[str, Any] = {},
-                       max_concurrent: int = 32,
+                       max_concurrent: int = 128,
                        **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
