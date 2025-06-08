@@ -9,7 +9,7 @@ from qwen_vl_utils import smart_resize
 # install qwen stuff
 uv pip install qwen-vl-utils
 # inference
-CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct'
+CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --max-model-len 64000
 # train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
@@ -26,7 +26,7 @@ NOTES:
 def preprocess_docvqa(x):
     return {
         "question": x["question"],
-        "images": [x["image"].resize(smart_resize(480, 640))],
+        "images": [x["image"].resize(smart_resize(768, 1024))], # XGA
         "answer": x["answers"][0],
     }
 
@@ -98,6 +98,7 @@ run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.log_completions = True
+training_args.num_train_epochs = 2
 
 trainer = vf.GRPOTrainer(
     model=model,
