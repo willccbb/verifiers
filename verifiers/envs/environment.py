@@ -111,12 +111,18 @@ class Environment(ABC):
         # Extract format_prompt as a standalone function to avoid capturing self
         def format_prompt_fn(prompt: str, images: list | None) -> List[Dict[str, Any]]:
             messages = []
-            if system_prompt:
-                messages.append({'role': 'system', 'content': [{"type": "text", "text": system_prompt}]})
-            if few_shot:
-                messages.extend(few_shot)
-            content = [{"type": "text", "text": prompt}]
-            if images is not None:
+            if images is None:
+                if system_prompt:
+                    messages.append({'role': 'system', 'content': system_prompt})
+                if few_shot:
+                    messages.extend(few_shot)
+                messages.append({'role': 'user', 'content': prompt})
+            else:
+                if system_prompt:
+                    messages.append({'role': 'system', 'content': [{"type": "text", "text": system_prompt}]})
+                if few_shot:
+                    messages.extend(few_shot)
+                content = [{"type": "text", "text": prompt}]
                 for img in images:
                     content.append(
                         {
@@ -124,7 +130,7 @@ class Environment(ABC):
                             "image_url": {"url": _pil_to_data_url(img)},
                         }
                     )
-            messages.append({"role": "user", "content": content})
+                messages.append({"role": "user", "content": content})
             return messages
 
         if answer_key == "answer":
