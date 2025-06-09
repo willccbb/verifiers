@@ -49,10 +49,6 @@ all = [
     "textarena",
     "nltk"
 ]
-fa = [
-    "flash-attn"
-]
-
 
 docs = [
     "sphinx",
@@ -71,9 +67,6 @@ vf-vllm = "verifiers.inference.vllm_server:cli_main"
 
 [tool.setuptools]
 packages = ["verifiers"]
-
-[tool.uv]
-no-build-isolation-package = ["flash-attn"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
