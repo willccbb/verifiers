@@ -13,7 +13,6 @@ CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --ma
 # train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
-    - check liger kernel support
     - check completions format, not just chat
     - fix wandb log
     - transformers changed weight keys. pinned for now, but should update:
@@ -77,7 +76,7 @@ def correctness_reward_func(completion: list[dict[str, str]], **kwargs) -> float
     if msgs_scores == []:
         return 0.0
     else:
-        return sum(msgs_scores) / len(msgs_scores)
+        return (sum(msgs_scores) / len(msgs_scores) / 2.0)
 
 
 rubric = vf.Rubric(
@@ -92,7 +91,7 @@ vf_env = vf.SingleTurnEnv(
 )
 
 model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
-model, processor = vf.get_model_and_processor(model_name, use_liger=False)
+model, processor = vf.get_model_and_processor(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
