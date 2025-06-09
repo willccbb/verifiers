@@ -14,12 +14,11 @@ CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --ma
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 TODO:
     - check liger kernel support
-    - check that generic_model_loader didn't break anything
     - check completions format, not just chat
-    - what happens if dataset is already formatted?
     - fix wandb log
-NOTES:
-    - transformers seems to be having an issue, so it's pinned for now: https://github.com/volcengine/verl/issues/1710
+    - transformers changed weight keys. pinned for now, but should update:
+        - https://github.com/volcengine/verl/issues/1710
+        - https://github.com/huggingface/transformers/pull/38385
 """
 
 
@@ -97,9 +96,8 @@ model, processor = vf.get_model_and_processor(model_name, use_liger=False)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
+training_args.learning_rate = 2e-6
 training_args.max_steps = -1
-training_args.lr_scheduler_type = "cosine"
-training_args.learning_rate = 3e-6
 
 trainer = vf.GRPOTrainer(
     model=model,
