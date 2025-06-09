@@ -106,36 +106,36 @@ class Environment(ABC):
                        system_prompt: str | None = None,
                        few_shot: List[Dict[str, Any]] | None = None,
                        question_key: str = "question",
-                       images_key: str = "images") -> Dataset:
+                       images_key: str = "images",
+                       answer_key: str = "answer") -> Dataset:
         # Extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(batch) -> Dict[str, List[Any]]:
-            batch_size = len(batch[question_key])
-            formatted_prompts = []
-            for i in range(batch_size):
-                messages = []
-                if system_prompt:
-                    messages.append({'role': 'system', 'content': system_prompt})
-                if few_shot:
-                    messages.extend(few_shot)
-                if images_key in batch.keys():
-                    content = [
-                        {"type": "text", "text": batch[question_key][i]}
-                    ]
-                    for img in batch[images_key][i]:
-                        content.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": _pil_to_data_url(img)},
-                            }
-                        ) 
-                else:
-                    content = batch[question_key][i]
-                messages.append({"role": "user", "content": content})
-                formatted_prompts.append(messages)
-            batch["prompt"] = formatted_prompts 
-            return batch 
+        def format_prompt_fn(prompt: str, images: list | None) -> List[Dict[str, Any]]:
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': [{"type": "text", "text": system_prompt}]})
+            if few_shot:
+                messages.extend(few_shot)
+            content = [{"type": "text", "text": prompt}]
+            if images is not None:
+                for img in images:
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": _pil_to_data_url(img)},
+                        }
+                    )
+            messages.append({"role": "user", "content": content})
+            return messages
 
-        return dataset.with_transform(format_prompt_fn)
+        if answer_key == "answer":
+            return dataset.map(lambda x: {
+                "prompt": format_prompt_fn(x[question_key], x.get(images_key)),
+            }, num_proc=self.max_concurrent)
+        else:
+            return dataset.map(lambda x: {
+                "prompt": format_prompt_fn(x[question_key], x.get(images_key)),
+                "answer": x[answer_key]
+            }, num_proc=self.max_concurrent)
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
