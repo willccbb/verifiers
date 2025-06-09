@@ -36,5 +36,6 @@ logs/
 # WIPs
 wip/
 old/
+scripts/
 tests/
 notebooks/
