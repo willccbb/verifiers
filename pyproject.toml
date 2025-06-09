@@ -33,6 +33,10 @@ dependencies = [
     "datasets>=3.6.0",
     "transformers",
     "nest-asyncio>=1.6.0",
+    "aiohttp>=3.9.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.5.0",
 ]
 
 [project.optional-dependencies]
@@ -48,7 +52,13 @@ all = [
     "smolagents>=1.15.0",
     "textarena",
     "nltk",
-    "bleurt-pytorch"
+    "bleurt-pytorch",
+    "tensorflow>=2.13.0"
+]
+
+bleurt = [
+    "bleurt-pytorch",
+    "tensorflow>=2.13.0"
 ]
 
 docs = [
