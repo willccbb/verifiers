@@ -1,4 +1,4 @@
-# Verifiers: Reinforcement Learning with LLMs in Verifiable Environments 🚀
+# Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
 ## Overview
 
@@ -69,7 +69,7 @@ To use the latest `main` branch, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
-uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e ".[all]"
+uv sync --extra all && uv pip install flash-attn --no-build-isolation && uv pip install -e ".[all]"
 ```
 
 For CPU development (API-only, no training), just do:
