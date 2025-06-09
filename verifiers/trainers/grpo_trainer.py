@@ -590,7 +590,7 @@ class GRPOTrainer(Trainer):
             'mask': mask
         }
 
-    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any] | None, List[Any], List[Any]]:
+    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any], List[Any], List[Any]]:
         """
         Gather batch data from all processes.
         
@@ -607,17 +607,14 @@ class GRPOTrainer(Trainer):
         
         # Gather batch data from all processes
         prompts = [x['prompt'] for x in batch]
-        images = [x['images'] for x in batch]
-        images = None if images == [] else images
         answers = [x['answer'] for x in batch]
         tasks = [x.get('task', 'default') for x in batch]
         
         all_prompts = gather_object(prompts)
-        all_images = gather_object(images)
         all_answers = gather_object(answers)
         all_tasks = gather_object(tasks)
          
-        return all_prompts, all_images, all_answers, all_tasks
+        return all_prompts, all_answers, all_tasks
 
     def _prepare_inputs( # type: ignore
         self, inputs: list[dict[str, Any]]
@@ -671,7 +668,7 @@ class GRPOTrainer(Trainer):
                 if self.accelerator.is_main_process:
                     request = BatchRequest(
                         batch_id=batch_id,
-                        env_inputs={'prompt': all_prompts, 'images': all_images, 'answer': all_answers, 'task': all_tasks},
+                        env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
                         max_completion_length=self.max_completion_length,

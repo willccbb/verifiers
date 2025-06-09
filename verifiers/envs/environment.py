@@ -117,18 +117,20 @@ class Environment(ABC):
                     messages.append({'role': 'system', 'content': system_prompt})
                 if few_shot:
                     messages.extend(few_shot)
-                content_blocks = [
-                    {"type": "text", "text": batch[question_key][i]}
-                ]
                 if images_key in batch.keys():
+                    content = [
+                        {"type": "text", "text": batch[question_key][i]}
+                    ]
                     for img in batch[images_key][i]:
-                        content_blocks.append(
+                        content.append(
                             {
                                 "type": "image_url",
                                 "image_url": {"url": _pil_to_data_url(img)},
                             }
                         ) 
-                messages.append({"role": "user", "content": content_blocks})
+                else:
+                    content = batch[question_key][i]
+                messages.append({"role": "user", "content": content})
                 formatted_prompts.append(messages)
             batch["prompt"] = formatted_prompts 
             return batch 
