@@ -1,20 +1,38 @@
 """
-Example usage of BleurtRubric for semantic similarity evaluation.
+Example usage of BleurtEmbedRubric for semantic similarity evaluation.
 
-This example demonstrates how to use BLEURT for text summarization tasks,
-where semantic adequacy is more important than exact string matching.
+This example demonstrates how to use BLEURT via auxiliary API server
+for text summarization tasks, with process isolation for training.
+
+Prerequisites:
+1. Install dependencies: pip install verifiers[bleurt] 
+2. Start BLEURT server: python -m verifiers.servers.bleurt_server
+3. Run this example: python verifiers/examples/bleurt_example.py
+
+The API server approach avoids loading BLEURT models in the training process,
+preventing GPU memory conflicts in multi-GPU training setups.
 """
 
 from datasets import load_dataset
 import verifiers as vf
 
-# Check if BLEURT is available
+# Check if BLEURT API rubric is available
 try:
-    from verifiers.rubrics import BleurtRubric
+    from verifiers.rubrics import BleurtEmbedRubric
     BLEURT_AVAILABLE = True
 except ImportError:
     BLEURT_AVAILABLE = False
-    print("BLEURT not available. Install with: pip install bleurt tensorflow")
+    print("BleurtEmbedRubric not available. Make sure aiohttp is installed.")
+
+
+def check_server_available():
+    """Check if BLEURT server is running."""
+    try:
+        import requests
+        response = requests.get("http://localhost:8001/health", timeout=2)
+        return response.status_code == 200
+    except:
+        return False
 
 
 def main():
@@ -22,6 +40,16 @@ def main():
         return
     
     print("Setting up BLEURT summarization example...")
+    
+    # Check if BLEURT server is running
+    if not check_server_available():
+        print("BLEURT server not available at http://localhost:8001")
+        print("Please start the server first:")
+        print("  python -m verifiers.servers.bleurt_server")
+        print("Then run this example again.")
+        return
+    else:
+        print("BLEURT server is running")
     
     # Load a small dataset for demonstration
     # For real use, consider using cnn_dailymail or similar
@@ -46,19 +74,22 @@ Given an article, write a clear 2-3 sentence summary that captures the main poin
 Respond in the following format:
 {parser.get_format_str()}"""
     
-    # Create BLEURT rubric
-    print("Creating BLEURT rubric...")
-    rubric = BleurtRubric(
-        use_fast_model=True,        # Use distilled model for speed
-        bleurt_weight=0.8,          # Main reward
-        add_format_reward=True,     # Add format compliance
-        format_weight=0.2,          # Format checking weight
+    # Create BLEURT rubric using auxiliary server
+    print("Creating BLEURT API rubric...")
+    rubric = vf.BleurtEmbedRubric(
+        server_host="localhost",
+        server_port=8001,
         parser=parser
     )
     
-    # Alternative: Manual rubric composition
+    # Add format reward if needed
+    if parser and hasattr(parser, 'get_format_reward_func'):
+        rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
+    
+    # Alternative: Manual rubric composition using base Rubric class
+    # bleurt_rubric = vf.BleurtEmbedRubric(server_host="localhost", server_port=8001)
     # rubric = vf.Rubric(funcs=[
-    #     BleurtRubric()._bleurt_reward_func,
+    #     bleurt_rubric._bleurt_embed_func,
     #     parser.get_format_reward_func()
     # ], weights=[0.8, 0.2], parser=parser)
     
@@ -127,6 +158,10 @@ def example_hybrid_usage():
     
     if not BLEURT_AVAILABLE:
         return
+        
+    if not check_server_available():
+        print("BLEURT server required for hybrid example")
+        return
     
     print("\nDemonstrating hybrid reward usage...")
     
@@ -138,14 +173,22 @@ def example_hybrid_usage():
         parsed = parser.parse_field(completion, 'answer')
         return 1.0 if parsed and parsed.strip() == str(answer).strip() else 0.0
     
-    # Combine exact match + BLEURT + format
-    rubric = vf.Rubric(funcs=[
-        exact_match_reward,                              # Exact answer matching
-        BleurtRubric()._bleurt_reward_func,             # Semantic similarity
-        parser.get_format_reward_func()                  # Format compliance
-    ], weights=[0.5, 0.3, 0.2], parser=parser)
+    # Option 1: Use BleurtEmbedRubric directly with additional rewards
+    bleurt_rubric = vf.BleurtEmbedRubric(server_host="localhost", server_port=8001, parser=parser)
+    bleurt_rubric.add_reward_func(exact_match_reward, weight=0.5)
+    bleurt_rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
     
-    print("Hybrid rubric created: 50% exact + 30% BLEURT + 20% format")
+    # Option 2: Manual composition using base Rubric class
+    # bleurt_api_rubric = vf.BleurtEmbedRubric(server_host="localhost", server_port=8001)
+    # rubric = vf.Rubric(funcs=[
+    #     exact_match_reward,                                # Exact answer matching  
+    #     lambda c, a, **kw: asyncio.run(                   # BLEURT via API
+    #         bleurt_api_rubric.batch_embed_score([bleurt_api_rubric._extract_text(c)], [str(a)])
+    #     )[0],
+    #     parser.get_format_reward_func()                    # Format compliance
+    # ], weights=[0.5, 0.3, 0.2], parser=parser)
+    
+    print("Hybrid rubric created: BLEURT + exact match + format rewards")
     
     # Test the rubric
     test_completion = """<reasoning>
