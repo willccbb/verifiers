@@ -1,4 +1,4 @@
-# Verifiers: Reinforcement Learning with LLMs in Verifiable Environments 🚀
+# Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
 
 ## Overview
 
