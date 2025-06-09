@@ -98,7 +98,6 @@ run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.log_completions = True
-training_args.num_train_epochs = 3
 training_args.max_steps = -1
 
 trainer = vf.GRPOTrainer(

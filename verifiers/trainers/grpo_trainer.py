@@ -661,7 +661,7 @@ class GRPOTrainer(Trainer):
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 batch_offset = batch_id - batch_id_to_retrieve
-                all_prompts, all_images, all_answers, all_tasks = self._gather_batch_data(batch_offset)
+                all_prompts, all_answers, all_tasks = self._gather_batch_data(batch_offset)
                 
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
                 # Submit batch (main process only)
