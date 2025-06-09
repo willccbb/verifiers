@@ -590,7 +590,7 @@ class GRPOTrainer(Trainer):
             'mask': mask
         }
 
-    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any], List[Any], List[Any]]:
+    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any], List[Any]]:
         """
         Gather batch data from all processes.
         
