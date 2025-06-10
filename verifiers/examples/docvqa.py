@@ -15,18 +15,43 @@ CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 """
 
 
-def preprocess_docvqa(x):
-    return {
-        "question": x["question"],
-        "images": [x["image"].resize(smart_resize(768, 1024))], # XGA
-        "answer": x["answers"][0],
-    }
+# def preprocess_docvqa(x):
+#     return {
+#         "question": x["question"],
+#         "images": [x["image"].resize(smart_resize(768, 1024))], # XGA
+#         "answer": x["answers"][0],
+#     }
+
+def data_collator(batch: list[dict]) -> list[dict]:
+    processed_samples = []
+    for sample in batch:
+        messages = []
+        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        content_block = []
+        content_block.append({"type": "text", "text": sample["question"]})
+        content_block.append(
+            {
+                "type": "image",
+                "image": sample["image"], # only one image in this ds
+                "resized_height": 768, # XGA resolution
+                "resized_width": 1024,
+            }
+        )
+        messages.append({"role": "user", "content": content_block})
+        processed_images, *_ = process_vision_info(  # process with qwen utils
+            messages.copy()
+        )
+        sample["prompt"] = messages
+        sample["images"] = processed_images
+        sample["answer"] = sample["answers"]
+        processed_samples.append(sample)
+    return processed_samples
 
 
 dataset = load_dataset("lmms-lab/DocVQA", "DocVQA", split="validation")
-dataset = dataset.map(
-    preprocess_docvqa, num_proc=10, remove_columns=dataset.column_names
-)
+# dataset = dataset.map(
+#     preprocess_docvqa, num_proc=10, remove_columns=dataset.column_names
+# )
 
 parser = vf.XMLParser(["think", "answer"], answer_field="answer")
 system_prompt = f"""Answer the questions.
@@ -97,5 +122,6 @@ trainer = vf.GRPOTrainer(
     processing_class=processor,
     env=vf_env,
     args=training_args,
+    data_collator=data_collator,
 )
 trainer.train()

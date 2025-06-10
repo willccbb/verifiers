@@ -14,6 +14,7 @@ from accelerate.utils import broadcast_object_list, gather_object, is_peft_model
 from peft import PeftConfig, get_peft_model
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM
+from transformers.data.data_collator import DataCollator
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -155,6 +156,7 @@ class GRPOTrainer(Trainer):
             callbacks: Optional[list[TrainerCallback]] = None,
             optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
             peft_config: Optional[PeftConfig] = None,
+            data_collator: Optional[DataCollator] = None,
             **kwargs,
     ): 
         self.logger = logging.getLogger(__name__)
@@ -245,12 +247,12 @@ class GRPOTrainer(Trainer):
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
         # dummy data collator
-        def data_collator(features):
+        def default_data_collator(features):
             return features
         super().__init__(
             model=model,
             args=args,
-            data_collator=data_collator,
+            data_collator=data_collator if data_collator is not None else default_data_collator,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             processing_class=processing_class,
@@ -629,6 +631,7 @@ class GRPOTrainer(Trainer):
         """
         # Ensure all processes are synchronized at the start
         self.accelerator.wait_for_everyone()
+        import pdb;pdb.set_trace()
         
         # inputs = list of dicts for all gradient accumulation steps 
         generate_every = self.gradient_accumulation_steps * self.num_iterations
