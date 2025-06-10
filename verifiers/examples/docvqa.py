@@ -95,7 +95,7 @@ model, processor = vf.get_model_and_processor(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
-training_args.learning_rate = 2e-6
+training_args.learning_rate = 3e-6
 training_args.max_steps = -1
 
 trainer = vf.GRPOTrainer(
