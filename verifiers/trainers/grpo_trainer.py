@@ -1050,16 +1050,15 @@ class GRPOTrainer(Trainer):
 
             if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
                 import pandas as pd
-                if list(self._textual_logs["prompt"]) and isinstance(list(self._textual_logs["prompt"])[0], list):
-                    prompt = []
+                # format prompt for logging
+                prompt = []
+                if list(self._textual_logs["prompt"]):
                     for messages in list(self._textual_logs["prompt"]):
                         last_message = messages[-1]
                         content = last_message.get("content", "")
                         if isinstance(content, list):
-                            content = content[0]["text"]
-                        prompt.append([{'role': 'user', 'content': content}]) # format like text-only msgs
-                else:
-                    prompt = list(self._textual_logs["prompt"])
+                            content = content[0]["text"] # extract text only in multimodal case
+                        prompt.append([{'role': 'user', 'content': content}])
                 table = {
                     "step": [str(self.state.global_step)] * len(self._textual_logs["prompt"]),
                     "prompt": prompt,
