@@ -12,12 +12,6 @@ uv pip install qwen-vl-utils
 CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --max-model-len 64000
 # train
 CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
-TODO:
-    - check completions format, not just chat
-    - fix wandb log
-    - transformers changed weight keys. pinned for now, but should update:
-        - https://github.com/volcengine/verl/issues/1710
-        - https://github.com/huggingface/transformers/pull/38385
 """
 
 
