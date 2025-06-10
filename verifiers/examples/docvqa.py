@@ -91,7 +91,7 @@ vf_env = vf.SingleTurnEnv(
 )
 
 model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
-model, processor = vf.get_model_and_processor(model_name)
+model, processor = vf.get_model_and_tokenizer(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)

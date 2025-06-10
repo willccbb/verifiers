@@ -127,7 +127,7 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
     else:
         return generic_model_loader(model_name, **model_kwargs)
     
-def get_processor(model_name: str, padding_side: str = "left") -> Any:
+def get_tokenizer(model_name: str, padding_side: str = "left") -> Any:
     processor = AutoProcessor.from_pretrained(model_name, padding_side=padding_side)
     tokenizer = processor.tokenizer if hasattr(processor, "tokenizer") else processor
     if not hasattr(tokenizer, "chat_template"):
@@ -136,7 +136,7 @@ def get_processor(model_name: str, padding_side: str = "left") -> Any:
                             '-Instruct'. Please provide a tokenizer with the chat_template attribute.")
     return processor
             
-def get_model_and_processor(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
+def get_model_and_tokenizer(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
     model = get_model(model_name, use_liger, model_kwargs)
-    tokenizer = get_processor(model_name)
+    tokenizer = get_tokenizer(model_name)
     return model, tokenizer

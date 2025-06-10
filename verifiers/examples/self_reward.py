@@ -10,6 +10,6 @@ vf_env = vf.SingleTurnEnv(
     system_prompt="You are a helpful assistant.",
     rubric=rubric
 )
-model, tokenizer = vf.get_model_and_processor(model_name)
+model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOTrainer(env=vf_env, model=model, processing_class=tokenizer, args=vf.grpo_defaults(run_name="self_reward"))
 trainer.train()

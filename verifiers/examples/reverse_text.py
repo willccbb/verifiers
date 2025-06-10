@@ -48,7 +48,7 @@ args.eval_strategy = "steps"
 args.eval_steps = 10
 args.max_steps = 100
 
-model, tokenizer = vf.get_model_and_processor(model_name)
+model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,

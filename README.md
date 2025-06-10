@@ -129,7 +129,7 @@ See `verifiers/examples/sft/reverse_text.py` for an example script using TRL's S
 ```python
 # train.py
 
-model, tokenizer = vf.get_model_and_processor(model_name)
+model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
