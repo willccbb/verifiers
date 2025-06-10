@@ -756,7 +756,7 @@ class GRPOTrainer(Trainer):
                 pad_token_id = self.processing_class.pad_token_id
             prompt_ids = pad(prompt_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
-            completion_ids = pad(completion_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
+            completion_ids = pad(completion_ids_list, padding_value=pad_token_id, padding_side='right') # type: ignore
             completion_mask = pad(completion_mask_list, padding_side="left")
             
             # Truncate if needed
