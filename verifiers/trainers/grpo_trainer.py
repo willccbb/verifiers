@@ -757,7 +757,7 @@ class GRPOTrainer(Trainer):
             prompt_ids = pad(prompt_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
             completion_ids = pad(completion_ids_list, padding_value=pad_token_id, padding_side='right') # type: ignore
-            completion_mask = pad(completion_mask_list, padding_side="left")
+            completion_mask = pad(completion_mask_list)
             
             # Truncate if needed
             if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
