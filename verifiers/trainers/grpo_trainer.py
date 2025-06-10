@@ -1057,7 +1057,7 @@ class GRPOTrainer(Trainer):
                         content = last_message.get("content", "")
                         if isinstance(content, list):
                             content = content[0]["text"]
-                        prompt.append(content)
+                        prompt.append([{'role': 'user', 'content': content}]) # format like text-only msgs
                 else:
                     prompt = list(self._textual_logs["prompt"])
                 table = {
