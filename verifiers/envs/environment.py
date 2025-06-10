@@ -26,6 +26,56 @@ def _pil_to_data_url(img: Image.Image, fmt: str | None = None) -> str:
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     return f"data:image/{fmt.lower()};base64,{b64}"
 
+def format_oai_chat_msg(
+    prompts: List[List[Dict[str, Any]]],
+    images: List[List[Image.Image]]
+) -> List[List[Dict[str, Any]]]:
+    """
+    Given:
+      - prompts: a list (for each convo) of lists of message‐dicts,
+                   where a user message's content may be a list of parts,
+                   some with {'type': 'image', 'image': PIL.Image, ...}.
+      - images:  a parallel list (for each convo) of lists of PIL.Image objects.
+
+    Returns:
+      A new list of the same shape, but with every image part replaced by:
+        {'type': 'image_url', 'image_url': DATA_URL}
+    """
+    formatted_conversations: List[List[Dict[str, Any]]] = []
+
+    for conv_prompts, conv_images in zip(prompts, images):
+        img_iter = iter(conv_images)
+        new_conv: List[Dict[str, Any]] = []
+
+        for msg in conv_prompts:
+            role = msg["role"]
+            content = msg["content"]
+
+            # If this message's content is a list of parts (text/image)
+            if isinstance(content, list):
+                new_parts: List[Dict[str, Any]] = []
+                for part in content:
+                    if part.get("type") == "image":
+                        # grab the next PIL.Image from the images list
+                        img = next(img_iter)
+                        data_url = _pil_to_data_url(img)
+                        new_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": data_url}
+                        })
+                    else:
+                        # leave text (or any other part) untouched
+                        new_parts.append(part.copy())
+                new_conv.append({"role": role, "content": new_parts})
+
+            else:
+                # system or assistant messages with string content
+                new_conv.append({"role": role, "content": content})
+
+        formatted_conversations.append(new_conv)
+
+    return formatted_conversations
+
 class Environment(ABC):
     """
     Base class for all environments.
@@ -324,8 +374,12 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
+        if results.get('images') is not None:
+            prompts = format_oai_chat_msg(results['prompt'], results['images'])
+        else:
+            prompts = results['prompt']
         rollouts = self.run_rollouts(
-            prompts=results['prompt'],
+            prompts=prompts,
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
@@ -333,6 +387,7 @@ class Environment(ABC):
             **kwargs
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
+        import pdb;pdb.set_trace()
         results['state'] = [rollout[1] for rollout in rollouts]
         if 'task' not in results:
             results['task'] = ['default'] * len(results['prompt'])

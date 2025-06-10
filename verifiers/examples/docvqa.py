@@ -3,7 +3,7 @@ import re
 from datasets import load_dataset
 
 import verifiers as vf
-from qwen_vl_utils import smart_resize
+from qwen_vl_utils import process_vision_info
 
 """
 # install qwen stuff
@@ -26,7 +26,7 @@ def data_collator(batch: list[dict]) -> list[dict]:
     processed_samples = []
     for sample in batch:
         messages = []
-        messages.append({"role": "system", "content": SYSTEM_PROMPT})
+        messages.append({"role": "system", "content": system_prompt})
         content_block = []
         content_block.append({"type": "text", "text": sample["question"]})
         content_block.append(
