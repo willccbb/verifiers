@@ -1,3 +1,4 @@
+import importlib
 from importlib.util import find_spec
 from importlib import import_module
 from typing import Dict, Any, Union, Tuple, Callable
@@ -106,19 +107,21 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
         )
     if is_liger_available() and use_liger:
         print("Using Liger kernel")
-        from liger_kernel.transformers import AutoLigerKernelForCausalLM, apply_liger_kernel_to_qwen2_5_vl # type: ignore
-        patch_mapping = {
-            "Qwen2_5_VLConfig": apply_liger_kernel_to_qwen2_5_vl
-        }
         try:
+            from liger_kernel.transformers import AutoLigerKernelForCausalLM  # type: ignore
             model = AutoLigerKernelForCausalLM.from_pretrained(model_name, **model_kwargs)
             return model
         except ValueError: # try monkey patch
             print(f"Model {model_name} is not supported with AutoLigerKernelForCausalLM. Attempting monkey patch...")
-            config_name = AutoConfig.from_pretrained(model_name, trust_remote_code=True).__class__.__name__
-            if config_name in patch_mapping.keys():
-                patch_mapping[config_name]()
-                return generic_model_loader(model_name, **model_kwargs)
+            model_type = AutoConfig.from_pretrained(model_name, trust_remote_code=True).model_type
+            patch_func_name = f"apply_liger_kernel_to_{model_type}"
+            ligermod  = importlib.import_module("liger_kernel.transformers")
+            patch_func  = getattr(ligermod, patch_func_name, None)
+            if callable(patch_func):
+                patch_func()
+                model = generic_model_loader(model_name, **model_kwargs)
+                print(f"Applied Liger-Kernel patch to {model_name}")
+                return model
             else:
                 raise ValueError(f"Model {model_name} is not supported with Liger-Kernel in verifiers")
     else:
