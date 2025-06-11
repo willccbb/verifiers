@@ -80,7 +80,6 @@ def print_prompt_completions_sample(
                 last_message = prompt[-1]
                 content = last_message.get("content", "")
                 if isinstance(content, list): # multimodal case
-                    # content = content[-1]["text"]
                     content = content[0]["text"]
                 formatted_prompt = Text(content, style="bright_yellow")
             else:

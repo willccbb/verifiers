@@ -15,13 +15,6 @@ CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
 """
 
 
-# def preprocess_docvqa(x):
-#     return {
-#         "question": x["question"],
-#         "images": [x["image"].resize(smart_resize(768, 1024))], # XGA
-#         "answer": x["answers"][0],
-#     }
-
 def data_collator(batch: list[dict]) -> list[dict]:
     processed_samples = []
     for sample in batch:
@@ -37,7 +30,6 @@ def data_collator(batch: list[dict]) -> list[dict]:
                 "resized_width": 640,
             }
         )
-        # content_block.append({"type": "text", "text": sample["question"]})
         messages.append({"role": "user", "content": content_block})
         processed_images, *_ = process_vision_info(  # process with qwen utils
             messages.copy()
@@ -50,9 +42,6 @@ def data_collator(batch: list[dict]) -> list[dict]:
 
 
 dataset = load_dataset("lmms-lab/DocVQA", "DocVQA", split="validation")
-# dataset = dataset.map(
-#     preprocess_docvqa, num_proc=10, remove_columns=dataset.column_names
-# )
 
 parser = vf.XMLParser(["think", "answer"], answer_field="answer")
 system_prompt = f"""Answer the questions.
@@ -115,7 +104,6 @@ model, processor = vf.get_model_and_tokenizer(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
-training_args.learning_rate = 3e-6
 training_args.max_steps = -1
 
 trainer = vf.GRPOTrainer(

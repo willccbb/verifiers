@@ -1126,7 +1126,6 @@ class GRPOTrainer(Trainer):
                         last_message = messages[-1]
                         content = last_message.get("content", "")
                         if isinstance(content, list):
-                            # content = content[-1]["text"] # extract text only in multimodal case
                             content = content[0]["text"] # extract text only in multimodal case
                         prompt.append([{'role': 'user', 'content': content}])
                 table = {
