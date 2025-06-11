@@ -116,6 +116,54 @@ def shuffle_tensor_dict(tensor_dict: dict[str, Optional[torch.Tensor]]) -> dict[
     permutation = torch.randperm(batch_size)
     return {key: tensor[permutation] if tensor is not None else None for key, tensor in tensor_dict.items()}
 
+def shuffle_data_dict(data_dict: dict[str, Any]) -> dict[str, Any]:
+    """
+    Shuffles a dictionary of tensors or lists along the first dimension in unison.
+    """
+    first_item = next(item for item in data_dict.values() if item is not None)
+    batch_size = len(first_item)
+    permutation = torch.randperm(batch_size)
+
+    shuffled_dict = {}
+    for key, value in data_dict.items():
+        if value is None:
+            shuffled_dict[key] = None
+        elif isinstance(value, torch.Tensor):
+            shuffled_dict[key] = value[permutation]
+        elif isinstance(value, list):
+            shuffled_dict[key] = [value[i] for i in permutation]
+        else:
+            raise TypeError(f"Unsupported type for shuffling: {type(value)}")
+    return shuffled_dict
+
+def split_data_dict(
+    data_dict: dict[str, Any], num_chunks: int
+) -> list[dict[str, Any]]:
+    """
+    Splits a dictionary of tensors or lists along the first dimension into `num_chunks` equal parts.
+    """
+    first_item = next(item for item in data_dict.values() if item is not None)
+    # Ensure chunk_size is an integer
+    chunk_size = len(first_item) // num_chunks
+    if len(first_item) % num_chunks != 0:
+        logging.warning(
+            f"The total number of samples ({len(first_item)}) is not divisible by the number of chunks ({num_chunks}). "
+            f"The last {len(first_item) % num_chunks} samples will be dropped."
+        )
+
+    chunked_list = []
+    for i in range(num_chunks):
+        chunk = {}
+        start_idx = i * chunk_size
+        end_idx = (i + 1) * chunk_size
+        for key, value in data_dict.items():
+            if value is None:
+                chunk[key] = None
+            else:
+                chunk[key] = value[start_idx:end_idx]
+        chunked_list.append(chunk)
+    return chunked_list
+
 def nanmin(tensor: torch.Tensor) -> torch.Tensor:
     """
     Compute the minimum value of a tensor, ignoring NaNs. This function only supports 1D tensors.
@@ -719,6 +767,7 @@ class GRPOTrainer(Trainer):
                     'all_reward_dict': batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']},
                     'completions': batch_result.completions if hasattr(batch_result, 'completions') else [],
                     'prompts': batch_result.prompts if hasattr(batch_result, 'prompts') else [],
+                    'images': batch_result.images if hasattr(batch_result, 'images') else [],
                 }
             else:
                 broadcast_data = None
@@ -774,6 +823,8 @@ class GRPOTrainer(Trainer):
             
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
+
+            images = broadcast_data['images'][process_slice]
             
             # Log metrics on main process only
             if self.accelerator.is_main_process:
@@ -797,7 +848,7 @@ class GRPOTrainer(Trainer):
                     all_completion_ids=broadcast_data['completion_ids'], 
                     all_prompt_mask=broadcast_data['prompt_mask']
                 )
-            
+
             # Concatenate all data for shuffling
             full_batch = {
                 "prompt_ids": prompt_ids,
@@ -806,11 +857,12 @@ class GRPOTrainer(Trainer):
                 "completion_mask": completion_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
+                "images": images,
             }
             
             # Shuffle and split for gradient accumulation
-            full_batch = shuffle_tensor_dict(full_batch)
-            self._buffered_inputs = split_tensor_dict(full_batch, self.gradient_accumulation_steps)
+            full_batch = shuffle_data_dict(full_batch)
+            self._buffered_inputs = split_data_dict(full_batch, self.gradient_accumulation_steps)
             self.accelerator.wait_for_everyone()
         # Return appropriate slice from buffer
         result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
@@ -847,17 +899,30 @@ class GRPOTrainer(Trainer):
         # Compute the per-token log probabilities for the model
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
+        images = inputs.get('images')
+        model_kwargs = {}
+        if images is not None:
+            prompt_texts = self.processing_class.batch_decode(prompt_ids)
+            prompt_inputs = self.processing_class(
+                text=prompt_texts,
+                images=images,
+                return_tensors="pt",
+                padding=True,
+                padding_side="left",
+                add_special_tokens=False,
+            ).to(self.accelerator.device)
+            prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"] # TODO: remove this. these should come from previous processing
+            model_kwarg_keys = (
+                inspect.signature(model.forward).parameters.keys()
+                if not hasattr(model, "get_base_model")
+                else inspect.signature(
+                    model.get_base_model().forward
+                ).parameters.keys()
+            )
+            model_kwargs = {k: prompt_inputs[k] for k in model_kwarg_keys if k in prompt_inputs and k not in ["input_ids", "attention_mask"]}
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-        model_kwarg_keys = (
-            inspect.signature(model.forward).parameters.keys()
-            if not hasattr(model, "get_base_model")
-            else inspect.signature(
-                model.get_base_model().forward
-            ).parameters.keys()
-        )
-        model_kwargs = {k: inputs[k] for k in model_kwarg_keys if k in inputs}
         per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep, **model_kwargs)
 
         # Compute the loss
@@ -1061,6 +1126,7 @@ class GRPOTrainer(Trainer):
                         last_message = messages[-1]
                         content = last_message.get("content", "")
                         if isinstance(content, list):
+                            # content = content[-1]["text"] # extract text only in multimodal case
                             content = content[0]["text"] # extract text only in multimodal case
                         prompt.append([{'role': 'user', 'content': content}])
                 table = {

@@ -33,10 +33,11 @@ def data_collator(batch: list[dict]) -> list[dict]:
             {
                 "type": "image",
                 "image": sample["image"], # only one image in this ds
-                "resized_height": 768, # XGA resolution
-                "resized_width": 1024,
+                "resized_height": 480, # VGA resolution
+                "resized_width": 640,
             }
         )
+        # content_block.append({"type": "text", "text": sample["question"]})
         messages.append({"role": "user", "content": content_block})
         processed_images, *_ = process_vision_info(  # process with qwen utils
             messages.copy()

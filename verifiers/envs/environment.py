@@ -387,7 +387,6 @@ class Environment(ABC):
             **kwargs
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
-        import pdb;pdb.set_trace()
         results['state'] = [rollout[1] for rollout in rollouts]
         if 'task' not in results:
             results['task'] = ['default'] * len(results['prompt'])
