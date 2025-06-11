@@ -6,7 +6,7 @@ from typing import List, Dict, Callable, Any
 
 from datasets import Dataset, load_dataset, concatenate_datasets # type: ignore
 
-def extract_boxed_answer(text: str) -> str | None:
+def extract_boxed_answer(text: str) -> str:
     def find_matching_brace(s: str, start: int) -> int:
         count = 1
         i = start
@@ -34,9 +34,9 @@ def extract_boxed_answer(text: str) -> str | None:
 def strip_non_numeric(text: str) -> str:
     return "".join(c for c in text if c.isdigit() or c == '.')
 
-def extract_hash_answer(text: str) -> str | None:
+def extract_hash_answer(text: str) -> str:
     if "####" not in text:
-        return None
+        return text
     return text.split("####")[1].strip()
 
 def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]: 

@@ -1,4 +1,5 @@
 import verifiers as vf
+from verifiers.envs.doublecheck_env import DoubleCheckEnv   
 from verifiers.utils import load_example_dataset
 
 SIMPLE_PROMPT = """\
@@ -7,7 +8,7 @@ You are a helpful assistant. In each turn, think step-by-step inside <think>...<
 
 model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 dataset = load_example_dataset("math", "train", n=1000)
-vf_env = vf.DoubleCheckEnv(
+vf_env = DoubleCheckEnv(
     dataset=dataset,
     system_prompt=SIMPLE_PROMPT,
     few_shot=[]
