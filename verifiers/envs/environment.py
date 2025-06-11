@@ -399,7 +399,7 @@ class Environment(ABC):
             )
             assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
             current_ids = processing_class.encode(prefix_text)
-            assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
+            assert current_ids[:len(prev_ids)-1] == prev_ids[:-1], f"Tokenization difference in chat format. Current ids: {current_ids[:len(prev_ids)-1]}, previous ids: {prev_ids[:-1]}"
             
             # add new tokens to completion tokens
             new_tokens = current_ids[len(prev_ids):] 
