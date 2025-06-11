@@ -240,6 +240,7 @@ class AsyncBatchGenerator:
         # Process results
         processed_results = self.env.process_env_results(
             env_results['prompt'],
+            env_results['images'],
             env_results['completion'],
             env_results['state'],
             env_results['reward'],
@@ -248,12 +249,11 @@ class AsyncBatchGenerator:
             max_completion_length=request.max_completion_length,
             mask_truncated_completions=request.mask_truncated_completions
         )
-        
+
         return BatchResult(
             batch_id=request.batch_id,
             processed_results=processed_results,
             all_reward_dict=all_reward_dict,
             completions=env_results['completion'],
             prompts=env_results['prompt'],
-            images=env_results['images'],
         ) 

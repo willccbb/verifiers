@@ -520,15 +520,24 @@ class GRPOTrainer(Trainer):
     def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None, **model_kwargs) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
         all_logps = []
-        if _accepts_logits_to_keep(model):
-            model_kwargs["logits_to_keep"] = logits_to_keep + 1
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
-
+            model_kwargs_batch = {}
+            for key, value in model_kwargs.items():
+                if isinstance(value, list):
+                    # 1. Slice the list to get the tensors for this micro-batch
+                    sub_list = value[i : i + batch_size]
+                    # 2. Batch the tensors in the sub-list together
+                    model_kwargs_batch[key] = torch.cat(sub_list, dim=0).to(self.accelerator.device)
+                else:
+                    # Handle non-list arguments (like the 'logits_to_keep' we added)
+                    model_kwargs_batch[key] = value
+            if _accepts_logits_to_keep(model):
+                model_kwargs_batch["logits_to_keep"] = logits_to_keep + 1
             # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
             logits = model(
-                input_ids=input_ids_batch, attention_mask=attention_mask_batch, **model_kwargs
+                input_ids=input_ids_batch, attention_mask=attention_mask_batch, **model_kwargs_batch
             ).logits
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
             input_ids_batch = input_ids_batch[:, -logits_to_keep:]
@@ -764,10 +773,10 @@ class GRPOTrainer(Trainer):
                     'completion_ids': processed_results['completion_ids'],
                     'completion_mask': processed_results['completion_mask'],
                     'rewards': processed_results['rewards'],
+                    'remaining_inputs': processed_results['remaining_inputs'],
                     'all_reward_dict': batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']},
                     'completions': batch_result.completions if hasattr(batch_result, 'completions') else [],
                     'prompts': batch_result.prompts if hasattr(batch_result, 'prompts') else [],
-                    'images': batch_result.images if hasattr(batch_result, 'images') else [],
                 }
             else:
                 broadcast_data = None
@@ -824,8 +833,9 @@ class GRPOTrainer(Trainer):
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
 
-            images = broadcast_data['images'][process_slice]
-            
+            # slice remaining inputs
+            remaining_inputs = broadcast_data['remaining_inputs'][process_slice]
+
             # Log metrics on main process only
             if self.accelerator.is_main_process:
                 self._log_reward_metrics_primary(
@@ -857,7 +867,7 @@ class GRPOTrainer(Trainer):
                 "completion_mask": completion_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
-                "images": images,
+                "remaining_inputs": remaining_inputs,
             }
             
             # Shuffle and split for gradient accumulation
@@ -899,31 +909,12 @@ class GRPOTrainer(Trainer):
         # Compute the per-token log probabilities for the model
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
-        images = inputs.get('images')
-        model_kwargs = {}
-        if images is not None:
-            prompt_texts = self.processing_class.batch_decode(prompt_ids)
-            prompt_inputs = self.processing_class(
-                text=prompt_texts,
-                images=images,
-                return_tensors="pt",
-                padding=True,
-                padding_side="left",
-                add_special_tokens=False,
-            ).to(self.accelerator.device)
-            prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"] # TODO: remove this. these should come from previous processing
-            model_kwarg_keys = (
-                inspect.signature(model.forward).parameters.keys()
-                if not hasattr(model, "get_base_model")
-                else inspect.signature(
-                    model.get_base_model().forward
-                ).parameters.keys()
-            )
-            model_kwargs = {k: prompt_inputs[k] for k in model_kwarg_keys if k in prompt_inputs and k not in ["input_ids", "attention_mask"]}
+        model_kwargs = inputs["remaining_inputs"]
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep, **model_kwargs)
+        model_kwargs = {key: [d[key] for d in model_kwargs] for key in model_kwargs[0].keys()}
+        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep, batch_size = 1 if model_kwargs != {} else None, **model_kwargs)
 
         # Compute the loss
         advantages = inputs["advantages"]
