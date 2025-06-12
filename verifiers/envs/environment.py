@@ -30,17 +30,6 @@ def format_oai_chat_msg(
     prompts: List[List[Dict[str, Any]]],
     images: List[List[Image.Image]]
 ) -> List[List[Dict[str, Any]]]:
-    """
-    Given:
-      - prompts: a list (for each convo) of lists of message‐dicts,
-                   where a user message's content may be a list of parts,
-                   some with {'type': 'image', 'image': PIL.Image, ...}.
-      - images:  a parallel list (for each convo) of lists of PIL.Image objects.
-
-    Returns:
-      A new list of the same shape, but with every image part replaced by:
-        {'type': 'image_url', 'image_url': DATA_URL}
-    """
     formatted_conversations: List[List[Dict[str, Any]]] = []
 
     for conv_prompts, conv_images in zip(prompts, images):
@@ -51,12 +40,10 @@ def format_oai_chat_msg(
             role = msg["role"]
             content = msg["content"]
 
-            # If this message's content is a list of parts (text/image)
             if isinstance(content, list):
                 new_parts: List[Dict[str, Any]] = []
                 for part in content:
                     if part.get("type") == "image":
-                        # grab the next PIL.Image from the images list
                         img = next(img_iter)
                         data_url = _pil_to_data_url(img)
                         new_parts.append({
@@ -64,12 +51,10 @@ def format_oai_chat_msg(
                             "image_url": {"url": data_url}
                         })
                     else:
-                        # leave text (or any other part) untouched
                         new_parts.append(part.copy())
                 new_conv.append({"role": role, "content": new_parts})
 
             else:
-                # system or assistant messages with string content
                 new_conv.append({"role": role, "content": content})
 
         formatted_conversations.append(new_conv)
@@ -426,9 +411,7 @@ class Environment(ABC):
         completion_mask = []
         remaining_inputs = {}
         if images:
-           # Tokenize the prompt with images to establish the initial state.
             prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
-            # The multimodal processor call requires both text and images.
             inputs = processing_class(text=prompt_text, images=images, return_tensors="pt")
             remaining_inputs = {
                 k: v
@@ -439,25 +422,18 @@ class Environment(ABC):
             prompt_ids = prev_ids
             prompt_mask = [1] * len(prompt_ids)
 
-            # Process each completion message incrementally.
             for i, msg in enumerate(completion):
                 conversation_prefix = prompt + completion[:i+1]
-                
-                # Get the full text representation of the conversation up to this point.
                 prefix_text = processing_class.apply_chat_template(
                     conversation_prefix, 
                     tokenize=False, 
                     add_generation_prompt=False,
                 )
-                
-                # Tokenize the new prefix, passing the images each time.
                 current_ids = processing_class(text=prefix_text, images=images, return_tensors="pt").input_ids[0].tolist()
                 assert current_ids[:len(prev_ids)] == prev_ids, "Tokenization difference in chat format."
-                
                 new_tokens = current_ids[len(prev_ids):]
                 completion_ids.extend(new_tokens)
 
-                # Create mask for the new tokens.
                 if msg["role"] == "assistant":
                     msg_mask = [1] * len(new_tokens)
                 elif msg["role"] != "assistant" and mask_env_responses:
