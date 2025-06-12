@@ -43,6 +43,7 @@ class RubricGroup(Rubric):
                        answers: List[Any],
                        states: List[Dict[str, Any]],
                        tasks: List[str],
+                       infos: List[Dict[str, Any]] = [],
                        max_concurrent: int = 32,
                        **kwargs) -> Dict[str, List[float]]:
         """
