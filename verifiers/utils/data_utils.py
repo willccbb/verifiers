@@ -45,7 +45,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["problem"],
                 "answer": str(int(x["answer"])),
-                "task": "math"
             }
         return preprocess_aime2024
     elif name == "aime2025":
@@ -53,7 +52,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["question"],
                 "answer": strip_non_numeric(x["answer"]),
-                "task": "math"
             }
         return preprocess_aime2025
     elif name == "amc2023":
@@ -61,7 +59,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["problem"],
                 "answer": x["answer"],
-                "task": "math"
             }
         return preprocess_amc2023
     elif name in ["gpqa_diamond", "gpqa_main"]:
@@ -85,7 +82,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": question, 
                 "answer": itos[0],
-                "task": "mc"
             }
         return preprocess_gpqa
     elif name == "gsm8k":
@@ -93,7 +89,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["question"],
                 "answer": extract_hash_answer(x["answer"]),
-                "task": "math"
             }
         return preprocess_gsm8k
     elif name == "math":
@@ -101,7 +96,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["problem"],
                 "answer": extract_boxed_answer(x["solution"]),
-                "task": "math"
             }
         return preprocess_math
     elif name == "math500":
@@ -109,7 +103,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["problem"],
                 "answer": x["answer"],
-                "task": "math"
             }
         return preprocess_math500
     elif name == "mmlu":
@@ -123,7 +116,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": question,
                 "temp_answer": mmlu_map[answer],
-                "task": "mc"
             }
         return preprocess_mmlu
     elif name == "mmlu_pro":
@@ -137,7 +129,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": question,
                 "answer": answer,
-                "task": "mc"
             }
         return preprocess_mmlu
     elif name == "openbookqa":
@@ -153,7 +144,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": question,
                 "answer": x["answerKey"],
-                "task": "mc"
             }
         return preprocess_openbookqa
     elif name in ["openrs", "openrs_easy", "openrs_hard"]:
@@ -161,7 +151,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["problem"],
                 "answer": x["answer"],
-                "task": "math"
             }
         return preprocess_openrs
     elif name == "prime_code":
@@ -169,7 +158,6 @@ def get_preprocess_fn(name: str) -> Callable[[Dict], Dict]:
             return {
                 "question": x["prompt"],
                 "answer": x["verification_info"],
-                "task": "code"
             }
         return preprocess_prime_code
     else:

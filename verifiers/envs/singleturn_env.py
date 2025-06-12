@@ -20,6 +20,8 @@ class SingleTurnEnv(Environment):
                 model: str,
                 prompt: Union[str, List[Dict[str, Any]]],
                 answer: str,
+                task: str = "default",
+                info: Dict[str, Any] = {},
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[Union[str, List[Dict[str, str]]], Dict[str, Any]]:
         """

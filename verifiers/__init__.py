@@ -20,6 +20,7 @@ from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
 from .envs.singleturn_env import SingleTurnEnv
 from .envs.tool_env import ToolEnv
+from .envs.env_group import EnvGroup
 
 from .trainers import GRPOTrainer, GRPOConfig, grpo_defaults, lora_defaults
 
@@ -39,6 +40,7 @@ __all__ = [
     "MultiTurnEnv",
     "SingleTurnEnv",
     "ToolEnv",
+    "EnvGroup",
     "GRPOTrainer",
     "GRPOConfig",
     "get_model",

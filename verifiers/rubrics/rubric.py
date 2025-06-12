@@ -58,7 +58,8 @@ class Rubric:
                           completion: Union[str, List[Dict[str, Any]]],
                           answer: Any,
                           state: Dict[str, Any],
-                          task: str | None,
+                          task: str = "default",
+                          info: dict = {},
                           **kwargs) -> float:
         """
         Invoke `func` with only the required arguments.
@@ -77,6 +78,7 @@ class Rubric:
             answer=answer,
             state=state,
             task=task,
+            info=info,
         )
         ans = 0.0
         merged = {**common, **kwargs}
@@ -100,7 +102,8 @@ class Rubric:
                             completion: Union[str, List[Dict[str, Any]]],
                             answer: Any,
                             state: Dict[str, Any],
-                            task: str | None = None,
+                            task: str = "default",
+                            info: dict = {},
                             **kwargs) -> Dict[str, float]:
         """
         Evaluate all reward functions asynchronously for a single rollout.
@@ -114,6 +117,7 @@ class Rubric:
                 answer,
                 state,
                 task=task,
+                info=info,
                 **kwargs
             )
             for func in self.get_reward_funcs()
@@ -123,19 +127,19 @@ class Rubric:
         rewards['reward'] = sum([reward * weight for reward, weight in zip(reward_scores, self.get_reward_weights())])
         return rewards
 
-    async def _score_single(self, semaphore, *pcast, **kw):
+    async def _score_single(self, semaphore, *pcasti, **kw):
         async with semaphore:
-            return await self.score_rollout(*pcast, **kw)
+            return await self.score_rollout(*pcasti, **kw)
 
     async def _score_all(
-            self, prompts, completions, answers, states, tasks,
+            self, prompts, completions, answers, states, tasks, infos,
             max_concurrent: int = 128,
             **kwargs) -> Dict[str, List[float]]:
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
         rollout_tasks = [
-            self._score_single(semaphore, *pcast, **kwargs)
-            for pcast in zip(prompts, completions, answers, states, tasks)
+            self._score_single(semaphore, *pcasti, **kwargs)
+            for pcasti in zip(prompts, completions, answers, states, tasks, infos)
         ]
         rewards = await tqdm_asyncio.gather(
             *rollout_tasks,
@@ -150,6 +154,7 @@ class Rubric:
                        answers: List[Any],
                        states: List[Dict[str, Any]],
                        tasks: List[str],
+                       infos: List[Dict[str, Any]] = [],
                        max_concurrent: int = 128,
                        **kwargs) -> Dict[str, List[float]]:
         """
@@ -170,7 +175,7 @@ class Rubric:
                 loop.set_default_executor(executor)
         
         coro = self._score_all(
-            prompts, completions, answers, states, tasks,
+            prompts, completions, answers, states, tasks, infos,
             max_concurrent=max_concurrent,
             **kwargs
         )

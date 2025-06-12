@@ -91,21 +91,11 @@ class ToolRubric(Rubric):
         
         return passed / total_cases if total_cases else 0.0
  
-    def correct_answer_reward_func(self, completion, answer, task, **kwargs) -> float:
+    def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
         """Reward function that checks if the final answer matches the expected answer."""
-        if task == "mc":
-            response = str(self.parser.parse_answer(completion))
-            reward = 1.0 if response == answer.strip() else 0.0
-        elif task == "math":
-            response = str(self.parser.parse_answer(completion))
-            reward = 1.0 if answer == response else 0.0
-        elif task == "code":
-            response = str(self.parser.parse_answer(completion))
-            reward = self.evaluate_code(response, answer, **kwargs)
-        else:
-            reward = 0.0
-        return reward
-     
+        response = str(self.parser.parse_answer(completion))
+        return 1.0 if answer == response else 0.0
+ 
     def tool_execution_reward_func(self, completion: List[Dict[str, str]], **kwargs) -> float:
         """
         Reward function that checks tool execution success.
