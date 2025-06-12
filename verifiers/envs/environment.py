@@ -26,6 +26,41 @@ def _pil_to_data_url(img: Image.Image, fmt: str | None = None) -> str:
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     return f"data:image/{fmt.lower()};base64,{b64}"
 
+def format_oai_chat_msg(
+    prompts: List[List[Dict[str, Any]]],
+    images: List[List[Image.Image]]
+) -> List[List[Dict[str, Any]]]:
+    formatted_conversations: List[List[Dict[str, Any]]] = []
+
+    for conv_prompts, conv_images in zip(prompts, images):
+        img_iter = iter(conv_images)
+        new_conv: List[Dict[str, Any]] = []
+
+        for msg in conv_prompts:
+            role = msg["role"]
+            content = msg["content"]
+
+            if isinstance(content, list):
+                new_parts: List[Dict[str, Any]] = []
+                for part in content:
+                    if part.get("type") == "image":
+                        img = next(img_iter)
+                        data_url = _pil_to_data_url(img)
+                        new_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": data_url}
+                        })
+                    else:
+                        new_parts.append(part.copy())
+                new_conv.append({"role": role, "content": new_parts})
+
+            else:
+                new_conv.append({"role": role, "content": content})
+
+        formatted_conversations.append(new_conv)
+
+    return formatted_conversations
+
 class Environment(ABC):
     """
     Base class for all environments.
@@ -324,8 +359,12 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
+        if results.get('images') is not None:
+            prompts = format_oai_chat_msg(results['prompt'], results['images'])
+        else:
+            prompts = results['prompt']
         rollouts = self.run_rollouts(
-            prompts=results['prompt'],
+            prompts=prompts,
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
@@ -352,6 +391,7 @@ class Environment(ABC):
     def process_chat_format(
         self,
         prompt: List[Dict[str, str]],
+        images: Optional[List[List[Any]]],
         completion: List[Dict[str, str]],
         processing_class: PreTrainedTokenizerBase,
         mask_env_responses: bool = False
@@ -367,59 +407,96 @@ class Environment(ABC):
         Returns:
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
-        # tokenize just the prompt
-        prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
-        assert isinstance(prompt_text, str)
-        if hasattr(processing_class, "tokenizer"):
-            encode = processing_class.tokenizer.encode
-        else:
-            encode = processing_class.encode
-        prompt_ids = encode(prompt_text)
-        prompt_mask = [1] * len(prompt_ids)
-        
-        # track completion tokens and masks by processing incrementally
         completion_ids = []
         completion_mask = []
-        
-        # previous tokenization (starts with just prompt)
-        prev_ids = prompt_ids
-        
-        # process each completion message incrementally
-        for i, msg in enumerate(completion):
-            # create conversation prefix: prompt + completion[:i+1]
-            conversation_prefix = prompt + completion[:i+1]
-            
-            # tokenize the full prefix
-            prefix_text = processing_class.apply_chat_template(
-                conversation_prefix, 
-                tokenize=False, 
-                add_generation_prompt=False,
-            )
-            assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
-            current_ids = encode(prefix_text)
-            assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
-            
-            # add new tokens to completion tokens
-            new_tokens = current_ids[len(prev_ids):] 
-            assert len(new_tokens) > 0, f"No new tokens in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
-            completion_ids.extend(new_tokens)
+        remaining_inputs = {}
+        if images:
+            prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+            inputs = processing_class(text=prompt_text, images=images, return_tensors="pt")
+            remaining_inputs = {
+                k: v
+                for k, v in inputs.items()
+                if k not in ["input_ids", "attention_mask"]
+            }
+            prev_ids = inputs.input_ids[0].tolist()
+            prompt_ids = prev_ids
+            prompt_mask = [1] * len(prompt_ids)
 
-            # create mask
-            if msg["role"] == "assistant":
-                msg_mask = [1] * len(new_tokens)
-            elif msg["role"] != "assistant" and mask_env_responses:
-                # mask intermediate 'user' and/or 'tool' messages 
-                msg_mask = [0] * len(new_tokens)
+            for i, msg in enumerate(completion):
+                conversation_prefix = prompt + completion[:i+1]
+                prefix_text = processing_class.apply_chat_template(
+                    conversation_prefix, 
+                    tokenize=False, 
+                    add_generation_prompt=False,
+                )
+                current_ids = processing_class(text=prefix_text, images=images, return_tensors="pt").input_ids[0].tolist()
+                assert current_ids[:len(prev_ids)] == prev_ids, "Tokenization difference in chat format."
+                new_tokens = current_ids[len(prev_ids):]
+                completion_ids.extend(new_tokens)
+
+                if msg["role"] == "assistant":
+                    msg_mask = [1] * len(new_tokens)
+                elif msg["role"] != "assistant" and mask_env_responses:
+                    msg_mask = [0] * len(new_tokens)
+                else:
+                    msg_mask = [1] * len(new_tokens)
+                
+                completion_mask.extend(msg_mask)
+                prev_ids = current_ids
+        else:
+            # tokenize just the prompt
+            prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+            assert isinstance(prompt_text, str)
+            if hasattr(processing_class, "tokenizer"):
+                encode = processing_class.tokenizer.encode
             else:
-                # default to not masking
-                msg_mask = [1] * len(new_tokens)
+                encode = processing_class.encode
+            prompt_ids = encode(prompt_text)
+            prompt_mask = [1] * len(prompt_ids)
             
-            completion_mask.extend(msg_mask)
-            # Update previous tokenization for next iteration
-            prev_ids = current_ids
-            assert len(completion_ids) == len(completion_mask), f"Length mismatch in chat format. Completion ids: {completion_ids}, completion mask: {completion_mask}"
+            # track completion tokens and masks by processing incrementally
+            completion_ids = []
+            completion_mask = []
+            
+            # previous tokenization (starts with just prompt)
+            prev_ids = prompt_ids
+            
+            # process each completion message incrementally
+            for i, msg in enumerate(completion):
+                # create conversation prefix: prompt + completion[:i+1]
+                conversation_prefix = prompt + completion[:i+1]
+                
+                # tokenize the full prefix
+                prefix_text = processing_class.apply_chat_template(
+                    conversation_prefix, 
+                    tokenize=False, 
+                    add_generation_prompt=False,
+                )
+                assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
+                current_ids = encode(prefix_text)
+                assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
+                
+                # add new tokens to completion tokens
+                new_tokens = current_ids[len(prev_ids):] 
+                assert len(new_tokens) > 0, f"No new tokens in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
+                completion_ids.extend(new_tokens)
 
-        return prompt_ids, prompt_mask, completion_ids, completion_mask
+                # create mask
+                if msg["role"] == "assistant":
+                    msg_mask = [1] * len(new_tokens)
+                elif msg["role"] != "assistant" and mask_env_responses:
+                    # mask intermediate 'user' and/or 'tool' messages 
+                    msg_mask = [0] * len(new_tokens)
+                else:
+                    # default to not masking
+                    msg_mask = [1] * len(new_tokens)
+                
+                completion_mask.extend(msg_mask)
+                # Update previous tokenization for next iteration
+                prev_ids = current_ids
+                assert len(completion_ids) == len(completion_mask), f"Length mismatch in chat format. Completion ids: {completion_ids}, completion mask: {completion_mask}"
+
+        return prompt_ids, prompt_mask, completion_ids, completion_mask, remaining_inputs
 
     def process_completion_format(
         self,
@@ -455,6 +532,7 @@ class Environment(ABC):
     def process_env_results(
         self,
         prompts: List[Union[str, List[Dict[str, Any]]]],
+        images: Optional[List[List[Any]]],
         completions: List[Union[str, List[Dict[str, Any]]]],
         states: List[Dict[str, Any]],
         rewards: List[float],
@@ -478,13 +556,16 @@ class Environment(ABC):
         all_prompt_masks = []
         all_completion_ids = []
         all_completion_masks = []
+        all_remaining_inputs = []
 
-        for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
+        images = images or [None] * len(prompts)
+
+        for i, (prompt, images, completion, state, reward) in enumerate(zip(prompts, images, completions, states, rewards)):
             # Format-specific processing
             if is_chat_format:
                 assert isinstance(prompt, list) and isinstance(completion, list)
-                prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_chat_format(
-                    prompt, completion, processing_class, mask_env_responses
+                prompt_ids, prompt_mask, completion_ids, completion_mask, remaining_inputs = self.process_chat_format(
+                    prompt, images, completion, processing_class, mask_env_responses
                 )
             else:
                 assert isinstance(prompt, str) and isinstance(completion, str)
@@ -498,6 +579,7 @@ class Environment(ABC):
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
             all_completion_masks.append(completion_mask)
+            all_remaining_inputs.append(remaining_inputs)
  
         return {
             "prompt_ids": all_prompt_ids,
@@ -505,6 +587,7 @@ class Environment(ABC):
             "completion_ids": all_completion_ids,
             "completion_mask": all_completion_masks,
             "rewards": rewards,
+            "remaining_inputs": all_remaining_inputs,
         }
 
     # Evaluation and dataset generation
