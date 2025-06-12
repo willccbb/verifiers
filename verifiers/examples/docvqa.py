@@ -26,8 +26,8 @@ def data_collator(batch: list[dict]) -> list[dict]:
             {
                 "type": "image",
                 "image": sample["image"], # only one image in this ds
-                "resized_height": 480, # VGA resolution
-                "resized_width": 640,
+                "resized_height": 768, # XGA resolution
+                "resized_width": 1024,
             }
         )
         messages.append({"role": "user", "content": content_block})
@@ -104,6 +104,7 @@ model, processor = vf.get_model_and_tokenizer(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
+training_args.learning_rate = 3e-6
 training_args.max_steps = -1
 
 trainer = vf.GRPOTrainer(
