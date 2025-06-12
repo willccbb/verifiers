@@ -81,6 +81,7 @@ class ToolEnv(MultiTurnEnv):
     def __init__(self,
                  tools: List[Callable] = [],
                  system_prompt: str = DEFAULT_TOOL_PROMPT_TEMPLATE,
+                 format_prompt: bool = True,
                  parser: XMLParser = XMLParser(fields=["think", ("tool", "answer")]),
                  env_parser: XMLParser = XMLParser(fields=["result"]),
                  max_turns: int = 10, **kwargs):
@@ -90,8 +91,11 @@ class ToolEnv(MultiTurnEnv):
         self.tools = {tool.__name__: tool for tool in tools}
         
         # Format the system prompt with tool descriptions
-        tool_descriptions = format_tool_descriptions(self.tool_schemas)
-        formatted_prompt = system_prompt.format(tool_descriptions=tool_descriptions)
+        if format_prompt:
+            tool_descriptions = format_tool_descriptions(self.tool_schemas)
+            formatted_prompt = system_prompt.format(tool_descriptions=tool_descriptions)
+        else:
+            formatted_prompt = system_prompt
         super().__init__(
             system_prompt=formatted_prompt,
             parser=parser,
