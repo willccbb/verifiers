@@ -7,7 +7,7 @@ accelerate launch --config-file configs/zero3.yaml verifiers/examples/sft/wiki_s
 """
 
 # convenience function for FA2 initialization
-model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-14B", use_liger=False)
+model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-8B", use_liger=False)
 dataset = load_dataset('willcb/V3-wiki-trivia-tool-use', split='train')
 
 tok_counts = []
@@ -45,7 +45,7 @@ args = SFTConfig(
     save_only_model=True,
     log_on_each_node=True,
     push_to_hub=True,
-    hub_model_id="Qwen3-14B-Wiki-Search-SFT",
+    hub_model_id="Qwen3-8B-Wiki-Search-SFT",
 )
 
 trainer = SFTTrainer(
