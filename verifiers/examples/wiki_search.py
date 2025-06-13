@@ -12,7 +12,7 @@ from verifiers.rubrics.judge_rubric import JudgeRubric
 """
 Multi-GPU training (single node, 4 training + 4 inference)
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Wiki-Search-SFT
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT
 
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/wiki_search.py
 """
@@ -170,8 +170,6 @@ def read_section(section_id: str) -> str:
 print(read_section("baseball:finnish_baseball"))
 
 
-
-
 system_prompt = """
 You are a search agent who has access to the following tools for searching over a set of Wikipedia articles:
 - search_pages(query: str) -> list[str]: Search the wiki for pages that match the query.
@@ -213,12 +211,6 @@ tools = [
     read_section,
 ]
 
-judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
-judge_model = "Qwen/Qwen2.5-7B-Instruct"
-judge_rubric = JudgeRubric(
-    judge_client=judge_client,
-    judge_model=judge_model
-)
 
 dataset = load_dataset("willcb/wiki-trivia-questions", split="train")
 
@@ -228,6 +220,13 @@ vf_env = vf.ToolEnv(
     tools=tools,
     max_turns=10,
     max_concurrent=256
+)
+judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
+judge_model = "Qwen/Qwen2.5-7B-Instruct"
+judge_rubric = JudgeRubric(
+    judge_client=judge_client,
+    judge_model=judge_model
+    parser=vf_env.parser
 )
 vf_env.rubric = vf.RubricGroup(rubrics=[judge_rubric, vf_env.rubric])
 
@@ -239,7 +238,7 @@ run_name = "wiki-trivia-grpo_" + model_name.split("/")[-1].lower()
 training_args=vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size=16
 training_args.num_generations=32
-training_args.gradient_accumulation_steps=16
+training_args.gradient_accumulation_steps=4
 training_args.num_iterations=1
 training_args.num_train_epochs=5
 training_args.max_prompt_length=1024
