@@ -219,7 +219,7 @@ vf_env = vf.ToolEnv(
     system_prompt=system_prompt,
     tools=tools,
     max_turns=10,
-    max_concurrent=256
+    max_concurrent=512
 )
 judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
 judge_model = "Qwen/Qwen2.5-7B-Instruct"
@@ -238,7 +238,7 @@ run_name = "wiki-trivia-grpo_" + model_name.split("/")[-1].lower()
 training_args=vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size=16
 training_args.num_generations=32
-training_args.gradient_accumulation_steps=4
+training_args.gradient_accumulation_steps=16
 training_args.num_iterations=1
 training_args.num_train_epochs=5
 training_args.max_prompt_length=1024
