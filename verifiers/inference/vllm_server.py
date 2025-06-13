@@ -1840,7 +1840,7 @@ def main(script_args: ScriptArguments):
         port=script_args.port, 
         log_level=script_args.log_level,
         workers=num_uvicorn_workers,
-        ws_max_queue=128
+        ws_max_queue=1024
     )
 
 
