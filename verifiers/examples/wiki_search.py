@@ -225,7 +225,7 @@ judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
 judge_model = "Qwen/Qwen2.5-7B-Instruct"
 judge_rubric = JudgeRubric(
     judge_client=judge_client,
-    judge_model=judge_model
+    judge_model=judge_model,
     parser=vf_env.parser
 )
 vf_env.rubric = vf.RubricGroup(rubrics=[judge_rubric, vf_env.rubric])
