@@ -213,8 +213,8 @@ tools = [
     read_section,
 ]
 
-judge_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-judge_model = "gpt-4.1-nano"
+judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
+judge_model = "Qwen/Qwen2.5-7B-Instruct"
 judge_rubric = JudgeRubric(
     judge_client=judge_client,
     judge_model=judge_model
@@ -227,23 +227,25 @@ vf_env = vf.ToolEnv(
     system_prompt=system_prompt,
     tools=tools,
     max_turns=10,
-    max_concurrent=32
+    max_concurrent=256
 )
 vf_env.rubric = vf.RubricGroup(rubrics=[judge_rubric, vf_env.rubric])
 
 
-model_name = "willcb/Qwen3-14B-Wiki-Search-SFT"
+model_name = "willcb/Qwen3-8B-Wiki-Search-SFT"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "wiki-trivia-grpo_" + model_name.split("/")[-1].lower()
 
 training_args=vf.grpo_defaults(run_name=run_name)
-training_args.per_device_train_batch_size=8
-training_args.num_generations=16
-training_args.gradient_accumulation_steps=4
+training_args.per_device_train_batch_size=16
+training_args.num_generations=32
+training_args.gradient_accumulation_steps=16
 training_args.num_iterations=1
+training_args.num_train_epochs=5
 training_args.max_prompt_length=1024
-training_args.max_completion_length=6144
-training_args.max_steps=100
+training_args.max_completion_length=4096
+training_args.max_steps=500
+training_args.save_steps=100
 
 trainer = vf.GRPOTrainer(
     model=model,
