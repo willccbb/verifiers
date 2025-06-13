@@ -394,7 +394,7 @@ class ScriptArguments:
         },
     )
     max_batch_size: int = field(
-        default=128,
+        default=1024,
         metadata={"help": "Maximum number of requests to process in one LLM call from the active pool."},
     )
     batch_request_timeout_seconds: int = field(
@@ -402,7 +402,7 @@ class ScriptArguments:
         metadata={"help": "Timeout in seconds for a single request waiting for its turn and completion."},
     )
     token_chunk_size: int = field(
-        default=128,
+        default=64,
         metadata={"help": "Number of tokens to generate per iteration in token-chunk dynamic batching."},
     )
 
@@ -1876,7 +1876,7 @@ def make_parser():
     parser.add_argument("--log-level", type=str, default="info", 
                         choices=["critical", "error", "warning", "info", "debug", "trace"],
                         help="Log level for uvicorn.")
-    parser.add_argument("--max-batch-size", type=int, default=128,
+    parser.add_argument("--max-batch-size", type=int, default=1024,
                         help="Maximum number of requests to process in one LLM call from the active pool.")
     parser.add_argument("--batch-request-timeout-seconds", type=int, default=300,
                         help="Timeout in seconds for a single request waiting for its turn and completion.")

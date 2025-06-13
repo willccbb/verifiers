@@ -151,7 +151,7 @@ class GRPOConfig(TrainingArguments):
         metadata={"help": "Maximum number of processes to use for filtering the dataset."},
     )
     max_concurrent: int = field(
-        default=128,
+        default=1024,
         metadata={"help": "Maximum number of concurrent requests to the environment."},
     )
     # Async generation parameters

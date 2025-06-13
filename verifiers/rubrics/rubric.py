@@ -133,7 +133,7 @@ class Rubric:
 
     async def _score_all(
             self, prompts, completions, answers, states, tasks, infos,
-            max_concurrent: int = 128,
+            max_concurrent: int = 1024,
             **kwargs) -> Dict[str, List[float]]:
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
@@ -155,7 +155,7 @@ class Rubric:
                        states: List[Dict[str, Any]],
                        tasks: List[str],
                        infos: List[Dict[str, Any]] = [],
-                       max_concurrent: int = 128,
+                       max_concurrent: int = 1024,
                        **kwargs) -> Dict[str, List[float]]:
         """
         Compute reward scores for a group of rollouts.
