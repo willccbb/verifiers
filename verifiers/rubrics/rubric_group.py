@@ -54,7 +54,7 @@ class RubricGroup(Rubric):
         all_scores = {} 
         for rubric in self.rubrics:
             rubric_scores = rubric.score_rollouts(
-                prompts, completions, answers, states, tasks,
+                prompts, completions, answers, states, tasks, infos,
                 max_concurrent=max_concurrent, **kwargs)
             for key, value in rubric_scores.items():
                 if key in all_scores:
