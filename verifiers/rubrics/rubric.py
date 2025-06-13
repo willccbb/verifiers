@@ -146,7 +146,6 @@ class Rubric:
             total=len(prompts),
             desc=f"Evaluating {len(prompts)} rollouts"
         )
-        print(rewards)
         return {k: [item[k] for item in rewards] for k in rewards[0]}
     
     def score_rollouts(self,
