@@ -77,6 +77,7 @@ class Environment(ABC):
                  sampling_args: Dict[str, Any] = {},
                  max_concurrent: int = 32,
                  message_type: Literal['chat', 'completion'] = 'chat',
+                 data_collator: Any | None = None,
                  **kwargs: Any):
         self.client = client
         self.model = model
@@ -84,6 +85,7 @@ class Environment(ABC):
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         self.max_concurrent = max_concurrent
+        self.data_collator = data_collator
         if self.message_type == 'chat':
             if dataset is not None:
                 self.dataset = self.format_dataset(dataset, self.system_prompt, self.few_shot)
@@ -619,8 +621,18 @@ class Environment(ABC):
         if num_samples > 0:
             inputs = inputs.select(range(num_samples))
 
+        if self.data_collator:
+            batch = list(inputs)
+            processed_batch = self.data_collator(batch)
+            if not processed_batch:
+                processed_inputs = {}
+            else:
+                keys = processed_batch[0].keys()
+                processed_inputs = {key: [sample.get(key) for sample in processed_batch] for key in keys}
+        else:
+            processed_inputs = inputs
         results = self.generate(
-            inputs, client, model, sampling_args, max_concurrent, **kwargs
+            processed_inputs, client, model, sampling_args, max_concurrent, **kwargs
         )
         return results
 

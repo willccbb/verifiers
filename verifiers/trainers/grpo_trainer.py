@@ -155,7 +155,6 @@ class GRPOTrainer(Trainer):
             callbacks: Optional[list[TrainerCallback]] = None,
             optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
             peft_config: Optional[PeftConfig] = None,
-            data_collator: Optional[Any] = None,
             **kwargs,
     ): 
         self.logger = logging.getLogger(__name__)
@@ -245,13 +244,14 @@ class GRPOTrainer(Trainer):
             if filtered_size < original_size:
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
+        self.data_collator = env.data_collator
         # dummy data collator
         def default_data_collator(features):
             return features
         super().__init__(
             model=model,
             args=args,
-            data_collator=data_collator if data_collator is not None else default_data_collator,
+            data_collator=self.data_collator if self.data_collator is not None else default_data_collator,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             processing_class=processing_class,
@@ -985,7 +985,10 @@ class GRPOTrainer(Trainer):
                 completion_lengths = []
                 for comp in completions:
                     # Apply chat template to get the full text
-                    tokens = self.processing_class.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
+                    if hasattr(self.processing_class, "tokenizer"): # if multimodal processor, use tokenizer; ow, it expects mm inputs
+                        tokens = self.processing_class.tokenizer.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
+                    else:
+                        tokens = self.processing_class.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
                     # Tokenize and count
                     completion_lengths.append(len(tokens))
             
@@ -1018,10 +1021,18 @@ class GRPOTrainer(Trainer):
             # Log to wandb if available
             if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
                 import pandas as pd
-                
+                # format prompt for logging
+                prompt = []
+                if prompts:
+                    for messages in prompts:
+                        last_message = messages[-1]
+                        content = last_message.get("content", "")
+                        if isinstance(content, list):
+                            content = content[0]["text"] # extract text only in multimodal case
+                        prompt.append([{'role': 'user', 'content': content}])
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
-                    "prompt": prompts,
+                    "prompt": prompt,
                     "completion": completions,
                 }
                 for k, v in reward_dict.items():

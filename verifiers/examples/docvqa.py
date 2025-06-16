@@ -1,9 +1,9 @@
 import re
 
 from datasets import load_dataset
+from qwen_vl_utils import process_vision_info
 
 import verifiers as vf
-from qwen_vl_utils import process_vision_info
 
 """
 # install qwen stuff
@@ -25,8 +25,8 @@ def data_collator(batch: list[dict]) -> list[dict]:
         content_block.append(
             {
                 "type": "image",
-                "image": sample["image"], # only one image in this ds
-                "resized_height": 768, # XGA resolution
+                "image": sample["image"],  # only one image in this ds
+                "resized_height": 768,  # XGA resolution
                 "resized_width": 1024,
             }
         )
@@ -41,7 +41,8 @@ def data_collator(batch: list[dict]) -> list[dict]:
     return processed_samples
 
 
-dataset = load_dataset("lmms-lab/DocVQA", "DocVQA", split="validation")
+dataset = load_dataset("lmms-lab/DocVQA", "DocVQA", split="validation[10%:]")
+eval_dataset = load_dataset("lmms-lab/DocVQA", "DocVQA", split="validation[:10%]")
 
 parser = vf.XMLParser(["think", "answer"], answer_field="answer")
 system_prompt = f"""Answer the questions.
@@ -85,7 +86,7 @@ def correctness_reward_func(completion: list[dict[str, str]], **kwargs) -> float
     if msgs_scores == []:
         return 0.0
     else:
-        return (sum(msgs_scores) / len(msgs_scores) / 2.0)
+        return sum(msgs_scores) / len(msgs_scores) / 2.0
 
 
 rubric = vf.Rubric(
@@ -96,7 +97,12 @@ rubric = vf.Rubric(
 )
 
 vf_env = vf.SingleTurnEnv(
-    dataset=dataset, system_prompt=system_prompt, parser=parser, rubric=rubric
+    dataset=dataset,
+    eval_dataset=eval_dataset,
+    system_prompt=system_prompt,
+    parser=parser,
+    rubric=rubric,
+    data_collator=data_collator,
 )
 
 model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
@@ -106,12 +112,13 @@ run_name = "docvqa_" + model_name.split("/")[-1].lower()
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.learning_rate = 3e-6
 training_args.max_steps = -1
+training_args.eval_strategy = "steps"
+training_args.eval_steps = 2
 
 trainer = vf.GRPOTrainer(
     model=model,
     processing_class=processor,
     env=vf_env,
     args=training_args,
-    data_collator=data_collator,
 )
 trainer.train()
