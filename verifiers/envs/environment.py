@@ -4,7 +4,8 @@ from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any, Dict, List, Literal, Tuple, Optional, Union
-import base64, io
+import base64
+import io
 
 
 import torch
@@ -104,6 +105,13 @@ class Environment(ABC):
                 )
             self.dataset = dataset
             self.eval_dataset = eval_dataset
+        if self.data_collator is not None and self.eval_dataset is not None:
+            processed_dataset = self.data_collator(list(self.eval_dataset))
+            if not processed_dataset:
+                self.eval_dataset = {}
+            else:
+                keys = processed_dataset[0].keys()
+                self.eval_dataset = {key: [sample.get(key) for sample in processed_dataset] for key in keys}
         self.parser = parser
         self.rubric = rubric
         self.sampling_args = {
@@ -619,20 +627,13 @@ class Environment(ABC):
         else:
             inputs = self.eval_dataset
         if num_samples > 0:
-            inputs = inputs.select(range(num_samples))
+            if isinstance(inputs, dict):
+                inputs = {key: value_list[:num_samples] for key, value_list in inputs.items()}
+            elif isinstance(inputs, Dataset):
+                inputs = inputs.select(range(num_samples))
 
-        if self.data_collator:
-            batch = list(inputs)
-            processed_batch = self.data_collator(batch)
-            if not processed_batch:
-                processed_inputs = {}
-            else:
-                keys = processed_batch[0].keys()
-                processed_inputs = {key: [sample.get(key) for sample in processed_batch] for key in keys}
-        else:
-            processed_inputs = inputs
         results = self.generate(
-            processed_inputs, client, model, sampling_args, max_concurrent, **kwargs
+            inputs, client, model, sampling_args, max_concurrent, **kwargs
         )
         return results
 
