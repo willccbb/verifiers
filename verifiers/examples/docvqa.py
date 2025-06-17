@@ -117,6 +117,9 @@ training_args.learning_rate = 3e-6
 training_args.max_steps = -1
 training_args.eval_strategy = "steps"
 training_args.eval_steps = 100
+training_args.gradient_checkpointing_kwargs = {
+    "use_reentrant": False,
+}
 
 trainer = vf.GRPOTrainer(
     model=model,
