@@ -98,7 +98,7 @@ def generic_model_loader(model_id: str, **model_kwargs) -> PreTrainedModel:
 
     raise RuntimeError(f"No suitable loader found for model type {cfg.model_type!r}")
 
-def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Any:
+def get_model(model_name: str, use_liger: bool = True, liger_patch_suffix: str | None = None, model_kwargs: Union[Dict[str, Any], None] = None) -> Any:
     if model_kwargs is None:
         model_kwargs = dict(
             torch_dtype=torch.bfloat16,
@@ -113,8 +113,10 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
             return model
         except ValueError: # try monkey patch
             print(f"Model {model_name} is not supported with AutoLigerKernelForCausalLM. Attempting monkey patch...")
-            model_type = AutoConfig.from_pretrained(model_name, trust_remote_code=True).model_type
-            patch_func_name = f"apply_liger_kernel_to_{model_type}"
+            if liger_patch_suffix is None: # try with model tpe
+                liger_patch_suffix = AutoConfig.from_pretrained(model_name, trust_remote_code=True).model_type
+                print(f"No liger_patch_suffix provided, attempting with model_type: {liger_patch_suffix}")
+            patch_func_name = f"apply_liger_kernel_to_{liger_patch_suffix}"
             ligermod  = importlib.import_module("liger_kernel.transformers")
             patch_func  = getattr(ligermod, patch_func_name, None)
             if callable(patch_func):
@@ -123,7 +125,7 @@ def get_model(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[
                 print(f"Applied Liger-Kernel patch to {model_name}")
                 return model
             else:
-                raise ValueError(f"Model {model_name} is not supported with Liger-Kernel in verifiers")
+                raise ValueError(f"Model {model_name} may not be supported with Liger-Kernel in verifiers. Check the Liger-Kernel documentation.")
     else:
         return generic_model_loader(model_name, **model_kwargs)
     
@@ -136,7 +138,7 @@ def get_tokenizer(model_name: str, padding_side: str = "left") -> Any:
                             '-Instruct'. Please provide a tokenizer with the chat_template attribute.")
     return processor
             
-def get_model_and_tokenizer(model_name: str, use_liger: bool = True, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
-    model = get_model(model_name, use_liger, model_kwargs)
+def get_model_and_tokenizer(model_name: str, use_liger: bool = True, liger_patch_suffix:str | None = None, model_kwargs: Union[Dict[str, Any], None] = None) -> Tuple[Any, Any]:
+    model = get_model(model_name, use_liger, liger_patch_suffix, model_kwargs)
     tokenizer = get_tokenizer(model_name)
     return model, tokenizer
