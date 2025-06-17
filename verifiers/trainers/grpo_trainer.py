@@ -37,6 +37,7 @@ from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchR
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
 from verifiers.utils.trainer_utils import RepeatSampler
+from verifiers.utils.model_utils import generic_model_loader
 
 def _accepts_logits_to_keep(model) -> bool:
     forward = (
@@ -266,7 +267,7 @@ class GRPOTrainer(Trainer):
         elif is_deepspeed_zero3_enabled():
             model_id = model.config._name_or_path
             model_init_kwargs = {"torch_dtype": "auto"}
-            self.ref_model = AutoModelForCausalLM.from_pretrained(model_id, **model_init_kwargs)
+            self.ref_model = generic_model_loader(model_id, **model_init_kwargs)
         elif is_peft_model(model):
             # If PEFT is used, the reference model is not needed since the adapter can be disabled
             # to revert to the initial model.
