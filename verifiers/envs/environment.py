@@ -3,7 +3,7 @@ import logging
 from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Tuple, Optional, Union
+from typing import Any, Dict, List, Literal, Tuple, Optional, Union, Callable
 import base64
 import io
 
@@ -30,19 +30,19 @@ def _pil_to_data_url(img: Image.Image, fmt: str | None = None) -> str:
 def format_oai_chat_msg(
     prompts: List[List[Dict[str, Any]]],
     images: List[List[Image.Image]]
-) -> List[List[Dict[str, Any]]]:
-    formatted_conversations: List[List[Dict[str, Any]]] = []
+) -> List[Any]:
+    formatted_conversations = []
 
     for conv_prompts, conv_images in zip(prompts, images):
         img_iter = iter(conv_images)
-        new_conv: List[Dict[str, Any]] = []
+        new_conv = []
 
         for msg in conv_prompts:
             role = msg["role"]
             content = msg["content"]
 
             if isinstance(content, list):
-                new_parts: List[Dict[str, Any]] = []
+                new_parts = []
                 for part in content:
                     if part.get("type") == "image":
                         img = next(img_iter)
@@ -78,7 +78,7 @@ class Environment(ABC):
                  sampling_args: Dict[str, Any] = {},
                  max_concurrent: int = 32,
                  message_type: Literal['chat', 'completion'] = 'chat',
-                 data_collator: Any | None = None,
+                 data_collator: Callable | None = None,
                  **kwargs: Any):
         self.client = client
         self.model = model
@@ -177,7 +177,7 @@ class Environment(ABC):
             return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.dataset
 
-    def get_eval_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | dict[Any, list[Any]] | None:
         if n > 0 and self.eval_dataset is not None:
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.eval_dataset
@@ -387,9 +387,9 @@ class Environment(ABC):
         prompt: List[Dict[str, str]],
         images: Optional[List[List[Any]]],
         completion: List[Dict[str, str]],
-        processing_class: PreTrainedTokenizerBase,
+        processing_class: Any,
         mask_env_responses: bool = False
-    ) -> Tuple[List[int], List[int], List[int], List[int]]:
+    ) -> Tuple[List[int], List[int], List[int], List[int], dict[str, Any]]:
         """
         Process chat format conversations using incremental prefixes.
         
@@ -405,7 +405,9 @@ class Environment(ABC):
         completion_mask = []
         remaining_inputs = {}
         if images:
+            assert not isinstance(processing_class, PreTrainedTokenizerBase)
             prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+            assert isinstance(prompt_text, str)
             inputs = processing_class(text=prompt_text, images=images, return_tensors="pt")
             remaining_inputs = {
                 k: v
@@ -423,6 +425,7 @@ class Environment(ABC):
                     tokenize=False, 
                     add_generation_prompt=False,
                 )
+                assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
                 current_ids = processing_class(text=prefix_text, images=images, return_tensors="pt").input_ids[0].tolist()
                 assert current_ids[:len(prev_ids)] == prev_ids, "Tokenization difference in chat format."
                 new_tokens = current_ids[len(prev_ids):]
@@ -438,14 +441,11 @@ class Environment(ABC):
                 completion_mask.extend(msg_mask)
                 prev_ids = current_ids
         else:
+            assert isinstance(processing_class, PreTrainedTokenizerBase)
             # tokenize just the prompt
             prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
             assert isinstance(prompt_text, str)
-            if hasattr(processing_class, "tokenizer"):
-                encode = processing_class.tokenizer.encode
-            else:
-                encode = processing_class.encode
-            prompt_ids = encode(prompt_text)
+            prompt_ids = processing_class.encode(prompt_text)
             prompt_mask = [1] * len(prompt_ids)
             
             # track completion tokens and masks by processing incrementally
@@ -467,7 +467,7 @@ class Environment(ABC):
                     add_generation_prompt=False,
                 )
                 assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
-                current_ids = encode(prefix_text)
+                current_ids = processing_class.encode(prefix_text)
                 assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
                 
                 # add new tokens to completion tokens
@@ -510,17 +510,13 @@ class Environment(ABC):
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
         # Tokenize prompt
-        if hasattr(processing_class, "tokenizer"):
-            encode = processing_class.tokenizer.encode
-        else:
-            encode = processing_class.encode
-        prompt_ids = encode(prompt)
+        prompt_ids = processing_class.encode(prompt)
         prompt_mask = [1] * len(prompt_ids)
         
         # Tokenize completion
-        completion_ids = encode(completion)
+        completion_ids = processing_class.encode(completion)
         completion_mask = [1] * len(completion_ids)
-        
+
         return prompt_ids, prompt_mask, completion_ids, completion_mask
 
     def process_env_results(
@@ -530,7 +526,7 @@ class Environment(ABC):
         completions: List[Union[str, List[Dict[str, Any]]]],
         states: List[Dict[str, Any]],
         rewards: List[float],
-        processing_class: PreTrainedTokenizerBase,
+        processing_class: Any,
         max_completion_length: int = -1,
         mask_truncated_completions: bool = False,
         mask_env_responses: bool = False,
@@ -552,9 +548,9 @@ class Environment(ABC):
         all_completion_masks = []
         all_remaining_inputs = []
 
-        images = images or [None] * len(prompts)
+        input_images = images or [None] * len(prompts)
 
-        for i, (prompt, images, completion, state, reward) in enumerate(zip(prompts, images, completions, states, rewards)):
+        for i, (prompt, images, completion, state, reward) in enumerate(zip(prompts, input_images, completions, states, rewards)):
             # Format-specific processing
             if is_chat_format:
                 assert isinstance(prompt, list) and isinstance(completion, list)
@@ -566,6 +562,7 @@ class Environment(ABC):
                 prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
                     prompt, completion, processing_class
                 )
+                remaining_inputs = [None] * len(prompt_ids)
             if mask_truncated_completions and max_completion_length > 0 and len(completion_ids) > max_completion_length:
                 completion_ids = completion_ids[:max_completion_length]
                 completion_mask = [0] * len(completion_ids)

@@ -4,7 +4,8 @@ from importlib import import_module
 from typing import Dict, Any, Union, Tuple, Callable
 
 import torch
-from transformers import AutoModelForCausalLM, AutoProcessor, AutoConfig, PreTrainedModel # type: ignore
+from transformers import AutoModelForCausalLM, AutoModel, AutoProcessor, AutoConfig, PreTrainedModel # type: ignore
+from transformers.models.auto.modeling_auto import AutoModelForSeq2SeqLM, AutoModelForVision2Seq
 
 import torch.nn as nn
 
@@ -73,13 +74,6 @@ def generic_model_loader(model_id: str, **model_kwargs) -> PreTrainedModel:
             )
         except (AttributeError, ImportError, ValueError):
             pass
-
-    from transformers import (
-        AutoModel,
-        AutoModelForCausalLM,
-        AutoModelForSeq2SeqLM,
-        AutoModelForVision2Seq,
-    )
 
     for auto_cls in (
         AutoModelForCausalLM,

@@ -12,11 +12,10 @@ import torch
 from torch.utils.data import DataLoader, Sampler
 from accelerate.utils import broadcast_object_list, gather_object, is_peft_model
 from peft import PeftConfig, get_peft_model
-from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.processing_utils import ProcessorMixin
 from transformers.trainer import Trainer
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import seed_worker
@@ -152,7 +151,7 @@ class GRPOTrainer(Trainer):
             model: PreTrainedModel,
             env: Environment,
             args: GRPOConfig,
-            processing_class: PreTrainedTokenizerBase,
+            processing_class: ProcessorMixin,
             callbacks: Optional[list[TrainerCallback]] = None,
             optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
             peft_config: Optional[PeftConfig] = None,
@@ -171,9 +170,10 @@ class GRPOTrainer(Trainer):
         # Suppress irrelevant warning
         model.warnings_issued["estimate_tokens"] = True 
 
+        self.tokenizer_base = getattr(processing_class, "tokenizer", None) # extract tokenizer in multimodal case
         # Tokenizer pad token
-        if hasattr(processing_class, "tokenizer"):
-            if processing_class.tokenizer.pad_token is None:
+        if self.tokenizer_base is not None:
+            if processing_class.tokenizer.pad_token is None: # type: ignore
                 processing_class.tokenizer.pad_token = processing_class.tokenizer.eos_token # type: ignore
         else:
             if processing_class.pad_token is None: # type: ignore
@@ -216,8 +216,6 @@ class GRPOTrainer(Trainer):
         train_dataset = env.get_dataset()
         assert train_dataset is not None
 
-        eval_dataset = env.get_eval_dataset()
-        
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
             self.logger.info(f"Filtering dataset for prompts with length <= {self.max_prompt_length}")
@@ -232,9 +230,10 @@ class GRPOTrainer(Trainer):
                 else:
                     # Completion format
                     prompt_text = prompt
-                if hasattr(processing_class, "tokenizer"):
-                    encode = processing_class.tokenizer.encode
+                if self.tokenizer_base is not None:
+                    encode = self.tokenizer_base.encode
                 else:
+                    assert isinstance(processing_class, PreTrainedTokenizerBase)
                     encode = processing_class.encode
                 prompt_ids = encode(prompt_text) # type: ignore
                 return len(prompt_ids) <= max_length
@@ -245,16 +244,15 @@ class GRPOTrainer(Trainer):
             if filtered_size < original_size:
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
-        self.data_collator = env.data_collator
         # dummy data collator
         def default_data_collator(features):
             return features
         super().__init__(
             model=model,
             args=args,
-            data_collator=self.data_collator if self.data_collator is not None else default_data_collator,
+            data_collator=env.data_collator if env.data_collator is not None else default_data_collator,
             train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
+            eval_dataset=datasets.Dataset.from_dict({}), # dummy eval ds. This is actually handled by environment
             processing_class=processing_class,
             callbacks=callbacks,
             optimizers=optimizers,
@@ -766,9 +764,10 @@ class GRPOTrainer(Trainer):
                 completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
             # Pad sequences
-            if hasattr(self.processing_class, "tokenizer"):
-                pad_token_id = self.processing_class.tokenizer.pad_token_id
+            if self.tokenizer_base is not None:
+                pad_token_id = self.tokenizer_base.pad_token_id
             else:
+                assert isinstance(self.processing_class, PreTrainedTokenizerBase)
                 pad_token_id = self.processing_class.pad_token_id
             prompt_ids = pad(prompt_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
@@ -856,7 +855,7 @@ class GRPOTrainer(Trainer):
 
     def compute_loss(self,
                      model: PreTrainedModel,
-                     inputs: Dict[str, torch.Tensor],
+                     inputs: Dict[str, Any],
                      return_outputs: bool = False,
                      num_items_in_batch: int | None = None) -> torch.Tensor: 
         mode = "train" 
@@ -976,9 +975,10 @@ class GRPOTrainer(Trainer):
             completions = eval_results['completion']
             if isinstance(completions[0], str):
                 # Completion format - directly tokenize strings
-                if hasattr(self.processing_class, "tokenizer"):
-                    encode = self.processing_class.tokenizer.encode
+                if self.tokenizer_base is not None:
+                    encode = self.tokenizer_base.encode
                 else:
+                    assert isinstance(self.processing_class, PreTrainedTokenizerBase)
                     encode = self.processing_class.encode
                 completion_lengths = [len(encode(c)) for c in completions] # type: ignore
             else:
@@ -1175,9 +1175,10 @@ class GRPOTrainer(Trainer):
         
         # Check for EOS tokens  
         term_lengths = []
-        if hasattr(self.processing_class, "tokenizer"):
-            eos_token_id = self.processing_class.tokenizer.eos_token_id
+        if self.tokenizer_base is not None:
+            eos_token_id = self.tokenizer_base.eos_token_id
         else:
+            assert isinstance(self.processing_class, PreTrainedTokenizerBase)
             eos_token_id = self.processing_class.eos_token_id
         for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
             has_eos = any(token == eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
