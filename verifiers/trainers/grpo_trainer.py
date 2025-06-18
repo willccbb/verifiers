@@ -244,6 +244,10 @@ class GRPOTrainer(Trainer):
         # Models
         if peft_config is not None:
             model = get_peft_model(model, peft_config) # type: ignore
+            # Override sync_ref_model if PEFT is used since ref_model will be None
+            if args.sync_ref_model:
+                self.logger.warning("sync_ref_model=True is not compatible with PEFT. Setting sync_ref_model=False.")
+                args.sync_ref_model = False
 
         # Enable gradient checkpointing if requested
         if args.gradient_checkpointing:

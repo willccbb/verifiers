@@ -21,6 +21,7 @@ WIKI_DIR = "notebooks/data/wiki"
 CHROMA_DB_DIR = "notebooks/.chroma_db" 
 
 # Create embedding function using OpenAI
+
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
     api_key=os.environ.get("OPENAI_API_KEY"),
     model_name="text-embedding-3-small"
@@ -211,7 +212,6 @@ tools = [
     read_section,
 ]
 
-
 dataset = load_dataset("willcb/wiki-trivia-questions", split="train")
 
 vf_env = vf.ToolEnv(
@@ -221,6 +221,7 @@ vf_env = vf.ToolEnv(
     max_turns=10,
     max_concurrent=512
 )
+
 judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
 judge_model = "Qwen/Qwen2.5-7B-Instruct"
 judge_rubric = JudgeRubric(

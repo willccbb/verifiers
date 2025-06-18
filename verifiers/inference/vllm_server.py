@@ -1845,13 +1845,14 @@ def main(script_args: ScriptArguments):
 
 
 def make_parser():
+    num_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").count(",") + 1
     parser = argparse.ArgumentParser(description="OpenAI-compatible vLLM server with weight synchronization")
     
     parser.add_argument("--model", type=str, required=True,
                         help="Model name or path to load the model from.")
     parser.add_argument("--revision", type=str, default=None,
                         help="Revision to use for the model. If not specified, the default branch will be used.")
-    parser.add_argument("--tensor-parallel-size", type=int, default=1,
+    parser.add_argument("--tensor-parallel-size", type=int, default=num_gpus,
                         help="Number of tensor parallel workers to use.")
     parser.add_argument("--data-parallel-size", type=int, default=1,
                         help="Number of data parallel workers to use.")
