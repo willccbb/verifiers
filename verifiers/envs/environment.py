@@ -558,6 +558,8 @@ class Environment(ABC):
                     prompt, images, completion, processing_class, mask_env_responses
                 )
             else:
+                if images is not None:
+                    raise NotImplementedError("Multi-modal training is not supported with completion formats yet")
                 assert isinstance(prompt, str) and isinstance(completion, str)
                 prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
                     prompt, completion, processing_class
