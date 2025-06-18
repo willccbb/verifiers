@@ -9,9 +9,9 @@ import verifiers as vf
 # install qwen stuff
 uv pip install qwen-vl-utils
 # inference
-CUDA_VISIBLE_DEVICES=0 uv run vf-vllm --model 'Qwen/Qwen2.5-VL-3B-Instruct' --max-model-len 64000
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'Qwen/Qwen2.5-VL-7B-Instruct' --max-model-len 32000 --tensor_parallel_size 4 
 # train
-CUDA_VISIBLE_DEVICES=1 uv run accelerate launch verifiers/examples/docvqa.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/docvqa.py
 """
 
 
@@ -108,7 +108,7 @@ vf_env = vf.SingleTurnEnv(
     data_collator=data_collator,
 )
 
-model_name = "Qwen/Qwen2.5-VL-3B-Instruct"
+model_name = "Qwen/Qwen2.5-VL-7B-Instruct"
 model, processor = vf.get_model_and_tokenizer(model_name)
 run_name = "docvqa_" + model_name.split("/")[-1].lower()
 
