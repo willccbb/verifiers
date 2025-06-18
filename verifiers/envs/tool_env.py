@@ -2,7 +2,7 @@ import inspect
 import json
 from typing import List, Dict, Any, Callable, Tuple
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE

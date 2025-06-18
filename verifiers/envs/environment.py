@@ -11,9 +11,11 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from datasets import Dataset
 from openai import OpenAI
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
+
+import weave
 
 class Environment(ABC):
     """
@@ -145,6 +147,7 @@ class Environment(ABC):
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
     
+    @weave.op
     def sanitize_sampling_args(self, client: OpenAI, sampling_args: Dict[str, Any]) -> Dict[str, Any]:
         from urllib.parse import urlparse
         url = urlparse(str(client.base_url))
@@ -156,6 +159,7 @@ class Environment(ABC):
             return sanitized_args
         return sampling_args
 
+    @weave.op
     def get_model_response(self,
                            prompt: str | List[Dict[str, str]],
                            client: OpenAI,
@@ -179,6 +183,7 @@ class Environment(ABC):
 
         try:
             if message_type == 'chat':
+                print(f"Making call to {model} with prompt: {prompt}\n===============\n")
                 assert isinstance(prompt, list)
                 response = client.chat.completions.create(
                     model=model,
@@ -312,7 +317,8 @@ class Environment(ABC):
             loop = asyncio.get_running_loop()
             setup_executor(loop)
             return loop.run_until_complete(coro)
-
+    
+    @weave.op
     def generate(self,
                  inputs: Dict[str, List[Any]] | Dataset,
                  client: OpenAI | None = None,

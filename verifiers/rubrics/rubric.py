@@ -5,8 +5,9 @@ import concurrent.futures
 import inspect
 import logging
 from typing import List, Dict, Any, Union
+import weave
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.parsers import Parser
 
 
@@ -148,6 +149,7 @@ class Rubric:
         )
         return {k: [item[k] for item in rewards] for k in rewards[0]}
     
+    @weave.op
     def score_rollouts(self,
                        prompts: List[Union[str, List[Dict[str, Any]]]],
                        completions: List[Union[str, List[Dict[str, Any]]]],

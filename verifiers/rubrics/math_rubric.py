@@ -1,6 +1,6 @@
 from typing import List
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 
