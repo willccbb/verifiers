@@ -59,16 +59,28 @@ If you use this code in your research, please cite:
 
 ### Setup 
 
+To install from PyPI, do:
+
+```bash
+uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
+```
+
 To use the latest `main` branch, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
-uv sync && uv pip install flash-attn --no-build-isolation && uv pip install -e ".[all]"
+uv sync --extra all && uv pip install flash-attn --no-build-isolation
 ```
 
+For CPU development (API-only, no training), just do:
+```
+uv add verifiers
+```
+and install additional tool + environment dependencies (e.g. `textarena`, `reasoning-gym`, `vllm`) as needed.
+
 **Troubleshooting:**
-- Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`).
-- On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) during vLLM weight syncing. This can usually be alleviated by setting `NCCL_P2P_DISABLE=1` in your environment.
+- Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
+- On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) or crash during vLLM weight syncing. This can usually be alleviated by setting (or unsetting) `NCCL_P2P_DISABLE=1` in your environment. Try this as your first step if you experience NCCL-related issues.
 - If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
 
 ### Resource Requirements
@@ -204,9 +216,7 @@ class YourCustomEnv(Environment):
 - See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings
 
 
-### Roadmap for v0.1 Release (very soon)
-
-TODO: GitHub header stuff, test coverage, [PyPI](https://pypi.org/project/verifiers/), general release prep
+### Release Notes - v0.1.0 
 
 New features for this release:
 - Async inference support via OpenAI-compatible vLLM server (with weight syncing enabled)

@@ -15,12 +15,17 @@ except ImportError:
 """
 Multi-GPU training (single node, 4 training + 4 inference) using SmolaAgents tools
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_server.py --model 'Qwen/Qwen2.5-7B-Instruct' \
-    --tensor_parallel_size 4 --max_model_len 8192 --dtype bfloat16 \
-    --gpu_memory_utilization 0.9 --enable_prefix_caching True \
-    --host 0.0.0.0 --port 8000
+CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_server.py \
+    --model 'Qwen/Qwen2.5-7B-Instruct' \
+    --tensor-parallel-size 4 \
+    --max-model-len 8192 \
+    --dtype bfloat16 \
+    --gpu-memory-utilization 0.9 \
+    --enable-prefix-caching \
+    --host 0.0.0.0 \
+    --port 8000
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/smola_math_train.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/smola_math_tools.py
 """
 
 dataset = load_example_dataset("math", "train", n=6000)

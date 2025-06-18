@@ -13,8 +13,8 @@ import torch
 from torch import nn
 from trl.import_utils import is_requests_available, is_vllm_available
 
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-from vllm.distributed.utils import StatelessProcessGroup
+from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator # type: ignore
+from vllm.distributed.utils import StatelessProcessGroup # type: ignore
 
 logger = logging.getLogger(__name__)
 

@@ -17,10 +17,6 @@ class SmolaToolEnv(MultiTurnEnv):
                  tools: List[Any] = [],
                  system_prompt: str = DEFAULT_TOOL_PROMPT_TEMPLATE,
                  few_shot: List[Dict[str, str]] = [],
-                 sampling_args={
-                     "stop": ["</tool>\n", "</answer>\n"],
-                     "include_stop_str_in_output": True
-                 },
                  mask_env_response: bool = True,
                  max_steps: int = 10, **kwargs):
         # Format the system prompt with tool descriptions
@@ -83,7 +79,7 @@ class SmolaToolEnv(MultiTurnEnv):
                 step_count += 1
         return step_count
     
-    def is_completed(self, messages: List[Dict[str, str]], **kwargs: Any) -> bool:
+    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs: Any) -> bool:
         try:
             # Check if we've hit max steps by counting tool uses in the message history
             step_count = self._get_step_count(messages)
@@ -123,16 +119,16 @@ class SmolaToolEnv(MultiTurnEnv):
         except Exception as e:
             return f"Error: {str(e)}. " + "Please format your tool call as '{\"name\": \"tool_name\", \"args\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}'"
 
-    def env_response(self, messages: List[Dict[str, str]], **kwargs: Any) -> Dict[str, str]:
+    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs: Any) -> Dict[str, str]:
         try:
             parsed = self.llm_parser.parse(messages[-1]["content"])
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, 'tool') and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
                 if len(result.strip()) > 0:
-                    return {"role": "user", "content": self.env_parser.format(result=result)}
+                    return {"role": "user", "content": self.env_parser.format(result=result)}, {}
                 else:
-                    return {"role": "user", "content": "Error: Tool execution returned empty output."}
+                    return {"role": "user", "content": "Error: Tool execution returned empty output."}, {}
         except Exception:
             pass
-        return {"role": "user", "content": "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}
+        return {"role": "user", "content": "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}, {}

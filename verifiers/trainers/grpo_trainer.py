@@ -4,7 +4,7 @@ import inspect
 import logging
 from collections import defaultdict, deque
 from contextlib import nullcontext
-from typing import Optional, Union, Any, List, Dict, Tuple
+from typing import Optional, Union, Any, List, Dict, Tuple, Sized
 
 import datasets
 import openai
@@ -30,13 +30,108 @@ import wandb
 import numpy as np
 
 from verifiers import Environment
-from verifiers.inference import VLLMClient
 from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
-from verifiers.utils.trainer_utils import RepeatSampler
 from verifiers.utils.model_utils import generic_model_loader
+
+class RepeatSampler(Sampler):
+    """
+    Sampler that repeats the indices of a dataset in a structured manner.
+
+    Args:
+        data_source (`Sized`):
+            Dataset to sample from.
+        mini_repeat_count (`int`):
+            Number of times to repeat each index per batch.
+        batch_size (`int`, *optional*, defaults to `1`):
+            Number of unique indices per batch.
+        repeat_count (`int`, *optional*, defaults to `1`):
+            Number of times to repeat the full sampling process.
+        shuffle (`bool`, *optional*, defaults to `True`):
+            Whether to shuffle the dataset.
+        seed (`int` or `None`, *optional*, defaults to `None`):
+            Random seed for reproducibility (only affects this sampler).
+
+    Example:
+    ```python
+    >>> sampler = RepeatRandomSampler(["a", "b", "c", "d", "e", "f", "g"], mini_repeat_count=2, batch_size=3, repeat_count=4)
+    >>> list(sampler)
+    [4, 4, 3, 3, 0, 0,
+     4, 4, 3, 3, 0, 0,
+     4, 4, 3, 3, 0, 0,
+     4, 4, 3, 3, 0, 0,
+
+     1, 1, 2, 2, 6, 6,
+     1, 1, 2, 2, 6, 6,
+     1, 1, 2, 2, 6, 6,
+     1, 1, 2, 2, 6, 6]
+    ```
+
+    ```txt
+    mini_repeat_count = 3
+          -   -   -
+         [0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,      |
+          4,  4,  4,  5,  5,  5,  6,  6,  6,  7,  7,  7,      |
+          8,  8,  8,  9,  9,  9, 10, 10, 10, 11, 11, 11,      |
+                                                                repeat_count = 2
+          0,  0,  0,  1,  1,  1,  2,  2,  2,  3,  3,  3,      |
+          4,  4,  4,  5,  5,  5,  6,  6,  6,  7,  7,  7,      |
+          8,  8,  8,  9,  9,  9, 10, 10, 10, 11, 11, 11, ...] |
+          ---------   ---------   ---------   ---------
+           ---------   ---------   ---------   ---------
+            ---------   ---------   ---------   ---------
+                         batch_size = 12
+    ```
+    """
+
+    def __init__(
+        self,
+        data_source: Sized,
+        mini_repeat_count: int,
+        batch_size: int = 1,
+        repeat_count: int = 1,
+        shuffle: bool = True,
+        seed: Optional[int] = None,
+    ):
+        self.data_source = data_source
+        self.mini_repeat_count = mini_repeat_count
+        self.batch_size = batch_size
+        self.repeat_count = repeat_count
+        self.num_samples = len(data_source)
+        self.shuffle = shuffle
+        self.seed = seed
+
+        if shuffle:
+            self.generator = torch.Generator()  # Create a local random generator
+            if seed is not None:
+                self.generator.manual_seed(seed)
+
+    def __iter__(self):
+        if self.shuffle:
+            # E.g., [2, 4, 3, 1, 0, 6, 5] (num_samples = 7)
+            indexes = torch.randperm(self.num_samples, generator=self.generator).tolist()
+        else:
+            indexes = list(range(self.num_samples))
+
+        #    [2, 4, 3, 1, 0, 6, 5]
+        # -> [[2, 4, 3], [1, 0, 6], [5]]  (batch_size = 3)
+        indexes = [indexes[i : i + self.batch_size] for i in range(0, len(indexes), self.batch_size)]
+
+        #    [[2, 4, 3], [1, 0, 6], [5]]
+        # -> [[2, 4, 3], [1, 0, 6]]
+        indexes = [chunk for chunk in indexes if len(chunk) == self.batch_size]
+
+        for chunk in indexes:
+            for _ in range(self.repeat_count):
+                for index in chunk:
+                    for _ in range(self.mini_repeat_count):
+                        yield index
+
+    def __len__(self) -> int:
+        return self.num_samples * self.mini_repeat_count * self.repeat_count
+
 
 def _accepts_logits_to_keep(model) -> bool:
     forward = (
@@ -49,6 +144,7 @@ def _accepts_logits_to_keep(model) -> bool:
         return True
     except TypeError:
         return False
+
 
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
@@ -288,8 +384,8 @@ class GRPOTrainer(Trainer):
         self.num_completions_to_print = args.num_completions_to_print
 
         # Environment integration parameters
-        self.mask_env_responses = getattr(args, 'mask_env_responses', False)
-        self.env_max_concurrent = getattr(args, 'env_max_concurrent', 32)
+        self.mask_env_responses = args.mask_env_responses
+        self.max_concurrent = args.max_concurrent
 
         # maxlen is set to the total number of forward passes per step. This value of `maxlen` ensures we log only the
         # final optimization step.
@@ -304,9 +400,17 @@ class GRPOTrainer(Trainer):
         host = args.vllm_server_host
         port = args.vllm_server_port
         vllm_base_url = f"http://{host}:{port}/v1"
-        self.oai_client = openai.OpenAI(base_url=vllm_base_url, api_key="EMPTY")
+        import httpx
+        self.oai_client = openai.OpenAI(
+            base_url=vllm_base_url,
+            api_key="EMPTY",
+            http_client=httpx.Client(
+                limits=httpx.Limits(max_connections=args.max_concurrent),
+                timeout=args.async_generation_timeout)
+        )
 
-        # vLLM client for weight syncing only
+        # vLLM client for weight syncing only; only import if used
+        from verifiers.inference.vllm_client import VLLMClient
         self.vllm_client = VLLMClient(
             host=host,
             port=port,
@@ -600,7 +704,7 @@ class GRPOTrainer(Trainer):
             'mask': mask
         }
 
-    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any] | None, List[Any], List[Any]]:
+    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any] | None,  List[Any], List[Any], List[Any]]:
         """
         Gather batch data from all processes.
         
@@ -620,14 +724,15 @@ class GRPOTrainer(Trainer):
         images = [x['images'] for x in batch if 'images' in x]
         answers = [x['answer'] for x in batch]
         tasks = [x.get('task', 'default') for x in batch]
-        
+        infos = [x.get('info', {}) for x in batch]
         all_prompts = gather_object(prompts)
         all_images = gather_object(images)
         all_images = all_images if all_images != [] else None
         all_answers = gather_object(answers)
         all_tasks = gather_object(tasks)
+        all_infos = gather_object(infos)
          
-        return all_prompts, all_images, all_answers, all_tasks
+        return all_prompts, all_images, all_answers, all_tasks, all_infos
 
     def _prepare_inputs( # type: ignore
         self, inputs: list[dict[str, Any]]
@@ -674,14 +779,14 @@ class GRPOTrainer(Trainer):
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 batch_offset = batch_id - batch_id_to_retrieve
-                all_prompts, all_images, all_answers, all_tasks = self._gather_batch_data(batch_offset)
+                all_prompts, all_images, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
                 
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
                     request = BatchRequest(
                         batch_id=batch_id,
-                        env_inputs={'prompt': all_prompts, 'images': all_images, 'answer': all_answers, 'task': all_tasks},
+                        env_inputs={'prompt': all_prompts,  'images': all_images, 'answer': all_answers, 'task': all_tasks, 'info': all_infos},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
                         max_completion_length=self.max_completion_length,
@@ -949,7 +1054,7 @@ class GRPOTrainer(Trainer):
             client=self.oai_client,
             model=self._get_model_name(),
             sampling_args=self._get_sampling_args(),
-            max_concurrent=self.env_max_concurrent,
+            max_concurrent=self.max_concurrent,
         )
         
         # Process results to compute metrics

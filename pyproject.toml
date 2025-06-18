@@ -5,33 +5,61 @@ authors = [
 ]
 version = "0.1.0"
 description = "Verifiers for reinforcement learning with LLMs"
+readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11,<3.13"
+keywords = ["reinforcement-learning", "llm", "rl", "grpo", "verifiable-environments", "multi-turn"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
-    "torch==2.6.0",
-    "liger-kernel>=0.5.10",
+    "torch>=2.6.0",
     "setuptools",
-    "deepspeed",
     "accelerate",
     "peft",
     "wandb",
     "rich",
     "trl>=0.17.0",
     "requests>=2.32.3",
-    "vllm>=0.8.5.post1",
     "openai>=1.81.0",
     "datasets>=3.6.0",
     "transformers<4.52.0",
+    "nest-asyncio>=1.6.0",
 ]
 
 [project.optional-dependencies]
 all = [
+    "vllm>=0.8.5.post1",
+    "liger-kernel>=0.5.10",
+    "deepspeed",
     "ipykernel",
     "ipywidgets",
     "duckduckgo-search",
     "brave-search",
     "reasoning-gym",
     "smolagents>=1.15.0",
+    "textarena",
+    "nltk"
+]
+
+docs = [
+    "sphinx",
+    "myst-parser",
+    "sphinx-rtd-theme"
+]
+
+tests = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.scripts]
@@ -43,3 +71,15 @@ packages = ["verifiers"]
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "twine>=6.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/willccbb/verifiers"
+Documentation = "https://github.com/willccbb/verifiers"
+Repository = "https://github.com/willccbb/verifiers.git"
+Issues = "https://github.com/willccbb/verifiers/issues"

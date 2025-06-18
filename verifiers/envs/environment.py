@@ -6,9 +6,8 @@ from copy import deepcopy
 from typing import Any, Dict, List, Literal, Tuple, Optional, Union, Callable
 import base64
 import io
+import concurrent.futures
 
-
-import torch
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase 
 
 from datasets import Dataset
@@ -76,7 +75,7 @@ class Environment(ABC):
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
                  sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = 32,
+                 max_concurrent: int = 128,
                  message_type: Literal['chat', 'completion'] = 'chat',
                  data_collator: Callable | None = None,
                  **kwargs: Any):
@@ -87,6 +86,16 @@ class Environment(ABC):
         self.few_shot = few_shot
         self.max_concurrent = max_concurrent
         self.data_collator = data_collator
+
+        # Ensure asyncio.to_thread doesn't hit default 32 thread limit
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+            loop.set_default_executor(executor)
+        
         if self.message_type == 'chat':
             if dataset is not None:
                 self.dataset = self.format_dataset(dataset, self.system_prompt, self.few_shot)
@@ -115,7 +124,7 @@ class Environment(ABC):
         self.parser = parser
         self.rubric = rubric
         self.sampling_args = {
-            'n': 1, # n > 1 not supported; duplicate prompts for multiple completions
+            'n': 1, # n > 1 not supported; use duplicate prompts for multiple completions
             'extra_body': {
                 'skip_special_tokens': False,
                 'spaces_between_special_tokens': False,
@@ -152,7 +161,10 @@ class Environment(ABC):
                        few_shot: List[Dict[str, Any]] | None = None,
                        question_key: str = "question",
                        answer_key: str = "answer") -> Dataset:
-        # Extract format_prompt as a standalone function to avoid capturing self
+        # skip if "prompt" already exists
+        if "prompt" in dataset.column_names:
+            return dataset
+        # extract format_prompt as a standalone function to avoid capturing self
         def format_prompt_fn(prompt: str) -> List[Dict[str, Any]]:
             messages = []
             if system_prompt:
@@ -165,12 +177,12 @@ class Environment(ABC):
         if answer_key == "answer":
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=self.max_concurrent)
+            }, num_proc=min(self.max_concurrent, 32))
         else:
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
-            }, num_proc=self.max_concurrent)
+            }, num_proc=min(self.max_concurrent, 32))
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
@@ -256,6 +268,9 @@ class Environment(ABC):
                 client: OpenAI,
                 model: str,
                 prompt: str | List[Dict[str, Any]],
+                answer: str,
+                task: str = "default",
+                info: Dict[str, Any] = {},
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
         """
@@ -269,6 +284,9 @@ class Environment(ABC):
                           client: OpenAI,
                           model: str,
                           prompt: str | List[Dict[str, Any]],
+                          answer: str,
+                          task: str = "default",
+                          info: Dict[str, Any] = {},
                           sampling_args: Dict[str, Any] = {},
                           **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
         """
@@ -276,14 +294,17 @@ class Environment(ABC):
         Returns a tuple of (completion, state).
         """
         async with semaphore:
-            return await asyncio.to_thread(self.rollout, client, model, prompt, sampling_args, **kwargs)
+            return await asyncio.to_thread(self.rollout, client, model, prompt, answer, task, info, sampling_args, **kwargs)
 
     async def _run_all(self,
                        client: OpenAI,
                        model: str,
                        prompts: List[str | List[Dict[str, str]]],
+                       answers: List[str],
+                       tasks: List[str] = [],
+                       infos: List[Dict[str, Any]] = [],
                        sampling_args: Dict[str, Any] = {},
-                       max_concurrent: int = 32,
+                       max_concurrent: int = 128,
                        **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
@@ -291,8 +312,8 @@ class Environment(ABC):
         from tqdm.asyncio import tqdm_asyncio
         semaphore = Semaphore(max_concurrent)
         rollout_tasks = [
-            self._run_single(semaphore, client, model, prompt, sampling_args, **kwargs)
-            for prompt in prompts
+            self._run_single(semaphore, client, model, prompt, answer, task, info, sampling_args, **kwargs)
+            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
         ]
         return await tqdm_asyncio.gather(
             *rollout_tasks,
@@ -301,27 +322,50 @@ class Environment(ABC):
         )
 
     def run_rollouts(self,
-                     prompts: List[Union[str, List[Dict[str, Any]]]],
                      client: OpenAI,
                      model: str,
+                     prompts: List[Union[str, List[Dict[str, Any]]]],
+                     answers: List[str],
+                     tasks: List[str] = [],
+                     infos: List[Dict[str, Any]] = [],
                      sampling_args: Dict[str, Any] = {},
-                     max_concurrent: int = 32,
+                     max_concurrent: int = 128,
                      **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
+        def setup_executor(loop):
+            if loop._default_executor is None:
+                executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
+                loop.set_default_executor(executor)
+        
         coro = self._run_all(
-            prompts=prompts, client=client, model=model,
-            sampling_args=sampling_args, max_concurrent=max_concurrent, 
+            client=client,
+            model=model,
+            prompts=prompts,
+            answers=answers, 
+            tasks=tasks,
+            infos=infos,
+            sampling_args=sampling_args,
+            max_concurrent=max_concurrent, 
             **kwargs
         )
         try:
-            return asyncio.run(coro)
+            # Create new event loop with custom executor
+            loop = asyncio.new_event_loop()
+            setup_executor(loop)
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
         except RuntimeError:
-            # Jupyter notebook
+            # Jupyter notebook or existing event loop
             import nest_asyncio
             nest_asyncio.apply()
             loop = asyncio.get_running_loop()
+            setup_executor(loop)
             return loop.run_until_complete(coro)
 
     def generate(self,
@@ -353,12 +397,20 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
+        if 'task' not in results:
+            results['task'] = ['default'] * len(results['prompt'])
+        if 'info' not in results:
+            results['info'] = [{}] * len(results['prompt'])
+
         if results.get('images') is not None:
             prompts = format_oai_chat_msg(results['prompt'], results['images'])
         else:
             prompts = results['prompt']
         rollouts = self.run_rollouts(
             prompts=prompts,
+            answers=results['answer'],
+            tasks=results['task'],
+            infos=results['info'],
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
@@ -376,6 +428,7 @@ class Environment(ABC):
                 answers=results['answer'],
                 states=results['state'],
                 tasks=results['task'],
+                infos=results['info'],
                 max_concurrent=max_concurrent,
                 apply_weights=True
             )       
@@ -427,7 +480,7 @@ class Environment(ABC):
                 )
                 assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
                 current_ids = processing_class(text=prefix_text, images=images, return_tensors="pt").input_ids[0].tolist()
-                assert current_ids[:len(prev_ids)] == prev_ids, "Tokenization difference in chat format."
+                assert current_ids[:len(prev_ids)-1] == prev_ids[:-1], f"Tokenization difference in chat format. Current ids: {current_ids[:len(prev_ids)-1]}, previous ids: {prev_ids[:-1]}"
                 new_tokens = current_ids[len(prev_ids):]
                 completion_ids.extend(new_tokens)
 
@@ -468,7 +521,7 @@ class Environment(ABC):
                 )
                 assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
                 current_ids = processing_class.encode(prefix_text)
-                assert current_ids[:len(prev_ids)] == prev_ids, f"Tokenization difference in chat format. Current ids: {current_ids}, previous ids: {prev_ids}"
+                assert current_ids[:len(prev_ids)-1] == prev_ids[:-1], f"Tokenization difference in chat format. Current ids: {current_ids[:len(prev_ids)-1]}, previous ids: {prev_ids[:-1]}"
                 
                 # add new tokens to completion tokens
                 new_tokens = current_ids[len(prev_ids):] 
@@ -486,7 +539,7 @@ class Environment(ABC):
                     msg_mask = [1] * len(new_tokens)
                 
                 completion_mask.extend(msg_mask)
-                # Update previous tokenization for next iteration
+                # update previous tokenization for next iteration
                 prev_ids = current_ids
                 assert len(completion_ids) == len(completion_mask), f"Length mismatch in chat format. Completion ids: {completion_ids}, completion mask: {completion_mask}"
 
@@ -589,7 +642,7 @@ class Environment(ABC):
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  num_samples: int = -1,
-                 max_concurrent: int = 32,
+                 max_concurrent: int = 128,
                  **kwargs: Any
                 ) -> Dict[str, Any]:
         """

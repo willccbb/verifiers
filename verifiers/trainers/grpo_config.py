@@ -151,7 +151,7 @@ class GRPOConfig(TrainingArguments):
         metadata={"help": "Maximum number of processes to use for filtering the dataset."},
     )
     max_concurrent: int = field(
-        default=32,
+        default=128,
         metadata={"help": "Maximum number of concurrent requests to the environment."},
     )
     # Async generation parameters
@@ -257,6 +257,13 @@ class GRPOConfig(TrainingArguments):
             "`'dr_grpo'`: Aggregates token-level losses by normalizing with a global constant. This method was "
             "introduced in the Dr. GRPO paper to eliminate length bias. The value of the constant corresponds to "
             "`max_completion_length`."
+        },
+    )
+    mask_env_responses: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to mask the environment responses. If `True`, the environment responses are masked, "
+            "preventing them from being incorrectly penalized and introducing noise during training."
         },
     )
     mask_truncated_completions: bool = field(

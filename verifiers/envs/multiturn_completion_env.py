@@ -33,10 +33,13 @@ class MultiTurnCompletionEnv(Environment):
                 client: OpenAI,
                 model: str,
                 prompt: str | List[Dict[str, str]],
+                answer: str,
+                task: str = "default",
+                info: Dict[str, Any] = {},
                 sampling_args: Dict[str, Any] = {},
                 **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
         is_completed = False
-        state = {}
+        state = {'answer': answer}
         assert isinstance(prompt, str)
         input = deepcopy(prompt) 
         completion = ""
