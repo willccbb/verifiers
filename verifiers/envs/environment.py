@@ -151,40 +151,24 @@ class Environment(ABC):
                        system_prompt: str | None = None,
                        few_shot: List[Dict[str, Any]] | None = None,
                        question_key: str = "question",
-                       images_key: str = "images",
                        answer_key: str = "answer") -> Dataset:
         # Extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(prompt: str, images: list | None) -> List[Dict[str, Any]]:
+        def format_prompt_fn(prompt: str) -> List[Dict[str, Any]]:
             messages = []
-            if images is None:
-                if system_prompt:
-                    messages.append({'role': 'system', 'content': system_prompt})
-                if few_shot:
-                    messages.extend(few_shot)
-                messages.append({'role': 'user', 'content': prompt})
-            else:
-                if system_prompt:
-                    messages.append({'role': 'system', 'content': [{"type": "text", "text": system_prompt}]})
-                if few_shot:
-                    messages.extend(few_shot)
-                content = [{"type": "text", "text": prompt}]
-                for img in images:
-                    content.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _pil_to_data_url(img)},
-                        }
-                    )
-                messages.append({"role": "user", "content": content})
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            if few_shot:
+                messages.extend(few_shot)
+            messages.append({'role': 'user', 'content': prompt})
             return messages
-
+        
         if answer_key == "answer":
             return dataset.map(lambda x: {
-                "prompt": format_prompt_fn(x[question_key], x.get(images_key)),
+                "prompt": format_prompt_fn(x[question_key]),
             }, num_proc=self.max_concurrent)
         else:
             return dataset.map(lambda x: {
-                "prompt": format_prompt_fn(x[question_key], x.get(images_key)),
+                "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
             }, num_proc=self.max_concurrent)
 
