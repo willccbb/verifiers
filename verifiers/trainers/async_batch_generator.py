@@ -233,7 +233,7 @@ class AsyncBatchGenerator:
         
         # Extract all reward-related keys
         all_reward_dict = {}
-        reward_keys = [k for k in env_results.keys() if k.endswith('_func') or k.endswith('_reward') or k == 'reward']
+        reward_keys = [k for k in env_results.keys() if k.endswith('_func') or 'reward' in k]
         for key in reward_keys:
             all_reward_dict[key] = env_results[key]
         
