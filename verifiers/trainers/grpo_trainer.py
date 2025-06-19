@@ -1160,9 +1160,11 @@ class GRPOTrainer(Trainer):
             if reward_key != 'reward':  # Skip the consolidated reward
                 reward_values = all_reward_dict[reward_key]
                 if isinstance(reward_values, list):
-                    reward_tensor = torch.tensor(reward_values, device=all_rewards.device)
+                    reward_tensor = torch.tensor(reward_values, dtype=torch.float32, device=all_rewards.device)
                 else:
                     reward_tensor = reward_values
+                    if reward_tensor.dtype != torch.float32:
+                        reward_tensor = reward_tensor.float()
                 mean_reward = reward_tensor.mean().item()
                 self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
 
