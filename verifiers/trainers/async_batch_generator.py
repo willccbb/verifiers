@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import time
 import torch
 from collections import deque
-import weave
+
 
 @dataclass
 class BatchRequest:
@@ -216,7 +216,7 @@ class AsyncBatchGenerator:
             except queue.Empty:
                 continue
     
-    @weave.op
+    
     def _generate_batch(self, request: BatchRequest) -> BatchResult:
         """
         Generate a single batch. This runs in the worker thread.

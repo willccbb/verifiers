@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Literal, Tuple, Union
 from openai import OpenAI
 
 from verifiers.envs.environment import Environment
-import weave
+
 
 class SingleTurnEnv(Environment):
     """
@@ -15,7 +15,7 @@ class SingleTurnEnv(Environment):
         super().__init__(message_type=message_type, **kwargs)
         self.message_type = message_type
     
-    @weave.op
+    
     def rollout(self,
                 client: OpenAI,
                 model: str,
