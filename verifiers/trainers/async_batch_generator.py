@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import time
 import torch
 from collections import deque
-
+import weave
 
 @dataclass
 class BatchRequest:
@@ -215,7 +215,8 @@ class AsyncBatchGenerator:
                 
             except queue.Empty:
                 continue
-
+    
+    @weave.op
     def _generate_batch(self, request: BatchRequest) -> BatchResult:
         """
         Generate a single batch. This runs in the worker thread.
@@ -232,7 +233,7 @@ class AsyncBatchGenerator:
         
         # Extract all reward-related keys
         all_reward_dict = {}
-        reward_keys = [k for k in env_results.keys() if k.endswith('_func') or k == 'reward']
+        reward_keys = [k for k in env_results.keys() if k.endswith('_func') or k.endswith('_reward') or k == 'reward']
         for key in reward_keys:
             all_reward_dict[key] = env_results[key]
         
