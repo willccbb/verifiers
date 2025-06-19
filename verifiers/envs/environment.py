@@ -34,6 +34,7 @@ class Environment(ABC):
                  max_concurrent: int = 128,
                  message_type: Literal['chat', 'completion'] = 'chat',
                  **kwargs: Any):
+
         self.client = client
         self.model = model
         self.message_type: Literal['chat', 'completion'] = message_type
@@ -183,7 +184,6 @@ class Environment(ABC):
 
         try:
             if message_type == 'chat':
-                print(f"Making call to {model} with prompt: {prompt}\n===============\n")
                 assert isinstance(prompt, list)
                 response = client.chat.completions.create(
                     model=model,
