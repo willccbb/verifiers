@@ -11,7 +11,7 @@ from collections import deque
 class BatchRequest:
     """Request for batch generation"""
     batch_id: int
-    env_inputs: Dict[str, List[Any]]
+    env_inputs: Dict[str, List[Any] | None]
     processing_class: Any
     mask_env_responses: bool
     max_completion_length: int
@@ -239,6 +239,7 @@ class AsyncBatchGenerator:
         # Process results
         processed_results = self.env.process_env_results(
             env_results['prompt'],
+            env_results['images'],
             env_results['completion'],
             env_results['state'],
             env_results['reward'],
