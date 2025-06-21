@@ -1843,73 +1843,13 @@ def main(script_args: ScriptArguments):
         ws_max_queue=1024
     )
 
-
-def make_parser():
-    num_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").count(",") + 1
-    parser = argparse.ArgumentParser(description="OpenAI-compatible vLLM server with weight synchronization")
-    
-    parser.add_argument("--model", type=str, required=True,
-                        help="Model name or path to load the model from.")
-    parser.add_argument("--revision", type=str, default=None,
-                        help="Revision to use for the model. If not specified, the default branch will be used.")
-    parser.add_argument("--tensor-parallel-size", type=int, default=num_gpus,
-                        help="Number of tensor parallel workers to use.")
-    parser.add_argument("--data-parallel-size", type=int, default=1,
-                        help="Number of data parallel workers to use.")
-    parser.add_argument("--host", type=str, default="0.0.0.0",
-                        help="Host address to run the server on.")
-    parser.add_argument("--port", type=int, default=8000,
-                        help="Port to run the server on.")
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.95,
-                        help="Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV cache.")
-    parser.add_argument("--dtype", type=str, default="auto",
-                        help="Data type to use for vLLM generation. If set to 'auto', the data type will be automatically determined.")
-    parser.add_argument("--max-model-len", type=int, default=8192,
-                        help="The max_model_len to use for vLLM. This can be useful when running with reduced gpu_memory_utilization.")
-    parser.add_argument("--enable-prefix-caching", action="store_true", default=True,
-                        help="Whether to enable prefix caching in vLLM.")
-    parser.add_argument("--no-enable-prefix-caching", dest="enable_prefix_caching", action="store_false",
-                        help="Disable prefix caching in vLLM.")
-    parser.add_argument("--enforce-eager", action="store_true", default=None,
-                        help="Whether to enforce eager execution. If True, disable CUDA graph and always execute in eager mode.")
-    parser.add_argument("--kv-cache-dtype", type=str, default="auto",
-                        help="Data type to use for KV cache. If set to 'auto', the dtype will default to the model data type.")
-    parser.add_argument("--log-level", type=str, default="info", 
-                        choices=["critical", "error", "warning", "info", "debug", "trace"],
-                        help="Log level for uvicorn.")
-    parser.add_argument("--max-batch-size", type=int, default=1024,
-                        help="Maximum number of requests to process in one LLM call from the active pool.")
-    parser.add_argument("--batch-request-timeout-seconds", type=int, default=300,
-                        help="Timeout in seconds for a single request waiting for its turn and completion.")
-    parser.add_argument("--token-chunk-size", type=int, default=64,
-                        help="Number of tokens to generate per iteration per request in token-chunk dynamic batching.")
-    
-    return parser
+from trl import TrlParser
+from verifiers.inference.vllm_config import VLLMServerConfig
 
 def cli_main():
     """Entry point for the vf-vllm CLI command."""
-    parser = make_parser()
-    args = parser.parse_args()
-    
-    # Convert argparse Namespace to ScriptArguments dataclass
-    script_args = ScriptArguments(
-        model=args.model,
-        revision=args.revision,
-        tensor_parallel_size=args.tensor_parallel_size,
-        data_parallel_size=args.data_parallel_size,
-        host=args.host,
-        port=args.port,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        dtype=args.dtype,
-        max_model_len=args.max_model_len,
-        enable_prefix_caching=args.enable_prefix_caching,
-        enforce_eager=args.enforce_eager,
-        kv_cache_dtype=args.kv_cache_dtype,
-        log_level=args.log_level,
-        max_batch_size=args.max_batch_size,
-        batch_request_timeout_seconds=args.batch_request_timeout_seconds,
-        token_chunk_size=args.token_chunk_size
-    )
+    parser = TrlParser(VLLMServerConfig)
+    script_args = parser.parse_args_and_config()[0]
     
     main(script_args)
 
