@@ -202,6 +202,7 @@ class YourCustomEnv(Environment):
 	- Using more `num_generations` (larger group size)
 	- Using LoRA adapters
 	- Difficulty filtering (expensive up front)
+        - Stay as much on policy as possible by decreasing the number of update steps per batch to (`num_iterations`) 1
 - Tricks whose benefit remains up-for-debate or context-dependent:
 	- High `beta` values (`0.1+`)
 	- Dr. GRPO vs GRPO
