@@ -29,7 +29,7 @@ from trl.trainer.utils import (
 import wandb
 import numpy as np
 
-from verifiers import Environment
+from verifiers.envs import Environment
 from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
@@ -1160,9 +1160,11 @@ class GRPOTrainer(Trainer):
             if reward_key != 'reward':  # Skip the consolidated reward
                 reward_values = all_reward_dict[reward_key]
                 if isinstance(reward_values, list):
-                    reward_tensor = torch.tensor(reward_values, device=all_rewards.device)
+                    reward_tensor = torch.tensor(reward_values, dtype=torch.float32, device=all_rewards.device)
                 else:
                     reward_tensor = reward_values
+                    if reward_tensor.dtype != torch.float32:
+                        reward_tensor = reward_tensor.float()
                 mean_reward = reward_tensor.mean().item()
                 self._metrics[mode][f"rewards/{reward_key}"].append(mean_reward)
 

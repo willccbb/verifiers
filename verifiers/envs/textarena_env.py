@@ -7,7 +7,7 @@ nltk.download('words', quiet=True)
 nltk.download('averaged_perceptron_tagger_eng', quiet=True)
 import textarena as ta 
 
-from verifiers import MultiTurnEnv
+from verifiers.envs import MultiTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 

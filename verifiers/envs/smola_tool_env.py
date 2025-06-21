@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Callable, Optional, Type
 
 from datasets import Dataset
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers.smola_parser import SmolaParser
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE

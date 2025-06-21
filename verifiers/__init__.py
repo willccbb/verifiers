@@ -1,12 +1,10 @@
-from typing import Callable
-RewardFunc = Callable[..., float]
-
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True # type: ignore
 
 from .utils.logging_utils import setup_logging, print_prompt_completions_sample
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
 from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
+from .utils.types import RewardFunc
 
 from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
@@ -53,4 +51,5 @@ __all__ = [
     "load_example_dataset",
     "setup_logging",
     "print_prompt_completions_sample",
+    "RewardFunc",
 ]

@@ -6,7 +6,8 @@ import inspect
 import logging
 from typing import List, Dict, Any, Union
 
-from verifiers import RewardFunc
+
+from verifiers.utils.types import RewardFunc
 from verifiers.parsers import Parser
 
 
@@ -147,6 +148,7 @@ class Rubric:
             desc=f"Evaluating {len(prompts)} rollouts"
         )
         return {k: [item[k] for item in rewards] for k in rewards[0]}
+    
     
     def score_rollouts(self,
                        prompts: List[Union[str, List[Dict[str, Any]]]],

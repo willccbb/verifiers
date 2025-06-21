@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.rubrics.rubric import Rubric
 
 

@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Tuple
 
 from datasets import Dataset
 from openai import OpenAI
-from verifiers import RewardFunc
+from verifiers.utils.types import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics import MathRubric
