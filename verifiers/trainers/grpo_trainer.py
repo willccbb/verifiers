@@ -1,5 +1,6 @@
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
 
+import inspect
 import logging
 from collections import defaultdict, deque
 from contextlib import nullcontext
@@ -11,11 +12,10 @@ import torch
 from torch.utils.data import DataLoader, Sampler
 from accelerate.utils import broadcast_object_list, gather_object, is_peft_model
 from peft import PeftConfig, get_peft_model
-from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.processing_utils import ProcessorMixin
 from transformers.trainer import Trainer
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import seed_worker
@@ -34,6 +34,7 @@ from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
+from verifiers.utils.model_utils import generic_model_loader
 
 class RepeatSampler(Sampler):
     """
@@ -132,6 +133,19 @@ class RepeatSampler(Sampler):
         return self.num_samples * self.mini_repeat_count * self.repeat_count
 
 
+def _accepts_logits_to_keep(model) -> bool:
+    forward = (
+        model.get_base_model().forward
+        if hasattr(model, "get_base_model")
+        else model.forward
+    )
+    try:
+        inspect.signature(forward).bind_partial(**{"logits_to_keep": None})
+        return True
+    except TypeError:
+        return False
+
+
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -150,53 +164,53 @@ def nanstd(tensor: torch.Tensor) -> torch.Tensor:
     variance *= count / (count - 1)  # Bessel's correction
     return torch.sqrt(variance)
 
-def split_tensor_dict(
-    tensor_dict: dict[str, Optional[torch.Tensor]], num_chunks: int
-) -> list[dict[str, Optional[torch.Tensor]]]:
+def shuffle_data_dict(data_dict: dict[str, Any]) -> dict[str, Any]:
     """
-    Splits a dictionary of tensors along the first dimension into `num_chunks` equal parts.
-
-    Example:
-        >>> x = torch.arange(12).reshape(6, 2)
-        >>> y = torch.arange(6).reshape(6, 1)
-        >>> tensor_dict = {"x": x, "y": y}
-        >>> split_tensor_dict(tensor_dict, 3)
-        [
-            {"x": tensor([[0, 1], [2, 3]]), "y": tensor([[0], [1]])},
-            {"x": tensor([[4, 5], [6, 7]]), "y": tensor([[2], [3]])},
-            {"x": tensor([[ 8,  9], [10, 11]]), "y": tensor([[4], [5]])}
-        ]
+    Shuffles a dictionary of tensors or lists along the first dimension in unison.
     """
-    first_tensor = next(tensor for tensor in tensor_dict.values() if tensor is not None)
-    chunk_size = first_tensor.shape[0] // num_chunks
-    return [
-        {
-            key: tensor[i * chunk_size : (i + 1) * chunk_size] if tensor is not None else None
-            for key, tensor in tensor_dict.items()
-        }
-        for i in range(num_chunks)
-    ]
-
-def shuffle_tensor_dict(tensor_dict: dict[str, Optional[torch.Tensor]]) -> dict[str, Optional[torch.Tensor]]:
-    """
-    Shuffles a dictionary of tensors along the first dimension in unison.
-
-    Example:
-        >>> x = torch.arange(6).reshape(3, 2)
-        >>> y = torch.arange(3).reshape(3, 1)
-        >>> tensor_dict = {"x": x, "y": y}
-        >>> shuffle_tensor_dict(tensor_dict)
-        {'x': tensor([[2, 3],
-                      [0, 1],
-                      [4, 5]]),
-         'y': tensor([[1],
-                      [0],
-                      [2]])}
-    """
-    first_tensor = next(tensor for tensor in tensor_dict.values() if tensor is not None)
-    batch_size = first_tensor.shape[0]
+    first_item = next(item for item in data_dict.values() if item is not None)
+    batch_size = len(first_item)
     permutation = torch.randperm(batch_size)
-    return {key: tensor[permutation] if tensor is not None else None for key, tensor in tensor_dict.items()}
+
+    shuffled_dict = {}
+    for key, value in data_dict.items():
+        if value is None:
+            shuffled_dict[key] = None
+        elif isinstance(value, torch.Tensor):
+            shuffled_dict[key] = value[permutation]
+        elif isinstance(value, list):
+            shuffled_dict[key] = [value[i] for i in permutation]
+        else:
+            raise TypeError(f"Unsupported type for shuffling: {type(value)}")
+    return shuffled_dict
+
+def split_data_dict(
+    data_dict: dict[str, Any], num_chunks: int
+) -> list[dict[str, Any]]:
+    """
+    Splits a dictionary of tensors or lists along the first dimension into `num_chunks` equal parts.
+    """
+    first_item = next(item for item in data_dict.values() if item is not None)
+    # Ensure chunk_size is an integer
+    chunk_size = len(first_item) // num_chunks
+    if len(first_item) % num_chunks != 0:
+        logging.warning(
+            f"The total number of samples ({len(first_item)}) is not divisible by the number of chunks ({num_chunks}). "
+            f"The last {len(first_item) % num_chunks} samples will be dropped."
+        )
+
+    chunked_list = []
+    for i in range(num_chunks):
+        chunk = {}
+        start_idx = i * chunk_size
+        end_idx = (i + 1) * chunk_size
+        for key, value in data_dict.items():
+            if value is None:
+                chunk[key] = None
+            else:
+                chunk[key] = value[start_idx:end_idx]
+        chunked_list.append(chunk)
+    return chunked_list
 
 def nanmin(tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -233,7 +247,7 @@ class GRPOTrainer(Trainer):
             model: PreTrainedModel,
             env: Environment,
             args: GRPOConfig,
-            processing_class: PreTrainedTokenizerBase,
+            processing_class: ProcessorMixin,
             callbacks: Optional[list[TrainerCallback]] = None,
             optimizers: tuple[Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]] = (None, None),
             peft_config: Optional[PeftConfig] = None,
@@ -256,9 +270,14 @@ class GRPOTrainer(Trainer):
         # Suppress irrelevant warning
         model.warnings_issued["estimate_tokens"] = True 
 
+        self.tokenizer_base = getattr(processing_class, "tokenizer", None) # extract tokenizer in multimodal case
         # Tokenizer pad token
-        if processing_class.pad_token is None: # type: ignore
-            processing_class.pad_token = processing_class.eos_token # type: ignore
+        if self.tokenizer_base is not None:
+            if processing_class.tokenizer.pad_token is None: # type: ignore
+                processing_class.tokenizer.pad_token = processing_class.tokenizer.eos_token # type: ignore
+        else:
+            if processing_class.pad_token is None: # type: ignore
+                processing_class.pad_token = processing_class.eos_token # type: ignore
 
         # Training arguments
         self.per_device_train_batch_size = args.per_device_train_batch_size
@@ -297,8 +316,6 @@ class GRPOTrainer(Trainer):
         train_dataset = env.get_dataset()
         assert train_dataset is not None
 
-        eval_dataset = env.get_eval_dataset()
-        
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
             self.logger.info(f"Filtering dataset for prompts with length <= {self.max_prompt_length}")
@@ -313,7 +330,12 @@ class GRPOTrainer(Trainer):
                 else:
                     # Completion format
                     prompt_text = prompt
-                prompt_ids = processing_class.encode(prompt_text) # type: ignore
+                if self.tokenizer_base is not None:
+                    encode = self.tokenizer_base.encode
+                else:
+                    assert isinstance(processing_class, PreTrainedTokenizerBase)
+                    encode = processing_class.encode
+                prompt_ids = encode(prompt_text) # type: ignore
                 return len(prompt_ids) <= max_length
             
             original_size = len(train_dataset)
@@ -323,14 +345,14 @@ class GRPOTrainer(Trainer):
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
         # dummy data collator
-        def data_collator(features):
+        def default_data_collator(features):
             return features
         super().__init__(
             model=model,
             args=args,
-            data_collator=data_collator,
+            data_collator=env.data_collator if env.data_collator is not None else default_data_collator,
             train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
+            eval_dataset=datasets.Dataset.from_dict({}), # dummy eval ds. This is actually handled by environment
             processing_class=processing_class,
             callbacks=callbacks,
             optimizers=optimizers,
@@ -343,7 +365,7 @@ class GRPOTrainer(Trainer):
         elif is_deepspeed_zero3_enabled():
             model_id = model.config._name_or_path
             model_init_kwargs = {"torch_dtype": "auto"}
-            self.ref_model = AutoModelForCausalLM.from_pretrained(model_id, **model_init_kwargs)
+            self.ref_model = generic_model_loader(model_id, **model_init_kwargs)
         elif is_peft_model(model):
             # If PEFT is used, the reference model is not needed since the adapter can be disabled
             # to revert to the initial model.
@@ -554,16 +576,28 @@ class GRPOTrainer(Trainer):
         return last_hidden_state
 
     # Get the per-token log probabilities for the completions for the model and the reference model
-    def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None) -> torch.Tensor:
+    def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None, **model_kwargs) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
         all_logps = []
+        accepts_logits_to_keep = _accepts_logits_to_keep(model)
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
-
+            model_kwargs_batch = {}
+            for key, value in model_kwargs.items():
+                if isinstance(value, list):
+                    # 1. Slice the list to get the tensors for this micro-batch
+                    sub_list = value[i : i + batch_size]
+                    # 2. Batch the tensors in the sub-list together
+                    model_kwargs_batch[key] = torch.cat(sub_list, dim=0).to(self.accelerator.device)
+                else:
+                    # Handle non-list arguments (like the 'logits_to_keep' we added)
+                    model_kwargs_batch[key] = value
+            if accepts_logits_to_keep:
+                model_kwargs_batch["logits_to_keep"] = logits_to_keep + 1
             # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
             logits = model(
-                input_ids=input_ids_batch, attention_mask=attention_mask_batch, logits_to_keep=logits_to_keep + 1
+                input_ids=input_ids_batch, attention_mask=attention_mask_batch, **model_kwargs_batch
             ).logits
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
             input_ids_batch = input_ids_batch[:, -logits_to_keep:]
@@ -674,7 +708,7 @@ class GRPOTrainer(Trainer):
             'mask': mask
         }
 
-    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any], List[Any], List[Any]]:
+    def _gather_batch_data(self, batch_offset: int = 0) -> Tuple[List[Any], List[Any] | None,  List[Any], List[Any], List[Any]]:
         """
         Gather batch data from all processes.
         
@@ -691,14 +725,18 @@ class GRPOTrainer(Trainer):
         
         # Gather batch data from all processes
         prompts = [x['prompt'] for x in batch]
+        images = [x['images'] for x in batch if 'images' in x]
         answers = [x['answer'] for x in batch]
         tasks = [x.get('task', 'default') for x in batch]
         infos = [x.get('info', {}) for x in batch]
         all_prompts = gather_object(prompts)
+        all_images = gather_object(images)
+        all_images = all_images if all_images != [] else None
         all_answers = gather_object(answers)
         all_tasks = gather_object(tasks)
         all_infos = gather_object(infos)
-        return all_prompts, all_answers, all_tasks, all_infos
+         
+        return all_prompts, all_images, all_answers, all_tasks, all_infos
 
     def _prepare_inputs( # type: ignore
         self, inputs: list[dict[str, Any]]
@@ -745,15 +783,14 @@ class GRPOTrainer(Trainer):
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 batch_offset = batch_id - batch_id_to_retrieve
-                all_prompts, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
+                all_prompts, all_images, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
                 
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
-                
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
                     request = BatchRequest(
                         batch_id=batch_id,
-                        env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks, 'info': all_infos},
+                        env_inputs={'prompt': all_prompts,  'images': all_images, 'answer': all_answers, 'task': all_tasks, 'info': all_infos},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
                         max_completion_length=self.max_completion_length,
@@ -797,6 +834,7 @@ class GRPOTrainer(Trainer):
                     'completion_ids': processed_results['completion_ids'],
                     'completion_mask': processed_results['completion_mask'],
                     'rewards': processed_results['rewards'],
+                    'remaining_inputs': processed_results['remaining_inputs'],
                     'all_reward_dict': batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']},
                     'completions': batch_result.completions if hasattr(batch_result, 'completions') else [],
                     'prompts': batch_result.prompts if hasattr(batch_result, 'prompts') else [],
@@ -835,9 +873,14 @@ class GRPOTrainer(Trainer):
                 completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
             # Pad sequences
-            prompt_ids = pad(prompt_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
+            if self.tokenizer_base is not None:
+                pad_token_id = self.tokenizer_base.pad_token_id
+            else:
+                assert isinstance(self.processing_class, PreTrainedTokenizerBase)
+                pad_token_id = self.processing_class.pad_token_id
+            prompt_ids = pad(prompt_ids_list, padding_value=pad_token_id, padding_side='left') # type: ignore
             prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
-            completion_ids = pad(completion_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
+            completion_ids = pad(completion_ids_list, padding_value=pad_token_id, padding_side='right') # type: ignore
             completion_mask = pad(completion_mask_list)
             
             # Truncate if needed
@@ -851,7 +894,10 @@ class GRPOTrainer(Trainer):
             
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
-            
+
+            # slice remaining inputs
+            remaining_inputs = broadcast_data['remaining_inputs'][process_slice]
+
             # Log metrics on main process only
             if self.accelerator.is_main_process:
                 self._log_reward_metrics_primary(
@@ -874,7 +920,7 @@ class GRPOTrainer(Trainer):
                     all_completion_ids=broadcast_data['completion_ids'], 
                     all_prompt_mask=broadcast_data['prompt_mask']
                 )
-            
+
             # Concatenate all data for shuffling
             full_batch = {
                 "prompt_ids": prompt_ids,
@@ -883,11 +929,12 @@ class GRPOTrainer(Trainer):
                 "completion_mask": completion_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
+                "remaining_inputs": remaining_inputs,
             }
             
             # Shuffle and split for gradient accumulation
-            full_batch = shuffle_tensor_dict(full_batch)
-            self._buffered_inputs = split_tensor_dict(full_batch, self.gradient_accumulation_steps)
+            full_batch = shuffle_data_dict(full_batch)
+            self._buffered_inputs = split_data_dict(full_batch, self.gradient_accumulation_steps)
             self.accelerator.wait_for_everyone()
         # Return appropriate slice from buffer
         result = self._buffered_inputs[self._step % self.gradient_accumulation_steps]
@@ -917,17 +964,19 @@ class GRPOTrainer(Trainer):
 
     def compute_loss(self,
                      model: PreTrainedModel,
-                     inputs: Dict[str, torch.Tensor],
+                     inputs: Dict[str, Any],
                      return_outputs: bool = False,
                      num_items_in_batch: int | None = None) -> torch.Tensor: 
         mode = "train" 
         # Compute the per-token log probabilities for the model
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
         completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
+        model_kwargs = inputs["remaining_inputs"]
         input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
+        model_kwargs = {key: [d[key] for d in model_kwargs] for key in model_kwargs[0].keys()}
+        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep, batch_size = 1 if model_kwargs != {} else None, **model_kwargs)
 
         # Compute the loss
         advantages = inputs["advantages"]
@@ -954,12 +1003,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep
+                        self.ref_model, input_ids, attention_mask, logits_to_keep, batch_size = 1 if model_kwargs != {} else None, **model_kwargs
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter(): # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep
+                            self.model, input_ids, attention_mask, logits_to_keep, batch_size = 1 if model_kwargs != {} else None, **model_kwargs
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
@@ -1035,13 +1084,21 @@ class GRPOTrainer(Trainer):
             completions = eval_results['completion']
             if isinstance(completions[0], str):
                 # Completion format - directly tokenize strings
-                completion_lengths = [len(self.processing_class.encode(c)) for c in completions] # type: ignore
+                if self.tokenizer_base is not None:
+                    encode = self.tokenizer_base.encode
+                else:
+                    assert isinstance(self.processing_class, PreTrainedTokenizerBase)
+                    encode = self.processing_class.encode
+                completion_lengths = [len(encode(c)) for c in completions] # type: ignore
             else:
                 # Chat format - use apply_chat_template
                 completion_lengths = []
                 for comp in completions:
                     # Apply chat template to get the full text
-                    tokens = self.processing_class.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
+                    if hasattr(self.processing_class, "tokenizer"): # if multimodal processor, use tokenizer; ow, it expects mm inputs
+                        tokens = self.processing_class.tokenizer.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
+                    else:
+                        tokens = self.processing_class.apply_chat_template(comp, tokenize=True, add_generation_prompt=False) # type: ignore
                     # Tokenize and count
                     completion_lengths.append(len(tokens))
             
@@ -1074,10 +1131,18 @@ class GRPOTrainer(Trainer):
             # Log to wandb if available
             if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
                 import pandas as pd
-                
+                # format prompt for logging
+                prompt = []
+                if prompts:
+                    for messages in prompts:
+                        last_message = messages[-1]
+                        content = last_message.get("content", "")
+                        if isinstance(content, list):
+                            content = content[0]["text"] # extract text only in multimodal case
+                        prompt.append([{'role': 'user', 'content': content}])
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
-                    "prompt": prompts,
+                    "prompt": prompt,
                     "completion": completions,
                 }
                 for k, v in reward_dict.items():
@@ -1119,10 +1184,18 @@ class GRPOTrainer(Trainer):
 
             if self.args.report_to and "wandb" in self.args.report_to and wandb.run is not None:
                 import pandas as pd
- 
+                # format prompt for logging
+                prompt = []
+                if list(self._textual_logs["prompt"]):
+                    for messages in list(self._textual_logs["prompt"]):
+                        last_message = messages[-1]
+                        content = last_message.get("content", "")
+                        if isinstance(content, list):
+                            content = content[0]["text"] # extract text only in multimodal case
+                        prompt.append([{'role': 'user', 'content': content}])
                 table = {
                     "step": [str(self.state.global_step)] * len(self._textual_logs["prompt"]),
-                    "prompt": list(self._textual_logs["prompt"]),
+                    "prompt": prompt,
                     "completion": list(self._textual_logs["completion"]),
                     **{k: list(v) for k, v in self._textual_logs["rewards"].items()},
                 }
@@ -1211,8 +1284,13 @@ class GRPOTrainer(Trainer):
         
         # Check for EOS tokens  
         term_lengths = []
+        if self.tokenizer_base is not None:
+            eos_token_id = self.tokenizer_base.eos_token_id
+        else:
+            assert isinstance(self.processing_class, PreTrainedTokenizerBase)
+            eos_token_id = self.processing_class.eos_token_id
         for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
-            has_eos = any(token == self.processing_class.eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
+            has_eos = any(token == eos_token_id for token, mask in zip(comp_ids, comp_mask) if mask) # type: ignore
             if has_eos:
                 term_lengths.append(sum(comp_mask))
         
