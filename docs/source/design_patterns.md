@@ -1,6 +1,6 @@
 # The Verifiers Framework: A Code-Focused Architectural Analysis
 
-This is meant to be more of an analysis of how the verifiers framework is architectured and why its code is structured the way it is. This is a story about **composable RL for LLMs** - a framework designed around three core primitives that work together to enable sophisticated reinforcement learning training.
+Different from the rest of the docs, this is meant to be more of an analysis of how the verifiers framework is architectured and why its code is structured the way it is. This is a story about **composable RL for LLMs** - a framework designed around three core primitives that work together to enable sophisticated reinforcement learning training.
 
 ## The Big Picture: Why This Architecture Exists
 
