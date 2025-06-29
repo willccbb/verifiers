@@ -372,8 +372,8 @@ class ScriptArguments:
             "hardware support this feature."
         },
     )
-    enforce_eager: Optional[bool] = field(
-        default=None,
+    enforce_eager: bool = field(
+        default=False,
         metadata={
             "help": "Whether to enforce eager execution. If set to `True`, we will disable CUDA graph and always "
             "execute the model in eager mode. If `False` (default behavior), we will use CUDA graph and eager "
