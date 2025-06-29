@@ -304,7 +304,7 @@ class ScriptArguments:
         enable_prefix_caching (`bool` or `None`, *optional*, defaults to `None`):
             Whether to enable prefix caching in vLLM. If set to `True`, ensure that the model and the hardware support
             this feature.
-        enforce_eager (`bool` or `None`, *optional*, defaults to `None`):
+        enforce_eager (`bool`, defaults to `False`):
             Whether to enforce eager execution. If set to `True`, we will disable CUDA graph and always execute the
             model in eager mode. If `False` (default behavior), we will use CUDA graph and eager execution in hybrid.
         kv_cache_dtype (`str`, *optional*, defaults to `"auto"`):
@@ -1870,7 +1870,7 @@ def make_parser():
                         help="Whether to enable prefix caching in vLLM.")
     parser.add_argument("--no-enable-prefix-caching", dest="enable_prefix_caching", action="store_false",
                         help="Disable prefix caching in vLLM.")
-    parser.add_argument("--enforce-eager", action="store_true", default=None,
+    parser.add_argument("--enforce-eager", action="store_true", default=False,
                         help="Whether to enforce eager execution. If True, disable CUDA graph and always execute in eager mode.")
     parser.add_argument("--kv-cache-dtype", type=str, default="auto",
                         help="Data type to use for KV cache. If set to 'auto', the dtype will default to the model data type.")
