@@ -13,7 +13,7 @@ def grpo_defaults(run_name: str) -> GRPOConfig:
         max_steps=500,
         bf16=True,
         max_grad_norm=0.001,
-        num_iterations=2,
+        num_iterations=1,
         max_prompt_length=1024,
         max_completion_length=2048,
         per_device_train_batch_size=8,
