@@ -342,10 +342,17 @@ class Environment(ABC):
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
             results = deepcopy(inputs)
+        if 'prompt' not in results:
+            raise ValueError('prompt column not found in inputs')
+        if 'answer' not in results and 'info' not in results:
+            raise ValueError('answer or info column must be found in inputs')
+        if 'answer' not in results:
+            results['answer'] = [''] * len(results['prompt'])
         if 'task' not in results:
             results['task'] = ['default'] * len(results['prompt'])
         if 'info' not in results:
             results['info'] = [{}] * len(results['prompt'])
+
         rollouts = self.run_rollouts(
             prompts=results['prompt'],
             answers=results['answer'],
@@ -439,7 +446,12 @@ class Environment(ABC):
             completion_mask.extend(msg_mask)
             # update previous tokenization for next iteration
             prev_ids = current_ids
-            assert len(completion_ids) == len(completion_mask), f"Length mismatch in chat format. Completion ids: {completion_ids}, completion mask: {completion_mask}"
+            assert len(completion_ids) == len(completion_mask), f"Length mismatch in chat format. \
+Completion ids: {completion_ids}, completion mask: {completion_mask}. \
+This often occurs with models whose tokenizer chat templates discard <think> tokens \
+from previous turns, such as Qwen3 or DeepSeek-R1-Distill models. \
+For Qwen3 models, you may want to replace the chat template with the Qwen2.5 chat template. \
+Model copies with swapped templates are available here: https://huggingface.co/collections/willcb/qwen3-68434f4883925bfdb4570ee5"
 
         return prompt_ids, prompt_mask, completion_ids, completion_mask
 
