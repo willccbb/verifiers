@@ -29,7 +29,6 @@ class SmolaToolEnv(MultiTurnEnv):
             few_shot=few_shot,
             mask_env_response=mask_env_response,
             max_steps=max_steps,
-            sampling_args=sampling_args,
             **kwargs
         )
         self.dataset_name = dataset
