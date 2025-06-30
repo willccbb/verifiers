@@ -1329,9 +1329,7 @@ def main(script_args: ScriptArguments):
     connections: list[AnyType] = [] # Use Any type to avoid PipeConnection vs Connection mismatch
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
-        # Use duplex=True to allow bidirectional communication
-        # This is needed for "call" type commands that expect responses
-        parent_connection, child_connection = Pipe(duplex=True)
+        parent_connection, child_connection = Pipe()
         process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
         process.start()
         connections.append(parent_connection)
@@ -1339,64 +1337,30 @@ def main(script_args: ScriptArguments):
 
     @asynccontextmanager 
     async def lifespan(app: FastAPI):
-        nonlocal processes # Capture from outer scope
-        global request_queue, batch_processor_task # Defined at module level
-
-        logger.info(f"Lifespan: Waiting for {script_args.data_parallel_size} LLM worker(s) to be ready...")
+        global request_queue, batch_processor_task
         ready_connections = set()
         
-        # Timeout for waiting for workers to get ready (e.g., 5 minutes)
-        timeout_seconds = 300 
-        start_wait_time = time.time()
-
         while len(ready_connections) < script_args.data_parallel_size:
-            if time.time() - start_wait_time > timeout_seconds:
-                logger.error(f"Lifespan: Timeout waiting for all LLM workers. Expected {script_args.data_parallel_size}, got {len(ready_connections)} ready.")
-                raise RuntimeError("LLM workers failed to initialize in time")
-
-            for i, connection in enumerate(connections):
+            for connection in connections:
                 if connection not in ready_connections:
-                    # Use poll() with a short timeout to avoid blocking indefinitely if a worker is stuck
-                    if connection.poll(0.1): # Check if data is available, with a 0.1s timeout
-                        try:
-                            msg = connection.recv()
-                            logger.info(f"Lifespan: Received message from worker {i}: {msg}")
-                            if isinstance(msg, dict) and msg.get("status") == "ready":
-                                logger.info(f"Lifespan: LLM worker {i} reported ready.")
-                                ready_connections.add(connection)
-                            else:
-                                logger.warning(f"Lifespan: Received unexpected message from worker {i}: {msg}")
-                        except Exception as e:
-                            logger.error(f"Lifespan: Error receiving message from worker {i}: {e}")
+                    msg = connection.recv()
+                    if isinstance(msg, dict) and msg.get("status") == "ready":
+                        ready_connections.add(connection)
 
             if len(ready_connections) < script_args.data_parallel_size:
                 time.sleep(0.5) # Brief sleep to avoid busy-waiting if not all workers are ready yet
 
         if len(ready_connections) == script_args.data_parallel_size:
-            logger.info(f"Lifespan: All {script_args.data_parallel_size} LLM worker(s) are ready. Proceeding to yield.")
-            # Initialize request queue and start batch processor task
             request_queue = asyncio.Queue()
-            logger.info("Lifespan: Initialized request queue for batched chat completions.")
             batch_processor_task = asyncio.create_task(
                 batch_processing_loop(script_args, connections, request_queue, logger)
             )
-            logger.info("Lifespan: Started batch processing task for chat completions.")
-        else:
-            logger.error(f"Lifespan: Not all LLM workers became ready. Expected {script_args.data_parallel_size}, got {len(ready_connections)}. Uvicorn might not function correctly. Batch processor NOT started.")
         
         yield
-        logger.info("Lifespan: Uvicorn server is shutting down. Cleaning up resources.")
 
         if batch_processor_task is not None and not batch_processor_task.done():
-            logger.info("Lifespan: Cancelling batch processor task...")
             batch_processor_task.cancel()
-            try:
-                await batch_processor_task
-                logger.info("Lifespan: Batch processor task finished.")
-            except asyncio.CancelledError:
-                logger.info("Lifespan: Batch processor task was cancelled as expected.")
-            except Exception as e:
-                logger.error(f"Lifespan: Exception during batch processor task shutdown: {e}", exc_info=True)
+            await batch_processor_task
 
         # Wait for processes to terminate
         for process in processes:
@@ -1710,9 +1674,6 @@ def main(script_args: ScriptArguments):
                     logger.warning(f"[UPDATE_PARAM] Timeout waiting for {active_generation_count} active generations to complete")
                     break
                 await asyncio.sleep(0.1)
-            if active_generation_count == 0:
-                logger.debug(f"[UPDATE_PARAM] All generations complete, proceeding with weight update")
-            
             # CRITICAL: Notify workers IMMEDIATELY so they're ready for NCCL broadcast
             # This must happen before returning the HTTP response to maintain synchronization with trainer
             dtype = getattr(torch, request.dtype.split(".")[-1])
@@ -1721,14 +1682,11 @@ def main(script_args: ScriptArguments):
             # Send to all workers synchronously to ensure they're ready
             # Using fire_and_forget since we don't need the result
             for i, connection in enumerate(connections):
-                logger.debug(f"[UPDATE_PARAM] Notifying worker {i} about weight update")
                 try:
                     connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
                 except Exception as e:
-                    logger.error(f"[UPDATE_PARAM] Failed to notify worker {i}: {e}")
                     return JSONResponse(status_code=500, content={"error": f"Failed to notify worker {i}: {str(e)}"})
             
-            logger.debug(f"[UPDATE_PARAM] All workers notified, trainer should now broadcast via NCCL")
             return {"message": "Weight update processed"}
 
     @app.post("/batch_update_named_params/")
@@ -1741,8 +1699,6 @@ def main(script_args: ScriptArguments):
             request (`BatchUpdateWeightsRequest`):
                 - `updates` (list of `UpdateWeightsRequest`): List of weight updates to process
         """
-        logger.info(f"[BATCH_UPDATE] Received batch of {len(request.updates)} weight updates")
-        
         # Process updates sequentially to maintain NCCL synchronization
         # The client will broadcast each parameter after we notify workers
         successful = []
@@ -1752,13 +1708,10 @@ def main(script_args: ScriptArguments):
             try:
                 # Acquire semaphore to limit concurrent updates across different batches
                 async with weight_update_semaphore:
-                    logger.debug(f"[BATCH_UPDATE] Processing weight update for: {update.name}")
-                    
                     # Wait for active generations if needed
                     wait_start = time.time()
                     while active_generation_count > 0:
                         if time.time() - wait_start > 30.0:
-                            logger.warning(f"[BATCH_UPDATE] Timeout waiting for generations")
                             break
                         await asyncio.sleep(0.1)
                     
@@ -1770,11 +1723,9 @@ def main(script_args: ScriptArguments):
                         try:
                             connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
                         except Exception as e:
-                            logger.error(f"[BATCH_UPDATE] Failed to notify worker {i} for {update.name}: {e}")
                             raise Exception(f"Failed to notify worker {i}")
                     
                     successful.append(update.name)
-                    logger.debug(f"[BATCH_UPDATE] Workers notified for {update.name}")
                     
             except Exception as e:
                 errors.append({"param": update.name, "error": str(e)})
@@ -1790,7 +1741,6 @@ def main(script_args: ScriptArguments):
                 }
             )
         
-        logger.info(f"[BATCH_UPDATE] Successfully processed {len(successful)} weight updates")
         return {"message": f"Successfully updated {len(successful)} parameters", "successful": successful}
 
     @app.post("/reset_prefix_cache/")

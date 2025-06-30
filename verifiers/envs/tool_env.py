@@ -85,12 +85,10 @@ class ToolEnv(MultiTurnEnv):
                  parser: XMLParser = XMLParser(fields=["think", ("tool", "answer")]),
                  env_parser: XMLParser = XMLParser(fields=["result"]),
                  max_turns: int = 10, **kwargs):
-        # Infer schemas from tool functions
         rubric = ToolRubric(tools=tools, parser=parser, env_parser=env_parser)
         self.tool_schemas = [infer_schema_from_function(tool) for tool in tools]
         self.tools = {tool.__name__: tool for tool in tools}
         
-        # Format the system prompt with tool descriptions
         if format_prompt:
             tool_descriptions = format_tool_descriptions(self.tool_schemas)
             formatted_prompt = system_prompt.format(tool_descriptions=tool_descriptions)

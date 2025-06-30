@@ -37,8 +37,15 @@ def main(num_samples: int, max_tokens: int):
         "temperature": 0.7,
     }
     results = vf_env.evaluate(
-        client=client, model=model_name, 
-        sampling_args=sampling_args, num_samples=num_samples)
+        client=client,
+        model=model_name, 
+        sampling_args=sampling_args,
+        num_samples=num_samples
+    )
+    
+
+
+
     print("--- Example ---")
     print(f"Prompt: {results['prompt'][0]}")
     print(f"Completion: {results['completion'][0]}")

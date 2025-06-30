@@ -41,10 +41,10 @@ class MultiTurnEnv(Environment):
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
-        is_completed = False
-        state = {'answer': answer}
         assert isinstance(prompt, list)
         messages = deepcopy(prompt) 
+        is_completed = False
+        state = {'answer': answer}
         completion = []
         turn = 0
         while not is_completed:
@@ -69,3 +69,4 @@ class MultiTurnEnv(Environment):
                 messages.append(env_msg)
                 completion.append(env_msg)
         return completion, state
+    

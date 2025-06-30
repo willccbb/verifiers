@@ -231,7 +231,6 @@ judge_rubric = JudgeRubric(
 )
 vf_env.rubric = vf.RubricGroup(rubrics=[judge_rubric, vf_env.rubric])
 
-
 model_name = "willcb/Qwen3-8B-Wiki-Search-SFT"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "wiki-trivia-grpo_" + model_name.split("/")[-1].lower()
