@@ -527,8 +527,33 @@ def create_pool_signature(
     )
 
 def llm_worker(
-    script_args: ScriptArguments, connection: MPConnection
+    script_args: ScriptArguments, data_parallel_rank: int, connection: MPConnection
 ) -> None:
+    # Set required environment variables for DP to work with vLLM
+    # Commenting these out to disable vLLM's built-in DP coordination
+    # Each worker will run as an independent vLLM instance
+    # os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
+    # os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
+    # os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
+    # os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
+
+    # Assign GPU based on data_parallel_rank
+    available_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+    if available_gpus == [""]:
+        available_gpus = [str(i) for i in range(torch.cuda.device_count())]
+    
+    gpus_per_worker = len(available_gpus) // script_args.data_parallel_size
+    if gpus_per_worker == 0:
+        raise ValueError(f"Not enough GPUs ({len(available_gpus)}) for data_parallel_size={script_args.data_parallel_size}")
+    
+    # Assign GPU(s) to this worker
+    start_idx = data_parallel_rank * gpus_per_worker
+    end_idx = start_idx + gpus_per_worker
+    worker_gpus = available_gpus[start_idx:end_idx]
+    
+    # Set CUDA_VISIBLE_DEVICES for this worker
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(worker_gpus)
+    
     llm = LLM(
         model=script_args.model,
         revision=script_args.revision,
@@ -1305,7 +1330,7 @@ def main(script_args: ScriptArguments):
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
-        process = Process(target=llm_worker, args=(script_args, child_connection))
+        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
         process.start()
         connections.append(parent_connection)
         processes.append(process)
