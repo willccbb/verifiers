@@ -527,14 +527,8 @@ def create_pool_signature(
     )
 
 def llm_worker(
-    script_args: ScriptArguments, data_parallel_rank: int, master_port: int, connection: MPConnection
+    script_args: ScriptArguments, connection: MPConnection
 ) -> None:
-    # Set required environment variables for DP to work with vLLM
-    os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
-    os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
-
     llm = LLM(
         model=script_args.model,
         revision=script_args.revision,
@@ -564,30 +558,11 @@ def llm_worker(
             method_name = command["method"]
             args, kwargs = command.get("args", ()), command.get("kwargs", {})
             
-            # Add debugging
-            logger.debug(f"[WORKER {data_parallel_rank}] Received command: {method_name}")
-            
-            try:
-                method = getattr(llm, method_name)
-                logger.debug(f"[WORKER {data_parallel_rank}] Calling {method_name} with kwargs keys: {list(kwargs.keys()) if kwargs else 'none'}")
-                
-                # Call the method
-                result = method(*args, **kwargs)
-                
-                logger.debug(f"[WORKER {data_parallel_rank}] {method_name} completed, result type: {type(result)}")
-                
-                if command["type"] == "call":
-                    # Send result back
-                    logger.debug(f"[WORKER {data_parallel_rank}] Sending result back")
-                    connection.send(result)
-                    logger.debug(f"[WORKER {data_parallel_rank}] Result sent")
-            except Exception as e:
-                logger.error(f"[WORKER {data_parallel_rank}] Error in {method_name}: {e}", exc_info=True)
-                if command["type"] == "call":
-                    # Send error back as a special result
-                    connection.send({"error": str(e), "traceback": traceback.format_exc()})
+            method = getattr(llm, method_name)
+            result = method(*args, **kwargs)
+            if command["type"] == "call":
+                connection.send(result)
         elif command["type"] == "shutdown":
-            logger.info(f"[WORKER {data_parallel_rank}] Received shutdown command")
             break
 
 
@@ -1330,7 +1305,7 @@ def main(script_args: ScriptArguments):
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
-        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
+        process = Process(target=llm_worker, args=(script_args, child_connection))
         process.start()
         connections.append(parent_connection)
         processes.append(process)
