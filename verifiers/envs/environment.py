@@ -15,6 +15,9 @@ from verifiers import RewardFunc
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 
+DEFAULT_MAX_CONCURRENT = 512
+DATASET_MAX_CONCURRENT = 32
+
 class Environment(ABC):
     """
     Base class for all environments.
@@ -29,7 +32,7 @@ class Environment(ABC):
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
                  sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = 128,
+                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                  message_type: Literal['chat', 'completion'] = 'chat',
                  **kwargs: Any):
         self.client = client
@@ -122,12 +125,12 @@ class Environment(ABC):
         if answer_key == "answer":
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=min(self.max_concurrent, 32))
+            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
         else:
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
-            }, num_proc=min(self.max_concurrent, 32))
+            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
 
     def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
@@ -249,7 +252,7 @@ class Environment(ABC):
                        tasks: List[str] = [],
                        infos: List[Dict[str, Any]] = [],
                        sampling_args: Dict[str, Any] = {},
-                       max_concurrent: int = 128,
+                       max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                        **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
@@ -274,7 +277,7 @@ class Environment(ABC):
                      tasks: List[str] = [],
                      infos: List[Dict[str, Any]] = [],
                      sampling_args: Dict[str, Any] = {},
-                     max_concurrent: int = 128,
+                     max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                      **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
         """
         Run rollouts for a given list of prompts and return the completions.
@@ -543,7 +546,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  num_samples: int = -1,
-                 max_concurrent: int = 128,
+                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                  **kwargs: Any
                 ) -> Dict[str, Any]:
         """
