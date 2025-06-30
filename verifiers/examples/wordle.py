@@ -21,18 +21,17 @@ model, tokenizer = vf.get_model_and_tokenizer(model_name)
 vf_env = TextArenaEnv(
     game="Wordle-v0",
     num_samples=2000, 
-    num_eval_samples=20,
-    max_concurrent=32,
+    num_eval_samples=20
 )
 
 run_name = f"wordle-grpo-{size}"
 training_args=vf.grpo_defaults(run_name=run_name)
 training_args.num_iterations=1
-training_args.per_device_train_batch_size=6
-training_args.num_generations=12
-training_args.gradient_accumulation_steps=4
+training_args.per_device_train_batch_size=8
+training_args.num_generations=16
+training_args.gradient_accumulation_steps=6
 training_args.max_prompt_length=1024
-training_args.max_completion_length=4096
+training_args.max_completion_length=3072
 training_args.max_steps=100
 training_args.mask_env_responses=True
 
