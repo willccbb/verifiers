@@ -527,13 +527,32 @@ def create_pool_signature(
     )
 
 def llm_worker(
-    script_args: ScriptArguments, data_parallel_rank: int, master_port: int, connection: MPConnection
+    script_args: ScriptArguments, data_parallel_rank: int, connection: MPConnection
 ) -> None:
     # Set required environment variables for DP to work with vLLM
-    os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
-    os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
-    os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
+    # Commenting these out to disable vLLM's built-in DP coordination
+    # Each worker will run as an independent vLLM instance
+    # os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
+    # os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
+    # os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
+    # os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
+
+    # Assign GPU based on data_parallel_rank
+    available_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+    if available_gpus == [""]:
+        available_gpus = [str(i) for i in range(torch.cuda.device_count())]
+    
+    gpus_per_worker = len(available_gpus) // script_args.data_parallel_size
+    if gpus_per_worker == 0:
+        raise ValueError(f"Not enough GPUs ({len(available_gpus)}) for data_parallel_size={script_args.data_parallel_size}")
+    
+    # Assign GPU(s) to this worker
+    start_idx = data_parallel_rank * gpus_per_worker
+    end_idx = start_idx + gpus_per_worker
+    worker_gpus = available_gpus[start_idx:end_idx]
+    
+    # Set CUDA_VISIBLE_DEVICES for this worker
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(worker_gpus)
 
     llm = LLM(
         model=script_args.model,
@@ -545,7 +564,9 @@ def llm_worker(
         enable_prefix_caching=script_args.enable_prefix_caching,
         max_model_len=script_args.max_model_len,
         max_num_seqs=script_args.max_batch_size,
-        worker_extension_cls="verifiers.inference.vllm_server.WeightSyncWorkerExtension",
+        # Only use weight sync extension if DP=1 (coordinated workers)
+        # For independent workers (DP>1), weight updates would need to be handled differently
+        worker_extension_cls="verifiers.inference.vllm_server.WeightSyncWorkerExtension" if script_args.data_parallel_size == 1 else None,
     )
 
     # Send ready signal to parent process
@@ -556,7 +577,9 @@ def llm_worker(
         try:
             command = connection.recv()
         except KeyboardInterrupt:
-            llm.collective_rpc(method="close_communicator")
+            # Only call close_communicator if weight sync is enabled
+            if script_args.data_parallel_size == 1:
+                llm.collective_rpc(method="close_communicator")
             break
 
         # Handle commands
@@ -566,6 +589,15 @@ def llm_worker(
             
             # Add debugging
             logger.debug(f"[WORKER {data_parallel_rank}] Received command: {method_name}")
+            
+            # Special handling for collective_rpc when worker extension is disabled
+            if method_name == "collective_rpc" and script_args.data_parallel_size > 1:
+                rpc_method = kwargs.get("method", "")
+                if rpc_method in ["init_communicator", "update_named_param", "close_communicator"]:
+                    logger.warning(f"[WORKER {data_parallel_rank}] Skipping {rpc_method} - weight sync disabled for independent workers")
+                    if command["type"] == "call":
+                        connection.send({"status": "skipped", "reason": "weight sync disabled"})
+                    continue
             
             try:
                 method = getattr(llm, method_name)
@@ -1330,7 +1362,7 @@ def main(script_args: ScriptArguments):
     processes = []
     for data_parallel_rank in range(script_args.data_parallel_size):
         parent_connection, child_connection = Pipe()
-        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, master_port, child_connection))
+        process = Process(target=llm_worker, args=(script_args, data_parallel_rank, child_connection))
         process.start()
         connections.append(parent_connection)
         processes.append(process)
@@ -1369,7 +1401,7 @@ def main(script_args: ScriptArguments):
                 logger.warning(f"Process {process} is still alive after 10 seconds, attempting to terminate...")
                 process.terminate()
                 process.join()  # ensure process termination after calling terminate()
-                
+     
     app = FastAPI(lifespan=lifespan) 
  
     # Define the endpoints for the model server
@@ -1394,7 +1426,9 @@ def main(script_args: ScriptArguments):
         {"world_size": 8}
         ```
         """
-        return {"world_size": script_args.tensor_parallel_size * script_args.data_parallel_size}
+        # With independent workers, only report tensor_parallel_size
+        # Each worker manages its own TP group independently
+        return {"world_size": script_args.tensor_parallel_size}
 
     # -------- OpenAI-chat ---------- #
     @app.post("/v1/chat/completions", response_model=OAChatCompletionResponse)
@@ -1602,27 +1636,44 @@ def main(script_args: ScriptArguments):
         """
         logger.info(f"[INIT_COMMUNICATOR] Received request: host={request.host}, port={request.port}, world_size={request.world_size}")
         
-        # Calculate actual world size based on vLLM configuration
-        vllm_world_size = script_args.tensor_parallel_size * script_args.data_parallel_size
-        expected_world_size = vllm_world_size + 1  # +1 for the client
+        # Check if weight sync is supported
+        if script_args.data_parallel_size > 1:
+            logger.warning("[INIT_COMMUNICATOR] Weight synchronization is disabled for independent workers (DP > 1)")
+            return JSONResponse(
+                status_code=200,  # Return 200 but with a warning message
+                content={
+                    "message": "Weight synchronization not supported with independent workers",
+                    "warning": "Use --data-parallel-size 1 for weight updates",
+                    "workers_notified": 0
+                }
+            )
         
-        logger.info(f"[INIT_COMMUNICATOR] vLLM world size: {vllm_world_size} (TP={script_args.tensor_parallel_size} x DP={script_args.data_parallel_size})")
-        logger.info(f"[INIT_COMMUNICATOR] Expected total world size: {expected_world_size}")
+        # With independent workers, each worker has its own communicator
+        # The world size for each worker is just tensor_parallel_size + 1 (for the trainer)
+        expected_world_size = script_args.tensor_parallel_size + 1  # +1 for the client
+        
+        logger.info(f"[INIT_COMMUNICATOR] Expected world size per worker: {expected_world_size} (TP={script_args.tensor_parallel_size} + 1 for trainer)")
         
         if request.world_size != expected_world_size:
             logger.warning(f"[INIT_COMMUNICATOR] World size mismatch! Request: {request.world_size}, Expected: {expected_world_size}")
+            # Adjust to use the provided world size
+            expected_world_size = request.world_size
 
-        # The function init_communicator is called this way: init_communicator(host, port, world_size)
-        # So with collective_rpc we need to call it this way:
-        # llm.collective_rpc(method="init_communicator", args=(host, port, world_size))
-        kwargs = {"method": "init_communicator", "args": (request.host, request.port, expected_world_size)}
+        # For independent workers, we need to use different ports for each worker
+        # to avoid conflicts in NCCL communication
+        base_port = request.port
         
-        # Send to all workers synchronously to ensure they're ready
+        # Initialize communicator for each worker independently
         successful_workers = []
         failed_workers = []
         
         for i, connection in enumerate(connections):
-            logger.debug(f"[INIT_COMMUNICATOR] Sending to worker {i}")
+            # Each worker gets a unique port offset
+            worker_port = base_port + i
+            logger.debug(f"[INIT_COMMUNICATOR] Initializing worker {i} with port {worker_port}")
+            
+            kwargs = {"method": "init_communicator", "args": (request.host, worker_port, expected_world_size)}
+            
             try:
                 connection.send({"type": "fire_and_forget", "method": "collective_rpc", "kwargs": kwargs})
                 successful_workers.append(i)
@@ -1660,6 +1711,14 @@ def main(script_args: ScriptArguments):
                 - `shape` (list of `int`): Shape of the weight
 
         """
+        # Check if weight sync is supported
+        if script_args.data_parallel_size > 1:
+            logger.warning("[UPDATE_PARAM] Weight synchronization is disabled for independent workers (DP > 1)")
+            return JSONResponse(
+                status_code=501, 
+                content={"error": "Weight synchronization not supported with independent workers. Use --data-parallel-size 1 for weight updates."}
+            )
+        
         # Acquire semaphore to limit concurrent weight updates
         async with weight_update_semaphore:
             logger.debug(f"[UPDATE_PARAM] Received weight update for: {request.name}, dtype={request.dtype}, shape={request.shape}")
@@ -1699,6 +1758,14 @@ def main(script_args: ScriptArguments):
             request (`BatchUpdateWeightsRequest`):
                 - `updates` (list of `UpdateWeightsRequest`): List of weight updates to process
         """
+        # Check if weight sync is supported
+        if script_args.data_parallel_size > 1:
+            logger.warning("[BATCH_UPDATE] Weight synchronization is disabled for independent workers (DP > 1)")
+            return JSONResponse(
+                status_code=501, 
+                content={"error": "Weight synchronization not supported with independent workers. Use --data-parallel-size 1 for weight updates."}
+            )
+        
         # Process updates sequentially to maintain NCCL synchronization
         # The client will broadcast each parameter after we notify workers
         successful = []
@@ -1767,6 +1834,11 @@ def main(script_args: ScriptArguments):
         """
         Closes the weight update group and cleans up associated resources.
         """
+        # Check if weight sync is supported
+        if script_args.data_parallel_size > 1:
+            logger.info("[CLOSE_COMMUNICATOR] Weight sync not enabled for independent workers")
+            return {"message": "Weight sync not enabled - nothing to close"}
+        
         kwargs = {"method": "close_communicator"}
         
         # Send to all workers
