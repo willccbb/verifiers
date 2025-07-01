@@ -527,33 +527,14 @@ def create_pool_signature(
     )
 
 def llm_worker(
-    script_args: ScriptArguments, data_parallel_rank: int, connection: MPConnection
+    script_args: ScriptArguments, data_parallel_rank: int, master_port: int, connection: MPConnection
 ) -> None:
     # Set required environment variables for DP to work with vLLM
-    # Commenting these out to disable vLLM's built-in DP coordination
-    # Each worker will run as an independent vLLM instance
-    # os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
-    # os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
-    # os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
-    # os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
+    os.environ["VLLM_DP_RANK"] = str(data_parallel_rank)
+    os.environ["VLLM_DP_RANK_LOCAL"] = str(data_parallel_rank)
+    os.environ["VLLM_DP_SIZE"] = str(script_args.data_parallel_size)
+    os.environ["VLLM_DP_MASTER_PORT"] = str(master_port)
 
-    # Assign GPU based on data_parallel_rank
-    available_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-    if available_gpus == [""]:
-        available_gpus = [str(i) for i in range(torch.cuda.device_count())]
-    
-    gpus_per_worker = len(available_gpus) // script_args.data_parallel_size
-    if gpus_per_worker == 0:
-        raise ValueError(f"Not enough GPUs ({len(available_gpus)}) for data_parallel_size={script_args.data_parallel_size}")
-    
-    # Assign GPU(s) to this worker
-    start_idx = data_parallel_rank * gpus_per_worker
-    end_idx = start_idx + gpus_per_worker
-    worker_gpus = available_gpus[start_idx:end_idx]
-    
-    # Set CUDA_VISIBLE_DEVICES for this worker
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(worker_gpus)
-    
     llm = LLM(
         model=script_args.model,
         revision=script_args.revision,
@@ -583,11 +564,30 @@ def llm_worker(
             method_name = command["method"]
             args, kwargs = command.get("args", ()), command.get("kwargs", {})
             
-            method = getattr(llm, method_name)
-            result = method(*args, **kwargs)
-            if command["type"] == "call":
-                connection.send(result)
+            # Add debugging
+            logger.debug(f"[WORKER {data_parallel_rank}] Received command: {method_name}")
+            
+            try:
+                method = getattr(llm, method_name)
+                logger.debug(f"[WORKER {data_parallel_rank}] Calling {method_name} with kwargs keys: {list(kwargs.keys()) if kwargs else 'none'}")
+                
+                # Call the method
+                result = method(*args, **kwargs)
+                
+                logger.debug(f"[WORKER {data_parallel_rank}] {method_name} completed, result type: {type(result)}")
+                
+                if command["type"] == "call":
+                    # Send result back
+                    logger.debug(f"[WORKER {data_parallel_rank}] Sending result back")
+                    connection.send(result)
+                    logger.debug(f"[WORKER {data_parallel_rank}] Result sent")
+            except Exception as e:
+                logger.error(f"[WORKER {data_parallel_rank}] Error in {method_name}: {e}", exc_info=True)
+                if command["type"] == "call":
+                    # Send error back as a special result
+                    connection.send({"error": str(e), "traceback": traceback.format_exc()})
         elif command["type"] == "shutdown":
+            logger.info(f"[WORKER {data_parallel_rank}] Received shutdown command")
             break
 
 
