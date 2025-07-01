@@ -82,6 +82,12 @@ async def get_next_worker_connection(connections: list[AnyType]) -> tuple[int, A
         worker_rotation_index += 1
         return worker_idx, connections[worker_idx]
 
+# -------- Usage tracking ---------- #
+class Usage(BaseModel):
+    completion_tokens: int
+    prompt_tokens: int
+    total_tokens: int
+
 # -------- OpenAI /v1/chat/completions Pydantic Models ---------- #
 class OAChatMessage(BaseModel):
     role: str
@@ -113,6 +119,7 @@ class OAChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[OAChatChoice]
+    usage: Usage
 
 # -------- OpenAI /v1/completions Pydantic Models ---------- #
 class OACompletionRequest(BaseModel):
@@ -140,6 +147,7 @@ class OACompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[OACompletionChoice]
+    usage: Usage
 # ---------------------------------------------------------------------- #
 
 def send_and_recv(conn: MPConnection, payload: dict):
@@ -304,7 +312,7 @@ class ScriptArguments:
         enable_prefix_caching (`bool` or `None`, *optional*, defaults to `None`):
             Whether to enable prefix caching in vLLM. If set to `True`, ensure that the model and the hardware support
             this feature.
-        enforce_eager (`bool`, defaults to `False`):
+        enforce_eager (`bool` or `None`, *optional*, defaults to `None`):
             Whether to enforce eager execution. If set to `True`, we will disable CUDA graph and always execute the
             model in eager mode. If `False` (default behavior), we will use CUDA graph and eager execution in hybrid.
         kv_cache_dtype (`str`, *optional*, defaults to `"auto"`):
@@ -372,8 +380,8 @@ class ScriptArguments:
             "hardware support this feature."
         },
     )
-    enforce_eager: bool = field(
-        default=False,
+    enforce_eager: Optional[bool] = field(
+        default=None,
         metadata={
             "help": "Whether to enforce eager execution. If set to `True`, we will disable CUDA graph and always "
             "execute the model in eager mode. If `False` (default behavior), we will use CUDA graph and eager "
@@ -434,6 +442,7 @@ class PooledRequestState:
     finish_reason: Optional[str] = None
     completed_and_signaled: bool = False
     timed_out: bool = False
+    prompt_tokens: int = 0  # Track prompt tokens from vLLM
     
     @property
     def is_complete(self) -> bool:
@@ -1076,6 +1085,10 @@ async def batch_processing_loop(
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
                                 
+                                # Track usage information from vLLM - only set prompt_tokens once
+                                if req_state.prompt_tokens == 0 and hasattr(request_output, 'prompt_token_ids'):
+                                    req_state.prompt_tokens = len(request_output.prompt_token_ids)
+                                
                                 # Store vLLM's finish reason but we'll interpret it carefully
                                 vllm_finish_reason = completion_output.finish_reason
                                 logger_instance.debug(f"[VLLM_RESPONSE] Request {req_state.request_id}: vLLM returned {new_token_count} tokens, finish_reason={vllm_finish_reason}")
@@ -1136,6 +1149,10 @@ async def batch_processing_loop(
                                 req_state.accumulated_content += new_text_chunk
                                 new_token_count = len(completion_output.token_ids)
                                 req_state.generated_token_count += new_token_count
+                                
+                                # Track usage information from vLLM - only set prompt_tokens once
+                                if req_state.prompt_tokens == 0 and hasattr(request_output, 'prompt_token_ids'):
+                                    req_state.prompt_tokens = len(request_output.prompt_token_ids)
                                 
                                 # Store vLLM's finish reason but we'll interpret it carefully
                                 vllm_finish_reason = completion_output.finish_reason
@@ -1225,11 +1242,17 @@ async def batch_processing_loop(
                                     message=OAChatMessage(role="assistant", content=error_message),
                                     finish_reason=req_state.finish_reason or "error"
                                 )]
+                                usage = Usage(
+                                    completion_tokens=req_state.generated_token_count,
+                                    prompt_tokens=req_state.prompt_tokens,
+                                    total_tokens=req_state.generated_token_count + req_state.prompt_tokens
+                                )
                                 response_content = OAChatCompletionResponse(
                                     id=f"chatcmpl-{uuid4().hex}",
                                     created=int(datetime.now(tz=timezone.utc).timestamp()),
                                     model=req_state.original_request.model,
-                                    choices=final_choices
+                                    choices=final_choices,
+                                    usage=usage
                                 )
                             else:  # Completion
                                 error_message = f"[ERROR] {str(req_state.error)}"
@@ -1238,11 +1261,17 @@ async def batch_processing_loop(
                                     text=error_message, 
                                     finish_reason=req_state.finish_reason or "error"
                                 )]
+                                usage = Usage(
+                                    completion_tokens=req_state.generated_token_count,
+                                    prompt_tokens=req_state.prompt_tokens,
+                                    total_tokens=req_state.generated_token_count + req_state.prompt_tokens
+                                )
                                 response_content = OACompletionResponse(
                                     id=f"cmpl-{uuid4().hex}",
                                     created=int(datetime.now(tz=timezone.utc).timestamp()),
                                     model=req_state.original_request.model,
-                                    choices=final_choices
+                                    choices=final_choices,
+                                    usage=usage
                                 )
                         elif req_state.request_type == "chat":
                             final_choices = [OAChatChoice(
@@ -1250,11 +1279,17 @@ async def batch_processing_loop(
                                 message=OAChatMessage(role="assistant", content=req_state.accumulated_content),
                                 finish_reason=req_state.finish_reason
                             )]
+                            usage = Usage(
+                                completion_tokens=req_state.generated_token_count,
+                                prompt_tokens=req_state.prompt_tokens,
+                                total_tokens=req_state.generated_token_count + req_state.prompt_tokens
+                            )
                             response_content = OAChatCompletionResponse(
                                 id=f"chatcmpl-{uuid4().hex}", # Use original request_id if available? For now, new UUID.
                                 created=int(datetime.now(tz=timezone.utc).timestamp()),
                                 model=req_state.original_request.model,
-                                choices=final_choices
+                                choices=final_choices,
+                                usage=usage
                             )
                         else: # Completion
                             final_choices = [OACompletionChoice(
@@ -1262,11 +1297,17 @@ async def batch_processing_loop(
                                 text=req_state.accumulated_content, 
                                 finish_reason=req_state.finish_reason
                             )]
+                            usage = Usage(
+                                completion_tokens=req_state.generated_token_count,
+                                prompt_tokens=req_state.prompt_tokens,
+                                total_tokens=req_state.generated_token_count + req_state.prompt_tokens
+                            )
                             response_content = OACompletionResponse(
                                 id=f"cmpl-{uuid4().hex}",
                                 created=int(datetime.now(tz=timezone.utc).timestamp()),
                                 model=req_state.original_request.model,
-                                choices=final_choices
+                                choices=final_choices,
+                                usage=usage
                             )
                         
                         req_state.result_container[0] = response_content
@@ -1843,73 +1884,13 @@ def main(script_args: ScriptArguments):
         ws_max_queue=1024
     )
 
-
-def make_parser():
-    num_gpus = os.environ.get("CUDA_VISIBLE_DEVICES", "").count(",") + 1
-    parser = argparse.ArgumentParser(description="OpenAI-compatible vLLM server with weight synchronization")
-    
-    parser.add_argument("--model", type=str, required=True,
-                        help="Model name or path to load the model from.")
-    parser.add_argument("--revision", type=str, default=None,
-                        help="Revision to use for the model. If not specified, the default branch will be used.")
-    parser.add_argument("--tensor-parallel-size", type=int, default=num_gpus,
-                        help="Number of tensor parallel workers to use.")
-    parser.add_argument("--data-parallel-size", type=int, default=1,
-                        help="Number of data parallel workers to use.")
-    parser.add_argument("--host", type=str, default="0.0.0.0",
-                        help="Host address to run the server on.")
-    parser.add_argument("--port", type=int, default=8000,
-                        help="Port to run the server on.")
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.95,
-                        help="Ratio (between 0 and 1) of GPU memory to reserve for the model weights, activations, and KV cache.")
-    parser.add_argument("--dtype", type=str, default="auto",
-                        help="Data type to use for vLLM generation. If set to 'auto', the data type will be automatically determined.")
-    parser.add_argument("--max-model-len", type=int, default=8192,
-                        help="The max_model_len to use for vLLM. This can be useful when running with reduced gpu_memory_utilization.")
-    parser.add_argument("--enable-prefix-caching", action="store_true", default=True,
-                        help="Whether to enable prefix caching in vLLM.")
-    parser.add_argument("--no-enable-prefix-caching", dest="enable_prefix_caching", action="store_false",
-                        help="Disable prefix caching in vLLM.")
-    parser.add_argument("--enforce-eager", action="store_true", default=False,
-                        help="Whether to enforce eager execution. If True, disable CUDA graph and always execute in eager mode.")
-    parser.add_argument("--kv-cache-dtype", type=str, default="auto",
-                        help="Data type to use for KV cache. If set to 'auto', the dtype will default to the model data type.")
-    parser.add_argument("--log-level", type=str, default="info", 
-                        choices=["critical", "error", "warning", "info", "debug", "trace"],
-                        help="Log level for uvicorn.")
-    parser.add_argument("--max-batch-size", type=int, default=1024,
-                        help="Maximum number of requests to process in one LLM call from the active pool.")
-    parser.add_argument("--batch-request-timeout-seconds", type=int, default=300,
-                        help="Timeout in seconds for a single request waiting for its turn and completion.")
-    parser.add_argument("--token-chunk-size", type=int, default=64,
-                        help="Number of tokens to generate per iteration per request in token-chunk dynamic batching.")
-    
-    return parser
+from trl import TrlParser
+from verifiers.inference.vllm_config import VLLMServerConfig
 
 def cli_main():
     """Entry point for the vf-vllm CLI command."""
-    parser = make_parser()
-    args = parser.parse_args()
-    
-    # Convert argparse Namespace to ScriptArguments dataclass
-    script_args = ScriptArguments(
-        model=args.model,
-        revision=args.revision,
-        tensor_parallel_size=args.tensor_parallel_size,
-        data_parallel_size=args.data_parallel_size,
-        host=args.host,
-        port=args.port,
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        dtype=args.dtype,
-        max_model_len=args.max_model_len,
-        enable_prefix_caching=args.enable_prefix_caching,
-        enforce_eager=args.enforce_eager,
-        kv_cache_dtype=args.kv_cache_dtype,
-        log_level=args.log_level,
-        max_batch_size=args.max_batch_size,
-        batch_request_timeout_seconds=args.batch_request_timeout_seconds,
-        token_chunk_size=args.token_chunk_size
-    )
+    parser = TrlParser(VLLMServerConfig)
+    script_args = parser.parse_args_and_config()[0]
     
     main(script_args)
 
