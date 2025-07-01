@@ -69,4 +69,3 @@ class MultiTurnEnv(Environment):
                 messages.append(env_msg)
                 completion.append(env_msg)
         return completion, state
-    
