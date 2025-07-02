@@ -174,8 +174,13 @@ async def run_server(args: Namespace):
         
         dtype = getattr(torch, dtype_str.split(".")[-1])
         shape_tuple = tuple(shape)
-        # fire and forget
-        create_background_task(engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple)))
+        
+        async def throttled_update():
+            async with weight_update_semaphore:
+                await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
+        
+        # fire and forget with throttling
+        create_background_task(throttled_update())
         return {"status": "ok"}
 
     @app.post("/reset_prefix_cache")
