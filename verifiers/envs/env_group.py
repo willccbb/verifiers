@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Tuple, Union
 
 from datasets import concatenate_datasets
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from verifiers.envs.environment import Environment
 from verifiers.rubrics.rubric import Rubric
@@ -133,15 +133,15 @@ class EnvGroup(Environment):
         ) 
         self.logger.info(f"Initialized EnvGroup with {len(envs)} environments: {self.env_names}")
     
-    def rollout(self,
-                client: OpenAI,
-                model: str,
-                prompt: Union[str, List[Dict[str, Any]]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
+    async def rollout(self,
+                      client: AsyncOpenAI,
+                      model: str,
+                      prompt: Union[str, List[Dict[str, Any]]],
+                      answer: str,
+                      task: str = "default",
+                      info: Dict[str, Any] = {},
+                      sampling_args: Dict[str, Any] = {},
+                      **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
         """
         Route rollout to the appropriate sub-environment based on task.
         
@@ -154,7 +154,7 @@ class EnvGroup(Environment):
         env = self.env_map[task]
 
         # Pass through all arguments
-        return env.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
+        return await env.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
     
     def get_env_for_task(self, task: str) -> Environment:
         """Get the environment instance for a given task name."""

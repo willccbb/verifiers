@@ -43,9 +43,6 @@ def main(num_samples: int, max_tokens: int):
         num_samples=num_samples
     )
     
-
-
-
     print("--- Example ---")
     print(f"Prompt: {results['prompt'][0]}")
     print(f"Completion: {results['completion'][0]}")

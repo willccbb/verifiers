@@ -2,7 +2,7 @@ from abc import abstractmethod
 from copy import deepcopy
 from typing import List, Dict, Any, Tuple
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from verifiers.envs.environment import Environment
 
@@ -29,15 +29,15 @@ class MultiTurnCompletionEnv(Environment):
         """
         pass
 
-    def rollout(self,
-                client: OpenAI,
-                model: str,
-                prompt: str | List[Dict[str, str]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
+    async def rollout(self,
+                      client: AsyncOpenAI,
+                      model: str,
+                      prompt: str | List[Dict[str, str]],
+                      answer: str,
+                      task: str = "default",
+                      info: Dict[str, Any] = {},
+                      sampling_args: Dict[str, Any] = {},
+                      **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
         is_completed = False
         state = {'answer': answer}
         assert isinstance(prompt, str)
@@ -45,7 +45,7 @@ class MultiTurnCompletionEnv(Environment):
         completion = ""
         turn = 0
         while not is_completed:
-            response = self.get_model_response(
+            response = await self.get_model_response(
                 prompt=input,
                 client=client,
                 model=model,

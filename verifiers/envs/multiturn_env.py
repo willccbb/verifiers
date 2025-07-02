@@ -2,7 +2,7 @@ from abc import abstractmethod
 from copy import deepcopy
 from typing import List, Dict, Any, Tuple, Union
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from verifiers.envs.environment import Environment
 
@@ -29,15 +29,15 @@ class MultiTurnEnv(Environment):
         """
         pass
 
-    def rollout(self,
-                client: OpenAI,
-                model: str,
-                prompt: Union[str, List[Dict[str, Any]]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    async def rollout(self,
+                      client: AsyncOpenAI,
+                      model: str,
+                      prompt: Union[str, List[Dict[str, Any]]],
+                      answer: str,
+                      task: str = "default",
+                      info: Dict[str, Any] = {},
+                      sampling_args: Dict[str, Any] = {},
+                      **kwargs: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
@@ -51,7 +51,7 @@ class MultiTurnEnv(Environment):
             if self.is_completed(messages, state, **kwargs):
                 is_completed = True
                 break
-            response = self.get_model_response(
+            response = await self.get_model_response(
                 prompt=messages,
                 client=client,
                 model=model,

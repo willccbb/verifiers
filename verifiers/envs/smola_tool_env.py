@@ -1,6 +1,6 @@
 import inspect
 import json
-from typing import List, Dict, Any, Callable, Optional, Type
+from typing import List, Dict, Any, Callable, Optional, Type, Tuple
 
 from datasets import Dataset
 
@@ -118,7 +118,7 @@ class SmolaToolEnv(MultiTurnEnv):
         except Exception as e:
             return f"Error: {str(e)}. " + "Please format your tool call as '{\"name\": \"tool_name\", \"args\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}}'"
 
-    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs: Any) -> Dict[str, str]:
+    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         try:
             parsed = self.llm_parser.parse(messages[-1]["content"])
             # Check if we got a valid tool field (not just None from failed parsing)

@@ -63,7 +63,7 @@ tests = [
 ]
 
 [project.scripts]
-vf-vllm = "verifiers.inference.vllm_server:cli_main"
+vf-vllm = "verifiers.inference.vllm_server:main"
 
 [tool.setuptools]
 packages = ["verifiers"]
