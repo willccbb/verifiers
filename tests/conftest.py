@@ -52,26 +52,130 @@ def think_parser_with_extractor():
 
 # Async test fixtures for Environment testing
 
+class SmartMockClient:
+    """Smart mock client that maps inputs to outputs."""
+    
+    def __init__(self):
+        self.chat_completions = {}  # Maps conversation history to responses
+        self.text_completions = {}  # Maps prompts to responses
+        self.default_chat_response = "This is a test response"
+        self.default_text_response = "This is a test completion"
+        self.base_url = "http://localhost/v1/"  # For testing URL parsing
+        
+        # Create mock structure
+        self.chat = MagicMock()
+        self.completions = MagicMock()
+        self.chat.completions = MagicMock()
+        
+        # Set up async methods
+        self.chat.completions.create = AsyncMock(side_effect=self._handle_chat_completion)
+        self.completions.create = MagicMock(side_effect=self._handle_text_completion)
+        
+        # Support for backward compatibility with old mock patterns
+        self._chat_return_value = None
+        self._chat_side_effect = None
+        self._text_return_value = None
+        self._text_side_effect = None
+    
+    def add_chat_response(self, messages, response, finish_reason="stop"):
+        """Add a mapped response for specific messages."""
+        # Convert messages to a hashable key
+        key = self._messages_to_key(messages)
+        self.chat_completions[key] = {
+            "content": response,
+            "finish_reason": finish_reason
+        }
+    
+    def add_text_response(self, prompt, response, finish_reason="stop"):
+        """Add a mapped response for specific prompt."""
+        self.text_completions[prompt] = {
+            "text": response,
+            "finish_reason": finish_reason
+        }
+    
+    def set_default_responses(self, chat_response=None, text_response=None):
+        """Set default responses when no mapping found."""
+        if chat_response:
+            self.default_chat_response = chat_response
+        if text_response:
+            self.default_text_response = text_response
+    
+    # Backward compatibility properties
+    @property
+    def return_value(self):
+        """Backward compatibility for chat return_value."""
+        return self._chat_return_value
+    
+    @return_value.setter
+    def return_value(self, value):
+        """Backward compatibility for chat return_value."""
+        self._chat_return_value = value
+        # Also set it on the mock for direct access
+        self.chat.completions.create.return_value = value
+    
+    @property
+    def side_effect(self):
+        """Backward compatibility for chat side_effect."""
+        return self._chat_side_effect
+    
+    @side_effect.setter
+    def side_effect(self, value):
+        """Backward compatibility for chat side_effect."""
+        self._chat_side_effect = value
+        # Also set it on the mock for direct access
+        self.chat.completions.create.side_effect = value if value is not None else self._handle_chat_completion
+    
+    async def _handle_chat_completion(self, messages, **kwargs):
+        """Handle chat completion requests."""
+        key = self._messages_to_key(messages)
+        
+        if key in self.chat_completions:
+            response_data = self.chat_completions[key]
+        else:
+            response_data = {
+                "content": self.default_chat_response,
+                "finish_reason": "stop"
+            }
+        
+        # Create mock response
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = response_data["content"]
+        mock_response.choices[0].finish_reason = response_data["finish_reason"]
+        return mock_response
+    
+    def _handle_text_completion(self, prompt, **kwargs):
+        """Handle text completion requests."""
+        if prompt in self.text_completions:
+            response_data = self.text_completions[prompt]
+        else:
+            response_data = {
+                "text": self.default_text_response,
+                "finish_reason": "stop"
+            }
+        
+        # Create mock response
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].text = response_data["text"]
+        mock_response.choices[0].finish_reason = response_data["finish_reason"]
+        return mock_response
+    
+    def _messages_to_key(self, messages):
+        """Convert messages list to a hashable key."""
+        # Create a simplified representation for hashing
+        key_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            key_parts.append(f"{role}:{content}")
+        return tuple(key_parts)
+
+
 @pytest.fixture
 def mock_openai_client():
-    """Return a mocked AsyncOpenAI client."""
-    client = AsyncMock()
-    
-    # Mock chat completions
-    mock_chat_response = MagicMock()
-    mock_chat_response.choices = [MagicMock()]
-    mock_chat_response.choices[0].message.content = "This is a test response"
-    mock_chat_response.choices[0].finish_reason = "stop"
-    client.chat.completions.create = AsyncMock(return_value=mock_chat_response)
-    
-    # Mock regular completions - note: this is NOT async in the real OpenAI API
-    mock_completion_response = MagicMock()
-    mock_completion_response.choices = [MagicMock()]
-    mock_completion_response.choices[0].text = "This is a test completion"
-    mock_completion_response.choices[0].finish_reason = "stop"
-    client.completions.create = MagicMock(return_value=mock_completion_response)  # Not AsyncMock!
-    
-    return client
+    """Return a smart mocked AsyncOpenAI client with input-output mapping."""
+    return SmartMockClient()
 
 
 @pytest.fixture 
