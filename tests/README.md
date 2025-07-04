@@ -46,8 +46,10 @@ uv run pytest -m unit
 
 - `conftest.py` - Pytest configuration and shared fixtures
 - `test_parser.py` - Tests for the base Parser class
-- `test_xml_parser.py` - Tests for the XMLParser class
+- `test_xml_parser.py` - Tests for the XMLParser class  
 - `test_think_parser.py` - Tests for the ThinkParser class
+- `test_environment.py` - Tests for the base Environment class
+- `test_singleturn_env.py` - Tests for the SingleTurnEnv class
 
 ## Test Markers
 
@@ -56,9 +58,39 @@ uv run pytest -m unit
 - `slow` - Slow-running tests
 - `asyncio` - Async tests
 
+## Async Testing & Mocking
+
+The test suite includes comprehensive support for testing async Environment classes:
+
+### AsyncOpenAI Client Mocking
+- `mock_openai_client` fixture provides a fully mocked AsyncOpenAI client
+- Supports both chat completions and regular completions
+- No actual API calls are made during testing
+
+### Test Datasets
+- `sample_dataset` - Basic question/answer dataset
+- `sample_chat_dataset` - Pre-formatted chat messages
+- Custom datasets can be created using `Dataset.from_dict()`
+
+### Async Test Examples
+```python
+@pytest.mark.asyncio
+async def test_my_async_function(mock_openai_client):
+    env = SingleTurnEnv(client=mock_openai_client, model="test", ...)
+    result = await env.rollout(...)
+    assert result[0] == expected_completion
+```
+
+### Environment Testing
+- Tests cover both chat and completion message formats
+- Mocked responses simulate real OpenAI API behavior
+- Error handling and edge cases are tested
+- No real LLM requests are made
+
 ## Adding New Tests
 
 1. Create test files following the `test_*.py` naming convention
-2. Use the fixtures from `conftest.py` for common parser instances
-3. Add appropriate test markers
-4. Follow the existing test structure and naming conventions
+2. Use the fixtures from `conftest.py` for common instances
+3. Add appropriate test markers (`@pytest.mark.asyncio` for async tests)
+4. Use `mock_openai_client` for Environment testing
+5. Follow the existing test structure and naming conventions
