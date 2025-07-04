@@ -8,47 +8,70 @@ The framework is built around three fundamental primitives that work together:
 
 ### 1. Parser: Structured Output Extraction
 
-Parsers extract structured information from model outputs, and can expose useful functionalities for response composition. While you can use plain text or create your own parsers, **we generally recommend using XMLParser** for its convenience and reliability, particularly when getting started with `verifiers`.
+Parsers extract structured information from model outputs. The base `Parser` class simply returns text as-is, but specialized parsers can extract specific formats.
 
 ```python
-from verifiers.parsers import XMLParser
+import verifiers as vf
 
-# Define expected fields
-parser = XMLParser(fields=["think", "answer"])
+# Base parser (returns text as-is)
+parser = vf.Parser()
 
-# Parse model output
-output = """
-<think>
-First, I need to calculate 2+2...
-</reasoning>
-<think>4</answer>
-"""
+# ThinkParser extracts content after </think> tags
+parser = vf.ThinkParser()
+
+# XMLParser extracts structured fields
+parser = vf.XMLParser(fields=["reasoning", "answer"])
+```
+
+**ThinkParser** is useful for step-by-step reasoning:
+```python
+parser = vf.ThinkParser()
+
+# Model output: "<think>Let me calculate...</think>The answer is 4"
+# parser.parse_answer(output) returns: "The answer is 4"
+```
+
+**XMLParser** is useful for structured output with multiple fields:
+```python
+parser = vf.XMLParser(fields=["reasoning", "answer"])
+
+# Model output: "<reasoning>First, I calculate...</reasoning><answer>4</answer>"
 parsed = parser.parse(output)
-print(parsed.think)  # "First, I need to calculate 2+2..."
+print(parsed.reasoning)  # "First, I calculate..."
 print(parsed.answer)     # "4"
 ```
 
 ### 2. Rubric: Multi-Criteria Evaluation
 
-Rubrics combine multiple reward functions to evaluate model outputs from different perspectives. Each reward function can focus on a specific aspect:
+Rubrics combine multiple reward functions to evaluate model outputs. The base `Rubric` class takes a list of functions and weights.
 
 ```python
-from verifiers.rubrics import Rubric
+import verifiers as vf
 
+# Basic rubric with one reward function
+def correct_answer(completion, answer, **kwargs):
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
+
+rubric = vf.Rubric(
+    funcs=[correct_answer],
+    weights=[1.0]
+)
+```
+
+**Multi-criteria evaluation** combines different aspects:
+```python
 def correctness_reward(completion, answer, **kwargs):
-    """Check if the answer is correct."""
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer == answer else 0.0
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
 
-def reasoning_reward(completion, **kwargs):
-    """Reward clear reasoning steps."""
-    parsed = parser.parse(completion)
-    return min(len(parsed.reasoning.split('\n')) / 5, 1.0)
+def format_reward(completion, **kwargs):
+    # Check if response follows expected format
+    return parser.get_format_reward_func()(completion)
 
-rubric = Rubric(
-    funcs=[correctness_reward, reasoning_reward],
-    weights=[1.0, 0.5],  # Correctness is more important
-    parser=parser
+rubric = vf.Rubric(
+    funcs=[correctness_reward, format_reward],
+    weights=[0.8, 0.2]  # Correctness weighted higher
 )
 ```
 
@@ -57,21 +80,21 @@ rubric = Rubric(
 Environments bring everything together, managing the interaction flow between models, parsers, and rubrics:
 
 ```python
-from verifiers.envs import SingleTurnEnv
+import verifiers as vf
 
-env = SingleTurnEnv(
+dataset = vf.load_example_dataset("gsm8k", split="train")
+
+vf_env = vf.SingleTurnEnv(
     dataset=dataset,
-    system_prompt="Solve the math problem step by step.",
+    system_prompt="Solve the problem step by step.",
     parser=parser,
-    rubric=rubric,
-    client=openai_client
+    rubric=rubric
 )
 
 # Generate training data
-prompts, completions, rewards = env.generate(
-    model="gpt-4",
-    n_samples=1000
-)
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="example")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
 ```
 
 ## Why This Architecture?
@@ -84,8 +107,8 @@ prompts, completions, rewards = env.generate(
 ### Composability
 Build complex behaviors from simple components:
 - Combine multiple reward functions in a rubric
-- Chain multiple rubrics with RubricGroup
-- Extend base environments for custom tasks
+- Use built-in rubric types like `MathRubric`, `ToolRubric`
+- Choose from different environment types for different tasks
 
 ### Flexibility
 - Support for both chat and completion APIs
@@ -94,96 +117,86 @@ Build complex behaviors from simple components:
 
 ## Key Design Principles
 
-### 1. Format First
-Always define your output format explicitly. XMLParser makes this easy and reliable:
+### 1. Start Simple
+Many environments provide sensible defaults:
 
 ```python
-# Good: Clear structure
-parser = XMLParser(["reasoning", "answer"])
+# Simple - let environment choose defaults
+vf_env = vf.SingleTurnEnv(dataset=dataset)
 
-# Better: Support alternatives
-parser = XMLParser([("reasoning", "thinking"), "answer"])
-
-# Best: Add format validation
-rubric = Rubric(
-    funcs=[parser.get_format_reward_func(), correctness_func],
-    weights=[0.2, 0.8]
+# Custom - specify your own parser and rubric
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    parser=vf.ThinkParser(),
+    rubric=custom_rubric
 )
 ```
 
 ### 2. Multi-Criteria Evaluation
-Real-world tasks have multiple success criteria. Design rubrics that capture all important aspects:
+Real-world tasks have multiple success criteria:
 
 ```python
-rubric = Rubric(funcs=[
+rubric = vf.Rubric(funcs=[
     correct_answer_func,      # Is it right?
     reasoning_clarity_func,   # Is it well-explained?
-    efficiency_func,         # Is it concise?
-    format_compliance_func   # Does it follow instructions?
-])
+    format_compliance_func    # Does it follow instructions?
+], weights=[0.7, 0.2, 0.1])
 ```
 
 ### 3. Incremental Complexity
-Start simple and add complexity as needed:
+Start with basic environments and add complexity as needed:
 
-1. Begin with SingleTurnEnv for basic Q&A
-2. Add custom reward functions for your criteria
-3. Move to MultiTurnEnv for interactive tasks
-4. Integrate tools when reasoning alone isn't enough
+1. Begin with `SingleTurnEnv` for Q&A tasks
+2. Use `ToolEnv` when models need external tools
+3. Try `DoubleCheckEnv` for verification workflows
+4. Use `MultiTurnEnv` for interactive tasks
 
 ## Quick Start Example
 
-Here's a complete example for a math problem-solving task:
+Here's a complete working example:
 
 ```python
-from verifiers.envs import SingleTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
-import openai
+import verifiers as vf
 
-# 1. Setup parser for structured output
-parser = XMLParser(fields=["reasoning", "answer"])
+# 1. Load dataset
+dataset = vf.load_example_dataset("gsm8k", split="train")
 
-# 2. Define evaluation criteria
+# 2. Setup parser and rubric
+parser = vf.ThinkParser()
+
 def correct_answer(completion, answer, **kwargs):
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer.strip() == answer.strip() else 0.0
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
 
-def has_reasoning(completion, **kwargs):
-    parsed = parser.parse(completion)
-    return 1.0 if len(parsed.reasoning) > 20 else 0.0
-
-# 3. Create rubric with multiple criteria
-rubric = Rubric(
-    funcs=[correct_answer, has_reasoning, parser.get_format_reward_func()],
-    weights=[0.7, 0.2, 0.1],
-    parser=parser
+rubric = vf.Rubric(
+    funcs=[correct_answer, parser.get_format_reward_func()],
+    weights=[0.8, 0.2]
 )
 
-# 4. Setup environment
-env = SingleTurnEnv(
-    dataset=math_dataset,
-    system_prompt="""Solve the given math problem step by step.
-    
-Format your response as:
-<reasoning>
-Your step-by-step solution
-</reasoning>
-<answer>
-Your final answer
-</answer>""",
+# 3. Create environment
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt="Think step-by-step inside <think>...</think> tags, then give your answer.",
     parser=parser,
-    rubric=rubric,
-    client=openai.Client()
+    rubric=rubric
 )
 
-# 5. Generate training data
-results = env.generate(
-    model="gpt-4",
-    n_samples=100,
-    temperature=0.7
-)
+# 4. Setup and run training
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="quick-start")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
 ```
+
+## Environment Types
+
+Different environment types are designed for different tasks:
+
+- **SingleTurnEnv**: One-shot Q&A tasks
+- **ToolEnv**: Tasks requiring external tools (calculators, code execution)
+- **DoubleCheckEnv**: Multi-stage verification workflows
+- **TextArenaEnv**: Game-based environments
+- **ReasoningGymEnv**: Integration with reasoning gym benchmarks
 
 ## Next Steps
 
