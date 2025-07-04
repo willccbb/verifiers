@@ -58,48 +58,69 @@ development
 ### Installation
 
 ```bash
-# Install the package
-pip install verifiers
-
-# Or using uv
+# Install using uv (recommended)
 uv add verifiers
+
+# Or clone and install locally
+git clone https://github.com/your-org/verifiers
+cd verifiers
+uv sync
 ```
 
 ### Basic Example
 
+Here's a complete example for training a model on math problems:
+
 ```python
-from verifiers.envs import SingleTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
-import openai
+import verifiers as vf
 
-# 1. Define output format
-parser = XMLParser(fields=["think", "answer"])
+# Load dataset and create environment
+dataset = vf.load_example_dataset("gsm8k", split="train")
+eval_dataset = vf.load_example_dataset("gsm8k", split="test")
 
-# 2. Create evaluation criteria
-def correct_answer(completion, answer, **kwargs):
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer == answer else 0.0
+system_prompt = """
+Think step-by-step inside <think>...</think> tags.
 
-rubric = Rubric(
-    funcs=[correct_answer, parser.get_format_reward_func()],
-    weights=[0.8, 0.2]
-)
+Then, give your final numerical answer inside \\boxed{{...}}.
+"""
 
-# 3. Set up environment
-env = SingleTurnEnv(
-    dataset=your_dataset, # with 'question' and 'answer' string columns
+parser = vf.ThinkParser(extract_fn=vf.extract_boxed_answer)
+
+def correct_answer_reward_func(completion, answer, **kwargs):
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response == answer else 0.0
+
+rubric = vf.Rubric(funcs=[
+    correct_answer_reward_func,
+    parser.get_format_reward_func()
+], weights=[1.0, 0.2])
+
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    eval_dataset=eval_dataset,
+    system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
-    system_prompt="Solve the problem step by step.",
-    client=openai.Client()
 )
 
-# 4. Generate training data
-prompts, completions, rewards = env.generate(
-    model="gpt-4",
-    n_samples=100
+# Load model and set up training
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+model, tokenizer = vf.get_model_and_tokenizer(model_name)
+
+training_args = vf.grpo_defaults(run_name="gsm8k-example")
+training_args.per_device_train_batch_size = 4
+training_args.num_generations = 8
+training_args.max_steps = 100
+
+trainer = vf.GRPOTrainer(
+    model=model,
+    processing_class=tokenizer,
+    env=vf_env,
+    args=training_args,
 )
+
+# Train the model
+trainer.train()
 ```
 
 ## Key Concepts
@@ -110,7 +131,7 @@ prompts, completions, rewards = env.generate(
 - Integrate parsers and rubrics for complete evaluation
 
 ### 2. **Parsers** extract structured information
-- XMLParser (recommended) for reliable field extraction
+- ThinkParser (recommended) for step-by-step reasoning
 - Built-in format validation and rewards
 - Support for alternative field names
 
