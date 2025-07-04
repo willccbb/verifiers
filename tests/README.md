@@ -42,24 +42,6 @@ Run only unit tests:
 uv run pytest -m unit
 ```
 
-### Standard Test Run
-```bash
-uv run pytest tests/
-```
-
-### Clean Test Run (No External Warnings)
-To run tests without external dependency warnings for cleaner output:
-```bash
-./run_tests.sh tests/
-```
-
-This script suppresses deprecation warnings from external dependencies (Google protobuf, datasets library, multiprocess library) while preserving warnings from our own code.
-
-### Test Options
-- Run specific test file: `./run_tests.sh tests/test_environment.py`
-- Run with verbose output: `./run_tests.sh tests/ -v`
-- Run specific test: `./run_tests.sh tests/test_environment.py::TestEnvironmentBase::test_environment_initialization`
-
 ## Test Structure
 
 - `conftest.py` - Pytest configuration and shared fixtures
@@ -124,15 +106,6 @@ async def test_multiturn_conversation(mock_multiturn_env):
 - Mocked responses simulate real OpenAI API behavior
 - Error handling and edge cases are tested
 - No real LLM requests are made
-
-## Warning Suppression
-
-The test suite includes warnings from external dependencies that we cannot fix:
-- **Google protobuf**: PyType_Spec deprecation warnings
-- **Datasets library**: co_lnotab deprecation warnings  
-- **Multiprocess library**: Multi-threaded fork warnings
-
-These are suppressed in the `run_tests.sh` script using `PYTHONWARNINGS=ignore::DeprecationWarning`.
 
 ## Adding New Tests
 
