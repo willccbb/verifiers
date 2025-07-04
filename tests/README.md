@@ -14,14 +14,6 @@ Install test dependencies:
 uv sync --extra tests
 ```
 
-**Note:** If `uv` is not available in your environment, you can alternatively use pip with a virtual environment:
-
-```bash
-python3 -m venv test_env
-source test_env/bin/activate
-pip install pytest pytest-asyncio pytest-cov
-```
-
 ## Running Tests
 
 Run all tests:
