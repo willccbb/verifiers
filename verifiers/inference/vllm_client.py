@@ -217,7 +217,7 @@ class VLLMClient(OpenAI):
         """
         Closes the weight update group and cleans up the communication group.
         """
-        url = f"http://{self.host}:{self.server_port}/close_communicator/"
+        url = f"http://{self.host}:{self.server_port}/close_communicator"
 
         try:
             response = self.session.post(url)
