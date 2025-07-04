@@ -70,12 +70,6 @@ class SmartMockClient:
         # Set up async methods
         self.chat.completions.create = AsyncMock(side_effect=self._handle_chat_completion)
         self.completions.create = MagicMock(side_effect=self._handle_text_completion)
-        
-        # Support for backward compatibility with old mock patterns
-        self._chat_return_value = None
-        self._chat_side_effect = None
-        self._text_return_value = None
-        self._text_side_effect = None
     
     def add_chat_response(self, messages, response, finish_reason="stop"):
         """Add a mapped response for specific messages."""
@@ -99,31 +93,6 @@ class SmartMockClient:
             self.default_chat_response = chat_response
         if text_response:
             self.default_text_response = text_response
-    
-    # Backward compatibility properties
-    @property
-    def return_value(self):
-        """Backward compatibility for chat return_value."""
-        return self._chat_return_value
-    
-    @return_value.setter
-    def return_value(self, value):
-        """Backward compatibility for chat return_value."""
-        self._chat_return_value = value
-        # Also set it on the mock for direct access
-        self.chat.completions.create.return_value = value
-    
-    @property
-    def side_effect(self):
-        """Backward compatibility for chat side_effect."""
-        return self._chat_side_effect
-    
-    @side_effect.setter
-    def side_effect(self, value):
-        """Backward compatibility for chat side_effect."""
-        self._chat_side_effect = value
-        # Also set it on the mock for direct access
-        self.chat.completions.create.side_effect = value if value is not None else self._handle_chat_completion
     
     async def _handle_chat_completion(self, messages, **kwargs):
         """Handle chat completion requests."""
