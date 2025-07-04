@@ -69,26 +69,25 @@ uv sync
 
 ### Basic Example
 
-Here's a complete example for training a model on math problems:
+Here's a simple example using ThinkParser (for step-by-step reasoning):
 
 ```python
 import verifiers as vf
 
-# Load dataset and create environment
+# Load dataset 
 dataset = vf.load_example_dataset("gsm8k", split="train")
-eval_dataset = vf.load_example_dataset("gsm8k", split="test")
 
 system_prompt = """
 Think step-by-step inside <think>...</think> tags.
-
-Then, give your final numerical answer inside \\boxed{{...}}.
+Then give your final answer.
 """
 
-parser = vf.ThinkParser(extract_fn=vf.extract_boxed_answer)
+# ThinkParser extracts content after </think>
+parser = vf.ThinkParser()
 
 def correct_answer_reward_func(completion, answer, **kwargs):
     response = parser.parse_answer(completion) or ''
-    return 1.0 if response == answer else 0.0
+    return 1.0 if response.strip() == answer.strip() else 0.0
 
 rubric = vf.Rubric(funcs=[
     correct_answer_reward_func,
@@ -97,29 +96,58 @@ rubric = vf.Rubric(funcs=[
 
 vf_env = vf.SingleTurnEnv(
     dataset=dataset,
-    eval_dataset=eval_dataset,
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
 )
 
-# Load model and set up training
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
+# Load model and train
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="example")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
+```
 
-training_args = vf.grpo_defaults(run_name="gsm8k-example")
-training_args.per_device_train_batch_size = 4
-training_args.num_generations = 8
-training_args.max_steps = 100
+### Alternative: Using XMLParser for structured output
 
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=training_args,
+```python
+import verifiers as vf
+
+dataset = vf.load_example_dataset("gsm8k", split="train")
+
+system_prompt = """
+Format your response as:
+<reasoning>
+Your step-by-step solution
+</reasoning>
+<answer>
+Your final answer
+</answer>
+"""
+
+# XMLParser extracts structured fields
+parser = vf.XMLParser(fields=["reasoning", "answer"])
+
+def correct_answer_reward_func(completion, answer, **kwargs):
+    parsed = parser.parse(completion)
+    return 1.0 if parsed.answer == answer else 0.0
+
+rubric = vf.Rubric(funcs=[
+    correct_answer_reward_func,
+    parser.get_format_reward_func()
+], weights=[1.0, 0.2])
+
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt=system_prompt,
+    parser=parser,
+    rubric=rubric,
 )
 
-# Train the model
+# Training setup is the same
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="example")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
 trainer.train()
 ```
 
@@ -131,9 +159,9 @@ trainer.train()
 - Integrate parsers and rubrics for complete evaluation
 
 ### 2. **Parsers** extract structured information
-- ThinkParser (recommended) for step-by-step reasoning
+- ThinkParser for step-by-step reasoning (extracts content after `</think>`)
+- XMLParser for structured output with multiple fields
 - Built-in format validation and rewards
-- Support for alternative field names
 
 ### 3. **Rubrics** define evaluation criteria
 - Combine multiple reward functions with weights
