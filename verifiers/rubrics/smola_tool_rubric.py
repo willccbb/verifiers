@@ -32,7 +32,8 @@ class SmolaToolRubric(ToolRubric):
         
         try:
             test_cases = json.loads(answer)['test_cases']
-        except:
+        except Exception as e:
+            print(f"Error parsing test cases: {e}")
             return 0.0
         # strip ```python and ``` if present at the beginning and end of the code
         code_str = code_str.strip()

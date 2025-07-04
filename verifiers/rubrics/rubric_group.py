@@ -37,15 +37,15 @@ class RubricGroup(Rubric):
         self.logger.warning("Adding reward function to the first rubric in the group.")
         self.rubrics[0].add_reward_func(func, weight)
 
-    def score_rollouts(self,
-                       prompts: List[List[Dict[str, str]] | str],
-                       completions: List[List[Dict[str, str]] | str],
-                       answers: List[Any],
-                       states: List[Dict[str, Any]],
-                       tasks: List[str],
-                       infos: List[Dict[str, Any]] = [],
-                       max_concurrent: int = 32,
-                       **kwargs) -> Dict[str, List[float]]:
+    async def score_rollouts(self,
+                             prompts: List[List[Dict[str, str]] | str],
+                             completions: List[List[Dict[str, str]] | str],
+                             answers: List[Any],
+                             states: List[Dict[str, Any]],
+                             tasks: List[str],
+                             infos: List[Dict[str, Any]] = [],
+                             max_concurrent: int = 32,
+                             **kwargs) -> Dict[str, List[float]]:
         """
         Run all rubrics sequentially and return the aggregated scores.
 

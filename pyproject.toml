@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
     "torch>=2.6.0",
     "setuptools",
-    "accelerate",
+    "accelerate>=1.4.0",
     "peft",
     "wandb",
     "rich",
