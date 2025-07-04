@@ -9,8 +9,8 @@ from verifiers.rubrics import Rubric
 
 
 # Create a concrete implementation for testing the abstract base class
-class ConcreteEnvironment(Environment):
-    """Concrete implementation of Environment for testing."""
+class SimpleEnvironment(Environment):
+    """Simple implementation of Environment for testing."""
     
     async def rollout(self, client, model, prompt, answer, task="default", info={}, sampling_args={}, **kwargs):
         """Simple test rollout implementation."""
@@ -30,7 +30,7 @@ class TestEnvironmentBase:
 
     def test_environment_initialization(self, mock_openai_client, sample_dataset):
         """Test that Environment initializes correctly."""
-        env = ConcreteEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             dataset=sample_dataset,
@@ -45,7 +45,7 @@ class TestEnvironmentBase:
 
     def test_environment_with_eval_dataset_only(self, mock_openai_client, sample_dataset):
         """Test Environment with only eval_dataset."""
-        env = ConcreteEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=sample_dataset,
@@ -58,7 +58,7 @@ class TestEnvironmentBase:
     def test_environment_no_datasets_raises_error(self, mock_openai_client):
         """Test that Environment raises error when no datasets provided."""
         with pytest.raises(ValueError, match="Either dataset or eval_dataset must be provided"):
-            TestEnvironment(
+            SimpleEnvironment(
                 client=mock_openai_client,
                 model="test-model",
                 parser=Parser(),
@@ -68,7 +68,7 @@ class TestEnvironmentBase:
     def test_completion_mode_with_system_prompt_raises_error(self, mock_openai_client, sample_dataset):
         """Test that completion mode with system prompt raises error."""
         with pytest.raises(ValueError, match="not supported for completion tasks"):
-            TestEnvironment(
+            SimpleEnvironment(
                 client=mock_openai_client,
                 model="test-model",
                 dataset=sample_dataset,
@@ -80,7 +80,7 @@ class TestEnvironmentBase:
 
     def test_format_prompt(self, mock_openai_client, sample_dataset):
         """Test prompt formatting."""
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             dataset=sample_dataset,
@@ -106,7 +106,7 @@ class TestEnvironmentBase:
 
     def test_get_dataset(self, mock_openai_client, sample_dataset):
         """Test dataset retrieval."""
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             dataset=sample_dataset,
@@ -125,7 +125,7 @@ class TestEnvironmentBase:
     @pytest.mark.asyncio
     async def test_get_model_response_chat(self, mock_openai_client):
         """Test get_model_response with chat format."""
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
@@ -147,7 +147,7 @@ class TestEnvironmentBase:
     @pytest.mark.asyncio
     async def test_get_model_response_completion(self, mock_openai_client):
         """Test get_model_response with completion format."""
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"prompt": ["test"], "answer": ["test"]}),
@@ -177,7 +177,7 @@ class TestEnvironmentBase:
         mock_response.choices[0].finish_reason = "length"
         mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
         
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
@@ -202,7 +202,7 @@ class TestEnvironmentBase:
             side_effect=Exception("Request longer than the maximum context length")
         )
         
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
@@ -223,7 +223,7 @@ class TestEnvironmentBase:
         """Test sampling args sanitization for remote servers."""
         mock_openai_client.base_url = "https://api.openai.com/v1/"
         
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
@@ -247,7 +247,7 @@ class TestEnvironmentBase:
         # This causes extra_body to be removed even for localhost URLs with ports
         mock_openai_client.base_url = "http://localhost/v1/"  # No port to match exactly
         
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
@@ -270,7 +270,7 @@ class TestEnvironmentBase:
     @pytest.mark.asyncio
     async def test_run_rollouts(self, mock_openai_client):
         """Test running multiple rollouts."""
-        env = TestEnvironment(
+        env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
