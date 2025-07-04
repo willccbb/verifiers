@@ -58,48 +58,97 @@ development
 ### Installation
 
 ```bash
-# Install the package
-pip install verifiers
-
-# Or using uv
+# Install using uv (recommended)
 uv add verifiers
+
+# Or clone and install locally
+git clone https://github.com/your-org/verifiers
+cd verifiers
+uv sync
 ```
 
 ### Basic Example
 
+Here's a simple example using ThinkParser (for step-by-step reasoning):
+
 ```python
-from verifiers.envs import SingleTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
-import openai
+import verifiers as vf
 
-# 1. Define output format
-parser = XMLParser(fields=["think", "answer"])
+# Load dataset 
+dataset = vf.load_example_dataset("gsm8k", split="train")
 
-# 2. Create evaluation criteria
-def correct_answer(completion, answer, **kwargs):
+system_prompt = """
+Think step-by-step inside <think>...</think> tags.
+Then give your final answer.
+"""
+
+# ThinkParser extracts content after </think>
+parser = vf.ThinkParser()
+
+def correct_answer_reward_func(completion, answer, **kwargs):
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
+
+rubric = vf.Rubric(funcs=[
+    correct_answer_reward_func,
+    parser.get_format_reward_func()
+], weights=[1.0, 0.2])
+
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt=system_prompt,
+    parser=parser,
+    rubric=rubric,
+)
+
+# Load model and train
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="example")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
+```
+
+### Alternative: Using XMLParser for structured output
+
+```python
+import verifiers as vf
+
+dataset = vf.load_example_dataset("gsm8k", split="train")
+
+system_prompt = """
+Format your response as:
+<reasoning>
+Your step-by-step solution
+</reasoning>
+<answer>
+Your final answer
+</answer>
+"""
+
+# XMLParser extracts structured fields
+parser = vf.XMLParser(fields=["reasoning", "answer"])
+
+def correct_answer_reward_func(completion, answer, **kwargs):
     parsed = parser.parse(completion)
     return 1.0 if parsed.answer == answer else 0.0
 
-rubric = Rubric(
-    funcs=[correct_answer, parser.get_format_reward_func()],
-    weights=[0.8, 0.2]
-)
+rubric = vf.Rubric(funcs=[
+    correct_answer_reward_func,
+    parser.get_format_reward_func()
+], weights=[1.0, 0.2])
 
-# 3. Set up environment
-env = SingleTurnEnv(
-    dataset=your_dataset, # with 'question' and 'answer' string columns
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
-    system_prompt="Solve the problem step by step.",
-    client=openai.Client()
 )
 
-# 4. Generate training data
-prompts, completions, rewards = env.generate(
-    model="gpt-4",
-    n_samples=100
-)
+# Training setup is the same
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="example")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
 ```
 
 ## Key Concepts
@@ -110,9 +159,9 @@ prompts, completions, rewards = env.generate(
 - Integrate parsers and rubrics for complete evaluation
 
 ### 2. **Parsers** extract structured information
-- XMLParser (recommended) for reliable field extraction
+- ThinkParser for step-by-step reasoning (extracts content after `</think>`)
+- XMLParser for structured output with multiple fields
 - Built-in format validation and rewards
-- Support for alternative field names
 
 ### 3. **Rubrics** define evaluation criteria
 - Combine multiple reward functions with weights
