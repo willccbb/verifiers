@@ -1,8 +1,8 @@
-# Mock Client Guide: Input-Output Mapping
+# MockAsyncOpenAI Guide: Input-Output Mapping
 
 ## Overview
 
-The `SmartMockClient` provides a sophisticated mock OpenAI client that maps specific inputs to specific outputs, making tests more predictable and order-independent.
+The `MockAsyncOpenAI` provides a sophisticated mock OpenAI client that maps specific inputs to specific outputs, making tests more predictable and order-independent.
 
 ## Key Features
 
@@ -22,9 +22,9 @@ The `SmartMockClient` provides a sophisticated mock OpenAI client that maps spec
 ### Setting Up Chat Response Mappings
 
 ```python
-from tests.conftest import SmartMockClient
+from tests.conftest import MockAsyncOpenAI
 
-client = SmartMockClient()
+client = MockAsyncOpenAI()
 
 # Add specific chat response mapping
 client.add_chat_response(
@@ -119,7 +119,7 @@ from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 
 # Set up client with specific mappings
-client = SmartMockClient()
+client = MockAsyncOpenAI()
 client.add_chat_response(
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
@@ -147,9 +147,9 @@ completion, state = await env.rollout(
 )
 ```
 
-## Migration from Old Mock Client
+## Comparison with Alternative Approaches
 
-### Before (Order-Dependent)
+### Order-Dependent Mocking
 ```python
 @pytest.fixture
 def mock_client():
@@ -162,11 +162,11 @@ def mock_client():
     return client
 ```
 
-### After (Order-Independent)
+### Input-Output Mapping
 ```python
 @pytest.fixture
 def mock_client():
-    client = SmartMockClient()
+    client = MockAsyncOpenAI()
     client.add_chat_response(messages=conversation_1, response="Response 1")
     client.add_chat_response(messages=conversation_2, response="Response 2")
     client.add_chat_response(messages=conversation_3, response="Response 3")

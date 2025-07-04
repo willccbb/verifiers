@@ -1,8 +1,8 @@
-# Multi-Turn Dependencies in SmartMockClient
+# Multi-Turn Dependencies in MockAsyncOpenAI
 
 ## Overview
 
-**Yes!** The `SmartMockClient` fully supports multi-turn dependencies. The key insight is that `add_chat_response()` maps the **entire conversation history** to responses, enabling sophisticated context-dependent testing.
+**Yes!** The `MockAsyncOpenAI` fully supports multi-turn dependencies. The key insight is that `add_chat_response()` maps the **entire conversation history** to responses, enabling sophisticated context-dependent testing.
 
 ## How It Works
 
@@ -23,7 +23,7 @@ The conversation history is converted to a hashable key:
 ### Multi-Turn Interface
 
 ```python
-client = SmartMockClient()
+client = MockAsyncOpenAI()
 
 # Turn 1: Initial conversation
 client.add_chat_response(
@@ -67,7 +67,7 @@ The same question gets different answers based on conversation history:
 ```python
 @pytest.mark.asyncio
 async def test_context_dependent_math_help():
-    client = SmartMockClient()
+    client = MockAsyncOpenAI()
     
     # Math context
     client.add_chat_response(
@@ -103,7 +103,7 @@ Handle conversation trees with different paths:
 ```python
 @pytest.mark.asyncio 
 async def test_branching_travel_assistant():
-    client = SmartMockClient()
+    client = MockAsyncOpenAI()
     
     start_conversation = [
         {"role": "system", "content": "You are a travel assistant."},
@@ -144,7 +144,7 @@ How this works with actual environment testing:
 ```python
 @pytest.mark.asyncio
 async def test_multiturn_environment_flow():
-    client = SmartMockClient()
+    client = MockAsyncOpenAI()
     
     # Set up the exact conversation flow that MultiTurnEnv produces
     
@@ -268,7 +268,7 @@ client.set_default_responses(chat_response="Unexpected conversation path")
 
 ## Summary
 
-The `SmartMockClient` provides **full multi-turn dependency support** through conversation history mapping. This enables:
+The `MockAsyncOpenAI` provides **full multi-turn dependency support** through conversation history mapping. This enables:
 
 - **Context-dependent responses**: Same question → different answers based on history
 - **Complex conversation trees**: Branching dialogues with state dependencies  
