@@ -1,4 +1,4 @@
-THIS SHOULD BE A LINTER ERROR"""Tests for the base Environment class."""
+"""Tests for the base Environment class."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -45,7 +45,7 @@ class TestEnvironmentBase:
 
     def test_environment_with_eval_dataset_only(self, mock_openai_client, sample_dataset):
         """Test Environment with only eval_dataset."""
-        env = TestEnvironment(
+        env = ConcreteEnvironment(
             client=mock_openai_client,
             model="test-model",
             eval_dataset=sample_dataset,
