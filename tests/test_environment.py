@@ -1,4 +1,4 @@
-"""Tests for the base Environment class."""
+THIS SHOULD BE A LINTER ERROR"""Tests for the base Environment class."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -9,7 +9,7 @@ from verifiers.rubrics import Rubric
 
 
 # Create a concrete implementation for testing the abstract base class
-class TestEnvironment(Environment):
+class ConcreteEnvironment(Environment):
     """Concrete implementation of Environment for testing."""
     
     async def rollout(self, client, model, prompt, answer, task="default", info={}, sampling_args={}, **kwargs):
@@ -30,7 +30,7 @@ class TestEnvironmentBase:
 
     def test_environment_initialization(self, mock_openai_client, sample_dataset):
         """Test that Environment initializes correctly."""
-        env = TestEnvironment(
+        env = ConcreteEnvironment(
             client=mock_openai_client,
             model="test-model",
             dataset=sample_dataset,
