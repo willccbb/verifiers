@@ -50,6 +50,7 @@ uv run pytest -m unit
 - `test_think_parser.py` - Tests for the ThinkParser class
 - `test_environment.py` - Tests for the base Environment class
 - `test_singleturn_env.py` - Tests for the SingleTurnEnv class
+- `test_multiturn_env.py` - Tests for the MultiTurnEnv class
 
 ## Test Markers
 
@@ -79,9 +80,28 @@ async def test_my_async_function(mock_openai_client):
     env = SingleTurnEnv(client=mock_openai_client, model="test", ...)
     result = await env.rollout(...)
     assert result[0] == expected_completion
+
+# MultiTurnEnv testing
+@pytest.mark.asyncio  
+async def test_multiturn_conversation(mock_multiturn_env):
+    # Configure sequential responses
+    responses = ["response1", "response2", "final DONE"]
+    mock_multiturn_env.client.chat.completions.create.side_effect = [
+        create_mock_response(resp) for resp in responses
+    ]
+    
+    completion, state = await mock_multiturn_env.rollout(...)
+    assert len(completion) > 1  # Multiple turns
 ```
 
 ### Environment Testing
+- **SingleTurnEnv**: Simple request-response testing
+- **MultiTurnEnv**: Complex multi-turn conversation testing with:
+  - Turn-by-turn conversation flow
+  - Max turns limiting
+  - Environment response integration
+  - Completion detection logic
+  - State management across turns
 - Tests cover both chat and completion message formats
 - Mocked responses simulate real OpenAI API behavior
 - Error handling and edge cases are tested
