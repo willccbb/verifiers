@@ -119,36 +119,187 @@ class TestRubricGroup:
         with pytest.raises(AssertionError, match="RubricGroup must have at least one rubric"):
             group.add_reward_func(test_func)
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_score_rollouts_basic(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollouts_basic(self):
         """Test basic scoring of rollouts with multiple rubrics."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        # It calls rubric.score_rollouts() which is async but doesn't await it
-        pass
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        def func2(completion, **kwargs):
+            return 0.5
+        
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        rubric2 = Rubric(funcs=[func2], weights=[0.8])
+        
+        group = RubricGroup(rubrics=[rubric1, rubric2])
+        
+        # Test data
+        prompts = ["What is 1+1?"]
+        completions = ["2"]
+        answers = ["2"]
+        states = [{}]
+        tasks = ["default"]
+        infos = [{}]
+        
+        # Test scoring
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos
+        )
+        
+        # Should have scores from both rubrics
+        assert "func1" in scores
+        assert "func2" in scores
+        assert "reward" in scores
+        assert len(scores["func1"]) == 1
+        assert len(scores["func2"]) == 1
+        assert scores["func1"][0] == 1.0
+        assert scores["func2"][0] == 0.5
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_score_rollouts_duplicate_names(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollouts_duplicate_names(self):
         """Test that duplicate reward function names are summed up."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        pass
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        def func2(completion, **kwargs):
+            return 0.5
+        
+        # Create two rubrics with same function name
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        rubric2 = Rubric(funcs=[func1], weights=[0.5])  # Same function name
+        
+        group = RubricGroup(rubrics=[rubric1, rubric2])
+        
+        # Test data
+        prompts = ["What is 1+1?"]
+        completions = ["2"]
+        answers = ["2"]
+        states = [{}]
+        tasks = ["default"]
+        infos = [{}]
+        
+        # Test scoring
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos
+        )
+        
+        # Should have summed scores for duplicate function names
+        assert "func1" in scores
+        assert len(scores["func1"]) == 1
+        assert scores["func1"][0] == 2.0  # 1.0 + 1.0 (same function called twice)
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_score_rollouts_with_kwargs(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollouts_with_kwargs(self):
         """Test scoring rollouts with additional kwargs."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        pass
+        def func1(completion, custom_param=None, **kwargs):
+            return 1.0 if custom_param == "test" else 0.5
+        
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        rubric2 = Rubric(funcs=[func1], weights=[0.8])
+        
+        group = RubricGroup(rubrics=[rubric1, rubric2])
+        
+        # Test data
+        prompts = ["What is 1+1?"]
+        completions = ["2"]
+        answers = ["2"]
+        states = [{}]
+        tasks = ["default"]
+        infos = [{}]
+        
+        # Test scoring with custom kwargs
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            custom_param="test"
+        )
+        
+        # Should pass custom kwargs to reward functions
+        assert "func1" in scores
+        assert len(scores["func1"]) == 1
+        assert scores["func1"][0] == 2.0  # 1.0 + 1.0 (both should get custom_param="test")
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_score_rollouts_single_rubric(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollouts_single_rubric(self):
         """Test scoring rollouts with a single rubric (edge case)."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        pass
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        
+        group = RubricGroup(rubrics=[rubric1])
+        
+        # Test data
+        prompts = ["What is 1+1?"]
+        completions = ["2"]
+        answers = ["2"]
+        states = [{}]
+        tasks = ["default"]
+        infos = [{}]
+        
+        # Test scoring
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos
+        )
+        
+        # Should work with single rubric
+        assert "func1" in scores
+        assert "reward" in scores
+        assert len(scores["func1"]) == 1
+        assert scores["func1"][0] == 1.0
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_score_rollouts_empty_data(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollouts_empty_data(self):
         """Test scoring empty rollouts."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        pass
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        
+        group = RubricGroup(rubrics=[rubric1])
+        
+        # Test with empty data
+        prompts = []
+        completions = []
+        answers = []
+        states = []
+        tasks = []
+        infos = []
+        
+        # Test scoring
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos
+        )
+        
+        # Should return empty scores but with correct structure
+        assert "func1" in scores
+        assert "reward" in scores
+        assert len(scores["func1"]) == 0
+        assert len(scores["reward"]) == 0
 
     def test_rubric_group_mixed_rubric_types(self):
         """Test RubricGroup with different types of rubrics."""
@@ -168,11 +319,41 @@ class TestRubricGroup:
         assert group.get_reward_func_names() == ["func1", "func2"]
         assert group.get_reward_weights() == [1.0, 0.3]
 
-    @pytest.mark.skip(reason="RubricGroup.score_rollouts has a bug - it doesn't await async rubric.score_rollouts calls")
-    def test_rubric_group_with_max_concurrent(self):
+    @pytest.mark.asyncio
+    async def test_rubric_group_with_max_concurrent(self):
         """Test RubricGroup with max_concurrent parameter."""
-        # Note: This test is skipped because RubricGroup.score_rollouts() has a bug
-        pass
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        rubric1 = Rubric(funcs=[func1], weights=[1.0])
+        
+        group = RubricGroup(rubrics=[rubric1])
+        
+        # Test data
+        prompts = ["What is 1+1?", "What is 2+2?"]
+        completions = ["2", "4"]
+        answers = ["2", "4"]
+        states = [{}, {}]
+        tasks = ["default", "default"]
+        infos = [{}, {}]
+        
+        # Test scoring with max_concurrent parameter
+        scores = await group.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            max_concurrent=1  # Force sequential execution
+        )
+        
+        # Should work with max_concurrent parameter
+        assert "func1" in scores
+        assert "reward" in scores
+        assert len(scores["func1"]) == 2
+        assert scores["func1"][0] == 1.0
+        assert scores["func1"][1] == 1.0
 
     def test_rubric_group_inheritance(self):
         """Test that RubricGroup properly inherits from Rubric."""

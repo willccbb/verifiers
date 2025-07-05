@@ -285,19 +285,26 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_score_rollouts_empty(self):
         """Test scoring empty list of rollouts."""
-        rubric = Rubric(funcs=[], weights=[])
+        def test_func(completion, **kwargs):
+            return 1.0
         
-        # The Rubric class has a bug with empty rollouts - it tries to access rewards[0]
-        # Let's test that it handles this case gracefully or raises an appropriate error
-        with pytest.raises(IndexError):
-            await rubric.score_rollouts(
-                prompts=[],
-                completions=[],
-                answers=[],
-                states=[],
-                tasks=[],
-                infos=[]
-            )
+        rubric = Rubric(funcs=[test_func], weights=[1.0])
+        
+        # Should handle empty rollouts gracefully
+        results = await rubric.score_rollouts(
+            prompts=[],
+            completions=[],
+            answers=[],
+            states=[],
+            tasks=[],
+            infos=[]
+        )
+        
+        # Should return empty lists for each function
+        assert "test_func" in results
+        assert "reward" in results
+        assert results["test_func"] == []
+        assert results["reward"] == []
 
     @pytest.mark.asyncio
     async def test_score_rollouts_with_default_infos(self):

@@ -146,4 +146,11 @@ class Rubric:
             total=len(prompts),
             desc=f"Evaluating {len(prompts)} rollouts"
         )
+        
+        # Handle empty rewards list
+        if not rewards:
+            # Return empty dict with keys for each reward function
+            reward_func_names = self.get_reward_func_names()
+            return {name: [] for name in reward_func_names + ['reward']}
+        
         return {k: [item[k] for item in rewards] for k in rewards[0]} 
