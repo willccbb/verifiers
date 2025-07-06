@@ -123,12 +123,12 @@ class Environment(ABC):
                 "answer": x[answer_key]
             }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
 
-    def get_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
+    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.dataset is not None:
             return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.dataset
 
-    def get_eval_dataset(self, n: int = -1, seed: int = 0, **kwargs: Any) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.eval_dataset is not None:
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         return self.eval_dataset
