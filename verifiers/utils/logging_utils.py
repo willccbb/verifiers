@@ -8,15 +8,19 @@ from rich.text import Text
 from rich.panel import Panel
 
 
-def format_chat_response(chat_response: str | list[dict[str, str]]) -> str:
+def format_chat_response(chat_response) -> str:
     if isinstance(chat_response, str):
         return chat_response
+
     elif isinstance(chat_response, list):
         # For chat format, only show the last message content (typically the user's question and the assistant's response)
         # Excludes system prompt from wandb logging.
         last_message = chat_response[-1]
         content = last_message.get("content", "")
         return content
+        
+    else:
+        return str(chat_response)
 
 
 def setup_logging(
