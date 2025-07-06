@@ -33,7 +33,7 @@ from verifiers import Environment
 from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
-from verifiers.utils.logging_utils import print_prompt_completions_sample   
+from verifiers.utils.logging_utils import print_prompt_completions_sample, format_chat_response  
 
 class RepeatSampler(Sampler):
     """
@@ -1077,8 +1077,8 @@ class GRPOTrainer(Trainer):
                 
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
-                    "prompt": prompts,
-                    "completion": completions,
+                    "prompt": [format_chat_response(prompt) for prompt in prompts],
+                    "completion": [format_chat_response(completion) for completion in completions],
                 }
                 for k, v in reward_dict.items():
                     table_data[k] = v
@@ -1122,8 +1122,8 @@ class GRPOTrainer(Trainer):
  
                 table = {
                     "step": [str(self.state.global_step)] * len(self._textual_logs["prompt"]),
-                    "prompt": list(self._textual_logs["prompt"]),
-                    "completion": list(self._textual_logs["completion"]),
+                    "prompt": [format_chat_response(prompt) for prompt in self._textual_logs["prompt"]],
+                    "completion": [format_chat_response(completion) for completion in self._textual_logs["completion"]],
                     **{k: list(v) for k, v in self._textual_logs["rewards"].items()},
                 }
                 if len(table["prompt"]) > 0:
