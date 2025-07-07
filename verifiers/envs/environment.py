@@ -123,14 +123,18 @@ class Environment(ABC):
                 "answer": x[answer_key]
             }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
 
-    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
+    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
         if n > 0 and self.dataset is not None:
             return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
+        if self.dataset is None:
+            raise ValueError('dataset is not set')
         return self.dataset
 
-    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
         if n > 0 and self.eval_dataset is not None:
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
+        if self.eval_dataset is None:
+            raise ValueError('eval_dataset is not set')
         return self.eval_dataset
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
@@ -460,8 +464,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         Returns:
             Dict with prompt_ids, prompt_mask, completion_ids, completion_mask, rewards
         """
-        # TODO: states + rewards for intermediate-reward objectives
-
         # Determine format from first prompt
         is_chat_format = isinstance(prompts[0], list)
  
