@@ -82,6 +82,7 @@ class Rubric:
         )
         ans = 0.0
         merged = {**common, **kwargs}
+        print(merged)
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
                 ans = func(**merged)
