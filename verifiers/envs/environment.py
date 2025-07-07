@@ -455,6 +455,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         rewards: List[float],
         processing_class: PreTrainedTokenizerBase,
         max_completion_length: int = -1,
+        max_seq_length: int = -1,
         mask_truncated_completions: bool = False,
         mask_env_responses: bool = False,
     ) -> Dict[str, List[Any]]:
@@ -484,8 +485,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
                     prompt, completion, processing_class
                 )
-            if mask_truncated_completions and max_completion_length > 0 and len(completion_ids) > max_completion_length:
+            is_truncated = False
+            if max_completion_length > 0 and len(completion_ids) > max_completion_length:
                 completion_ids = completion_ids[:max_completion_length]
+                is_truncated = True
+            if max_seq_length > 0 and len(prompt_ids) + len(completion_ids) > max_seq_length:
+                completion_ids = completion_ids[:max_seq_length - len(prompt_ids)]
+                is_truncated = True
+            if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
