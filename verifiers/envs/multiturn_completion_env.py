@@ -39,21 +39,22 @@ class MultiTurnCompletionEnv(Environment):
                       sampling_args: Dict[str, Any] = {},
                       **kwargs: Any) -> Tuple[str, Dict[str, Any]]:
         is_completed = False
-        state = {'answer': answer}
+        state = {'answer': answer, 'responses': []}
         assert isinstance(prompt, str)
         input = deepcopy(prompt) 
         completion = ""
         turn = 0
         while not is_completed:
-            response = await self.get_model_response(
+            completion, response = await self.get_model_response(
                 prompt=input,
                 client=client,
                 model=model,
                 sampling_args=sampling_args,
                 message_type=self.message_type
             )
-            input = input + response
-            completion += response
+            state['responses'].append(response)
+            input = input + completion
+            completion += completion
             turn += 1
             if self.is_completed(input, state, **kwargs) or turn >= self.max_turns:
                 is_completed = True

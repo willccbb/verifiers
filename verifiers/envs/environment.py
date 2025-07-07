@@ -10,6 +10,8 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from datasets import Dataset
 from openai import OpenAI, AsyncOpenAI
+from openai.types.completion import Completion
+from openai.types.chat.chat_completion import ChatCompletion
 
 from verifiers import RewardFunc
 from verifiers.parsers import Parser
@@ -17,6 +19,8 @@ from verifiers.rubrics import Rubric
 
 DEFAULT_MAX_CONCURRENT = 512
 DATASET_MAX_CONCURRENT = 32
+
+Response = Union[Completion, ChatCompletion, None]
 
 class Environment(ABC):
     """
@@ -161,7 +165,7 @@ class Environment(ABC):
                            sampling_args: Dict[str, Any] = {},
                            message_type: Literal['chat', 'completion'] | None = None,
                            sanitize_sampling_args: bool = True,
-                           **kwargs: Any) -> str:
+                           **kwargs: Any) -> Tuple[str, Response]:
         """
         Get model response for a given prompt (chat or completion).
         
@@ -175,36 +179,22 @@ class Environment(ABC):
         if message_type is None:
             message_type = self.message_type
 
-        try:
-            if message_type == 'chat':
-                assert isinstance(prompt, list)
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=prompt, # type: ignore
-                    **sanitized_args
-                )
-                # Check if generation was truncated due to max_tokens
-                if response.choices[0].finish_reason == 'length':
-                    return "[ERROR] max_tokens_reached"
-                return response.choices[0].message.content # type: ignore
-            elif message_type == 'completion':
-                assert isinstance(prompt, str)
-                response = client.completions.create(
-                    model=model,
-                    prompt=prompt,
-                    **sanitized_args
-                )
-                # Check if generation was truncated due to max_tokens
-                if response.choices[0].finish_reason == 'length':
-                    return "[ERROR] max_tokens_reached"
-                return response.choices[0].text # type: ignore
-        except Exception as e:
-            # Check for prompt_too_long error
-            error_msg = str(e)
-            if "longer than the maximum" in error_msg or "exceeds the model" in error_msg:
-                return "[ERROR] prompt_too_long"
-            # Re-raise other errors
-            raise
+        if message_type == 'chat':
+            assert isinstance(prompt, list)
+            response = await client.chat.completions.create(
+                model=model,
+                messages=prompt, # type: ignore
+                **sanitized_args
+            )
+            return response.choices[0].message.content, response 
+        elif message_type == 'completion':
+            assert isinstance(prompt, str)
+            response = await client.completions.create(
+                model=model,
+                prompt=prompt,
+                **sanitized_args
+            )
+            return response.choices[0].text, response 
 
     @abstractmethod
     async def rollout(self,
@@ -490,10 +480,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_ids = completion_ids[:max_completion_length]
                 is_truncated = True
             if max_seq_length > 0 and len(prompt_ids) + len(completion_ids) > max_seq_length:
+                if len(prompt_ids) > max_seq_length:
+                    prompt_ids = prompt_ids[:max_seq_length]
                 completion_ids = completion_ids[:max_seq_length - len(prompt_ids)]
                 is_truncated = True
+                assert len(prompt_ids) + len(completion_ids) <= max_seq_length, f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_length: {max_seq_length}"
             if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
+                assert len(completion_ids) == len(completion_mask)
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)

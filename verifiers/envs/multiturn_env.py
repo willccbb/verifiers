@@ -44,25 +44,25 @@ class MultiTurnEnv(Environment):
         assert isinstance(prompt, list)
         messages = deepcopy(prompt) 
         is_completed = False
-        state = {'answer': answer}
+        state = {'answer': answer, 'responses': []}
         completion = []
         turn = 0
         while not is_completed:
             if self.is_completed(messages, state, **kwargs):
                 is_completed = True
                 break
-            response = await self.get_model_response(
+            response_text, response = await self.get_model_response(
                 prompt=messages,
                 client=client,
                 model=model,
                 sampling_args=sampling_args,
                 message_type=self.message_type
             )
-            has_error = response.startswith("[ERROR]")
-            messages.append({"role": "assistant", "content": response})
-            completion.append({"role": "assistant", "content": response})
+            messages.append({"role": "assistant", "content": response_text})
+            completion.append({"role": "assistant", "content": response_text})
+            state['responses'].append(response)
             turn += 1
-            if self.is_completed(messages, state, **kwargs) or turn >= self.max_turns or has_error:
+            if self.is_completed(messages, state, **kwargs) or turn >= self.max_turns:
                 is_completed = True
             else:
                 env_msg, state = self.env_response(messages, state, **kwargs)

@@ -27,14 +27,16 @@ class SingleTurnEnv(Environment):
         """
         Returns completion (str or message list) and null state.
         """
-        completion = await self.get_model_response(
+        state = {'responses': []}
+        completion, response = await self.get_model_response(
             client=client,
             model=model,
             prompt=prompt,
             sampling_args=sampling_args,
             message_type=self.message_type
         )
+        state['responses'].append(response)
         if self.message_type == 'chat': 
             return [{'role': 'assistant', 'content': completion}], {}
-        return completion, {}
+        return completion, state
     
