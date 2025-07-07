@@ -3,10 +3,8 @@ import logging
 from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Tuple, Optional, Union
+from typing import Any, Dict, List, Literal, Tuple, Optional, Union, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
-
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase 
 
 from datasets import Dataset
 from openai import OpenAI, AsyncOpenAI
@@ -16,6 +14,9 @@ from openai.types.chat.chat_completion import ChatCompletion
 from verifiers import RewardFunc
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
+
+if TYPE_CHECKING:
+    from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 DEFAULT_MAX_CONCURRENT = 512
 DATASET_MAX_CONCURRENT = 32
@@ -308,7 +309,7 @@ class Environment(ABC):
 
     def generate(self,
                  inputs: Dict[str, List[Any]] | Dataset,
-                 client: AsyncOpenAI | OpenAI | None = None,
+                 client: AsyncOpenAI | OpenAI,
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  max_concurrent: int = DEFAULT_MAX_CONCURRENT,
@@ -331,7 +332,7 @@ class Environment(ABC):
                 loop.close()
                 asyncio.set_event_loop(None)
         except RuntimeError:
-            import nest_asyncio
+            import nest_asyncio # type: ignore
             nest_asyncio.apply()
             loop = asyncio.get_running_loop()
             setup_executor(loop)
@@ -341,7 +342,7 @@ class Environment(ABC):
         self,
         prompt: List[Dict[str, str]],
         completion: List[Dict[str, str]],
-        processing_class: PreTrainedTokenizerBase,
+        processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False
     ) -> Tuple[List[int], List[int], List[int], List[int]]:
         """
@@ -414,7 +415,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         self,
         prompt: str,
         completion: str,
-        processing_class: PreTrainedTokenizerBase
+        processing_class: "PreTrainedTokenizerBase"
     ) -> Tuple[List[int], List[int], List[int], List[int]]:
         """
         Process completion format text.
@@ -443,7 +444,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         completions: List[Union[str, List[Dict[str, Any]]]],
         states: List[Dict[str, Any]],
         rewards: List[float],
-        processing_class: PreTrainedTokenizerBase,
+        processing_class: "PreTrainedTokenizerBase",
         max_completion_length: int = -1,
         max_seq_length: int = -1,
         mask_truncated_completions: bool = False,
@@ -478,16 +479,22 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             is_truncated = False
             if max_completion_length > 0 and len(completion_ids) > max_completion_length:
                 completion_ids = completion_ids[:max_completion_length]
+                completion_mask = completion_mask[:max_completion_length]
                 is_truncated = True
             if max_seq_length > 0 and len(prompt_ids) + len(completion_ids) > max_seq_length:
                 if len(prompt_ids) > max_seq_length:
                     prompt_ids = prompt_ids[:max_seq_length]
                 completion_ids = completion_ids[:max_seq_length - len(prompt_ids)]
+                completion_mask = completion_mask[:max_seq_length - len(prompt_ids)]
                 is_truncated = True
-                assert len(prompt_ids) + len(completion_ids) <= max_seq_length, f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_length: {max_seq_length}"
+                assert len(prompt_ids) + len(completion_ids) <= max_seq_length, \
+                    f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_length: {max_seq_length}"
             if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
-                assert len(completion_ids) == len(completion_mask)
+            assert len(prompt_ids) == len(prompt_mask), \
+                f"Prompt ids: {len(prompt_ids)}, prompt mask: {len(prompt_mask)}"
+            assert len(completion_ids) == len(completion_mask), \
+                f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
@@ -513,14 +520,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         """
         Evaluate model on the Environment evaluation dataset.
         """
-        # use class-level client and model if not provided
-        if client is None:
-            assert self.client is not None
-            client = self.client
-        if model is None:
-            assert self.model is not None
-            model = self.model
-
         if self.eval_dataset is None:
             self.logger.info('eval_dataset is not set, falling back to train dataset')
             assert self.dataset is not None

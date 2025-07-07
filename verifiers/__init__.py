@@ -1,12 +1,20 @@
 from typing import Callable
 RewardFunc = Callable[..., float]
 
-import torch._dynamo
-torch._dynamo.config.suppress_errors = True # type: ignore
+try:
+    import torch._dynamo # type: ignore
+    torch._dynamo.config.suppress_errors = True # type: ignore
+except ImportError:
+    pass
 
-from .utils.logging_utils import setup_logging, print_prompt_completions_sample
+from .utils.logging_utils import setup_logging
+try:
+    from .utils.logging_utils import print_prompt_completions_sample
+    _HAS_RICH = True
+except ImportError:
+    _HAS_RICH = False
+
 from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
-from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
 
 from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
@@ -22,7 +30,14 @@ from .envs.singleturn_env import SingleTurnEnv
 from .envs.tool_env import ToolEnv
 from .envs.env_group import EnvGroup
 
-from .trainers import GRPOTrainer, GRPOConfig, grpo_defaults, lora_defaults
+# Conditional import based on trl availability
+try:
+    import trl # type: ignore
+    from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
+    from .trainers import GRPOTrainer, GRPOConfig, grpo_defaults, lora_defaults
+    _HAS_TRL = True
+except ImportError:
+    _HAS_TRL = False
 
 __version__ = "0.1.0"
 
@@ -41,16 +56,25 @@ __all__ = [
     "SingleTurnEnv",
     "ToolEnv",
     "EnvGroup",
-    "GRPOTrainer",
-    "GRPOConfig",
-    "get_model",
-    "get_tokenizer",
-    "get_model_and_tokenizer",
-    "grpo_defaults",
-    "lora_defaults",
     "extract_boxed_answer",
     "extract_hash_answer",
     "load_example_dataset",
     "setup_logging",
-    "print_prompt_completions_sample",
 ]
+
+# Add trainer exports only if trl is available
+if _HAS_TRL:
+    __all__.extend([
+        "get_model",
+        "get_tokenizer",
+        "get_model_and_tokenizer",
+        "GRPOTrainer",
+        "GRPOConfig",
+        "grpo_defaults",
+        "lora_defaults",
+    ])
+
+if _HAS_RICH:
+    __all__.extend([
+        "print_prompt_completions_sample",
+    ])
