@@ -129,16 +129,23 @@ class Environment(ABC):
             }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
 
     def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
-        if n > 0 and self.dataset is not None:
-            return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         if self.dataset is None:
             raise ValueError('dataset is not set')
-        return self.dataset.shuffle(seed=seed)
+        if seed is not None:
+            self.dataset = self.dataset.shuffle(seed=seed)
+        if n > 0:
+            return self.dataset.select(range(n))
+        return self.dataset
 
     def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
-        if n > 0 and self.eval_dataset is not None:
-            return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
-        return self.eval_dataset.shuffle(seed=seed) if self.eval_dataset is not None else None
+        if self.eval_dataset is None:
+            self.logger.warning('eval_dataset is not set, falling back to train dataset')
+            return self.get_dataset(n, seed, **kwargs)
+        if seed is not None:
+            self.eval_dataset = self.eval_dataset.shuffle(seed=seed)
+        if n > 0:
+            return self.eval_dataset.select(range(n))
+        return self.eval_dataset
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
