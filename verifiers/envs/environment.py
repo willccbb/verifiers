@@ -70,8 +70,8 @@ class Environment(ABC):
         self.sampling_args = {
             'n': 1, # n > 1 not supported; use duplicate prompts for multiple completions
             'extra_body': {
-                'skip_special_tokens': False,
-                'spaces_between_special_tokens': False,
+            #    'skip_special_tokens': False,
+            #    'spaces_between_special_tokens': False,
             },
         }
         if sampling_args is not None and 'extra_body' in sampling_args:
