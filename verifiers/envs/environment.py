@@ -296,6 +296,7 @@ class Environment(ABC):
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
         results['state'] = [rollout[1] for rollout in rollouts]
+        print("State 0:", results['state'][0])
         if 'task' not in results:
             results['task'] = ['default'] * len(results['prompt'])
         if score_rollouts:
