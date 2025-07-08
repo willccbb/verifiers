@@ -365,8 +365,8 @@ class Environment(ABC):
         prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
         assert isinstance(prompt_text, str)
         prompt_ids = processing_class.encode(prompt_text)
-        prompt_mask = [1] * len(prompt_ids)
-        
+        prompt_mask = [0] * len(prompt_ids)
+
         # track completion tokens and masks by processing incrementally
         completion_ids = []
         completion_mask = []
