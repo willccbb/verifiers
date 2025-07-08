@@ -37,6 +37,6 @@ class SingleTurnEnv(Environment):
         )
         state['responses'].append(response)
         if self.message_type == 'chat': 
-            return [{'role': 'assistant', 'content': completion}], {}
+            return [{'role': 'assistant', 'content': completion}], state
         return completion, state
     
