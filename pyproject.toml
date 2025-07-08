@@ -30,14 +30,14 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
-    "torch>=2.6.0",
+    "torch>=2.7.0",
     "transformers",
     "accelerate>=1.4.0",
     "peft",
     "wandb",
     "rich",
     "trl>=0.17.0",
-    "vllm>=0.8.5.post1",
+    "vllm>=0.9.1",
     "liger-kernel>=0.5.10",
     "deepspeed",
     "nest-asyncio>=1.6.0",
@@ -52,14 +52,14 @@ all = [
 ]
 
 train = [
-    "torch>=2.6.0",
+    "torch>=2.7.0",
     "transformers",
     "accelerate>=1.4.0",
     "peft",
     "wandb",
     "rich",
     "trl>=0.17.0",
-    "vllm>=0.8.5.post1",
+    "vllm>=0.9.1",
     "liger-kernel>=0.5.10",
     "deepspeed",
 ]

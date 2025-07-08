@@ -9,9 +9,8 @@ training:
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/gsm8k.py
 """
 
-dataset = load_example_dataset("gsm8k", split="train")
-eval_dataset = load_example_dataset("gsm8k", split="test")
-
+dataset = load_example_dataset("gsm8k", split="train") 
+#eval_dataset = load_example_dataset("gsm8k", split="test")
 
 system_prompt = """
 Think step-by-step inside <think>...</think> tags.
@@ -31,7 +30,7 @@ rubric = vf.Rubric(funcs=[
 
 vf_env = vf.SingleTurnEnv(
     dataset=dataset,
-    eval_dataset=eval_dataset,
+    #eval_dataset=eval_dataset,
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
@@ -50,10 +49,9 @@ training_args.gradient_accumulation_steps=8
 training_args.num_iterations=1
 training_args.max_prompt_length=512
 training_args.max_completion_length=2048
-training_args.max_steps=100
 training_args.save_strategy="steps"
-training_args.save_steps=10
-training_args.save_total_limit=10
+training_args.save_steps=100
+training_args.max_steps=200
 
 trainer = vf.GRPOTrainer(
     model=model,

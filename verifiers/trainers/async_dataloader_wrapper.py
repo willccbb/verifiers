@@ -13,7 +13,7 @@ class AsyncDataLoaderWrapper:
     ahead while training continues on current batches.
     """
     
-    def __init__(self, dataloader: DataLoader, buffer_size: int = 5):
+    def __init__(self, dataloader: DataLoader, buffer_size: int = 5, gradient_accumulation_steps: int = 1):
         self.dataloader = dataloader
         self.buffer_size = buffer_size
         self._buffer = deque(maxlen=buffer_size)
@@ -22,6 +22,11 @@ class AsyncDataLoaderWrapper:
         self._exhausted = False
         self._current_epoch = 0
         self._current_batch = None  # Track the current batch
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+
+        # epoch tracking for RepeatSampler
+        self.batches_per_epoch = len(dataloader) 
+        self.batches_yielded = 0
         
     def __iter__(self):
         """Reset and return iterator"""
@@ -35,6 +40,10 @@ class AsyncDataLoaderWrapper:
         """Get next batch, refilling buffer as needed"""
         with self._lock:
             # If buffer is empty, try to fill it
+            if self.batches_yielded >= self.batches_per_epoch:
+                self.batches_yielded = 0
+                raise StopIteration
+            
             if not self._buffer and not self._exhausted:
                 self._fill_buffer()
                 
@@ -43,6 +52,7 @@ class AsyncDataLoaderWrapper:
                 
             # Store current batch before returning
             self._current_batch = self._buffer.popleft()
+            self.batches_yielded += 1
             return self._current_batch
             
     def peek_ahead(self, n: int = 1) -> List[Any]:
@@ -69,10 +79,10 @@ class AsyncDataLoaderWrapper:
             self._fill_buffer_single()
             
     def _fill_buffer_single(self):
-        """Add a single batch to the buffer"""
+        """Add a single batch to the buffer""" 
         if self._iterator is None:
             self._iterator = iter(self.dataloader)
-            
+ 
         try:
             batch = next(self._iterator)
             self._buffer.append(batch)

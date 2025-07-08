@@ -133,14 +133,12 @@ class Environment(ABC):
             return self.dataset.shuffle(seed=seed).select(range(n)) # type: ignore
         if self.dataset is None:
             raise ValueError('dataset is not set')
-        return self.dataset
+        return self.dataset.shuffle(seed=seed)
 
-    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
         if n > 0 and self.eval_dataset is not None:
             return self.eval_dataset.shuffle(seed=seed).select(range(n)) # type: ignore
-        if self.eval_dataset is None:
-            raise ValueError('eval_dataset is not set')
-        return self.eval_dataset
+        return self.eval_dataset.shuffle(seed=seed) if self.eval_dataset is not None else None
 
     def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
@@ -510,8 +508,8 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     # Evaluation and dataset generation
     def evaluate(self,
-                 client: AsyncOpenAI | OpenAI | None = None,
-                 model: str | None = None,
+                 client: AsyncOpenAI | OpenAI,
+                 model: str,
                  sampling_args: Dict[str, Any] = {},
                  num_samples: int = -1,
                  max_concurrent: int = DEFAULT_MAX_CONCURRENT,
@@ -523,12 +521,10 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         if self.eval_dataset is None:
             self.logger.info('eval_dataset is not set, falling back to train dataset')
             assert self.dataset is not None
-            inputs = self.dataset
+            inputs = self.get_dataset(n=num_samples)
         else:
-            inputs = self.eval_dataset
-        if num_samples > 0:
-            inputs = inputs.select(range(num_samples))
-
+            inputs = self.get_eval_dataset(n=num_samples)
+        assert inputs is not None, 'No dataset found'
         results = self.generate(
             inputs, client, model, sampling_args, max_concurrent, **kwargs
         )

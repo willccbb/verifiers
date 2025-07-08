@@ -322,6 +322,8 @@ class GRPOTrainer(Trainer):
             if filtered_size < original_size:
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
         
+
+
         # dummy data collator
         def data_collator(features):
             return features
@@ -335,6 +337,16 @@ class GRPOTrainer(Trainer):
             callbacks=callbacks,
             optimizers=optimizers,
         )
+
+        if self.train_dataset is not None:
+            unique_prompts_per_device_batch = self.per_device_train_batch_size // self.num_generations
+            unique_prompts_per_gradient_step = unique_prompts_per_device_batch * self.gradient_accumulation_steps
+            global_batch_size = unique_prompts_per_gradient_step * self.accelerator.num_processes
+            dataset_size = len(self.train_dataset) # type: ignore
+            truncated_dataset_size = (dataset_size // global_batch_size) * global_batch_size
+            if truncated_dataset_size < dataset_size:
+                self.logger.info(f"Truncating dataset from {dataset_size} to {truncated_dataset_size} examples ({dataset_size - truncated_dataset_size} examples were too long)")
+                self.train_dataset = self.train_dataset.select(range(truncated_dataset_size))
 
         # Reference model
         if self.beta == 0.0:
@@ -473,7 +485,8 @@ class GRPOTrainer(Trainer):
         # Store the wrapped dataloader for async access
         self._async_dataloader = AsyncDataLoaderWrapper(
             dataloader, 
-            buffer_size=max(5, self.num_batches_ahead * 2)
+            buffer_size=max(5, self.num_batches_ahead * 2),
+            gradient_accumulation_steps=self.gradient_accumulation_steps
         )
         return self.accelerator.prepare(self._async_dataloader)
 
@@ -685,10 +698,18 @@ class GRPOTrainer(Trainer):
             Tuple of (all_prompts, all_answers, all_tasks)
         """
         batches = self._async_dataloader.peek_ahead(batch_offset)
-        batch = batches[batch_offset - 1] if batch_offset > 0 else batches[0]
+
+        if batch_offset == 0:
+            batch = batches[0] if batches else None
+        else:
+            batch = batches[batch_offset - 1] if batches else None
+
+        if batch is None:
+            return [], [], [], []
+        
         if isinstance(batch, dict):
             batch = [batch]
-        
+
         # Gather batch data from all processes
         prompts = [x['prompt'] for x in batch]
         answers = [x['answer'] for x in batch]
@@ -742,11 +763,18 @@ class GRPOTrainer(Trainer):
             # On first call, this submits batches 0 through num_batches_ahead
             # On subsequent calls, this submits new batches to stay ahead
             batches_submitted = 0
+            steps_per_batch = generate_every 
+            max_batch_id = (self.state.max_steps - 1) // steps_per_batch
+            target_batch_id = min(target_batch_id, max_batch_id)
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
+                first_step_for_batch = batch_id * steps_per_batch
+                if first_step_for_batch >= self.state.max_steps:
+                    break
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
-                
+                if not all_prompts:
+                    break
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
                 
                 # Submit batch (main process only)
