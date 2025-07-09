@@ -7,8 +7,8 @@ try:
 except ImportError:
     pass
 
-from .utils.logging_utils import setup_logging
 try:
+    from .utils.logging_utils import setup_logging
     from .utils.logging_utils import print_prompt_completions_sample
     _HAS_RICH = True
 except ImportError:
