@@ -22,14 +22,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "setuptools",
-    "requests",
     "openai",
     "datasets",
 ]
 
 [project.optional-dependencies]
 all = [
+    "requests",
     "torch>=2.7.0",
     "transformers",
     "accelerate>=1.4.0",
@@ -71,6 +70,7 @@ jupyter = [
 ]
 
 envs = [
+    "requests",
     "duckduckgo-search",
     "brave-search",
     "reasoning-gym",
@@ -86,6 +86,7 @@ docs = [
 ]
 
 tests = [
+    "requests",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
