@@ -4,7 +4,7 @@ from .rubric_group import RubricGroup
 from .math_rubric import MathRubric
 from .codemath_rubric import CodeMathRubric
 from .tool_rubric import ToolRubric
-from .smola_tool_rubric import SmolaToolRubric
+from .smol_tool_rubric import SmolToolRubric
 
 __all__ = [
     "Rubric",
@@ -13,5 +13,5 @@ __all__ = [
     "MathRubric",
     "CodeMathRubric",
     "ToolRubric",
-    "SmolaToolRubric"
+    "SmolToolRubric"
 ]

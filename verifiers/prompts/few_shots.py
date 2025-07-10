@@ -279,7 +279,7 @@ CALCULATOR_FEW_SHOT = [
 ]
 
 """
-Few shot examples for SmolaAgents tool-based assistants.
+Few shot examples for SmolAgents tool-based assistants.
 """
 
 CALCULATOR_SMOLA_FEW_SHOTS = [

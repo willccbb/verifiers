@@ -6,11 +6,11 @@ from datasets import Dataset
 
 from verifiers import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers.smola_parser import SmolaParser
+from verifiers.parsers.smol_parser import SmolParser
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
-from verifiers.rubrics.smola_tool_rubric import SmolaToolRubric
+from verifiers.rubrics.smol_tool_rubric import SmolToolRubric
 
-class SmolaToolEnv(MultiTurnEnv):
+class SmolToolEnv(MultiTurnEnv):
     def __init__(self,
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
@@ -34,9 +34,9 @@ class SmolaToolEnv(MultiTurnEnv):
         self.dataset_name = dataset
         self.max_steps = max_steps
         self.tools = {tool.name: tool for tool in tools}
-        self.rubric = SmolaToolRubric(tools=tools)
-        self.llm_parser = SmolaParser(fields=["reasoning", ("tool", "answer")])
-        self.env_parser = SmolaParser(fields=["result"])
+        self.rubric = SmolToolRubric(tools=tools)
+        self.llm_parser = SmolParser(fields=["reasoning", ("tool", "answer")])
+        self.env_parser = SmolParser(fields=["result"])
 
     def _format_tool_descriptions(self, tools: List[Any]) -> str:
         """Formats tool schemas into a user-friendly description string."""
@@ -92,7 +92,7 @@ class SmolaToolEnv(MultiTurnEnv):
             return False
 
     def call_tool(self, tool_json: str, **kwargs: Any) -> str:
-        """Call a SmolaAgents Tool object based on JSON command."""
+        """Call a SmolAgents Tool object based on JSON command."""
         try:
             command = json.loads(tool_json)
             if not isinstance(command, dict):

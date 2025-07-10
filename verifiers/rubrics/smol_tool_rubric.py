@@ -1,13 +1,13 @@
 import json
 from typing import List, Any
 
-from verifiers.parsers.smola_parser import SmolaParser
+from verifiers.parsers.smol_parser import SmolParser
 from verifiers.rubrics.tool_rubric import ToolRubric
 
-class SmolaToolRubric(ToolRubric):
+class SmolToolRubric(ToolRubric):
     def __init__(self,
-                 parser: SmolaParser = SmolaParser(fields=["reasoning", ("tool", "answer")]),
-                 env_parser: SmolaParser = SmolaParser(fields=["result"]),
+                 parser: SmolParser = SmolParser(fields=["reasoning", ("tool", "answer")]),
+                 env_parser: SmolParser = SmolParser(fields=["result"]),
                  tools: List[Any] = []):
         super().__init__(parser, env_parser, tools)
         self.parser = parser

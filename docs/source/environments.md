@@ -8,7 +8,7 @@ Environments are the orchestration layer of the verifiers framework. They manage
 Environment (base class)
 ├── SingleTurnEnv     # One-shot Q&A tasks
 ├── ToolEnv           # Tool-augmented reasoning  
-├── SmolaToolEnv      # SmolaAgents integration
+├── SmolToolEnv       # SmolAgents integration
 ├── DoubleCheckEnv    # Multi-stage verification
 ├── TextArenaEnv      # Game environments
 ├── ReasoningGymEnv   # Reasoning benchmarks
@@ -119,13 +119,13 @@ vf_env = vf.ToolEnv(
 - Reasoning alone is insufficient  
 - Examples: Complex math, data analysis, code execution
 
-## SmolaToolEnv: SmolaAgents Integration
+## SmolToolEnv: SmolAgents Integration
 
-Advanced tool integration using SmolaAgents:
+Advanced tool integration using SmolAgents:
 
 ```python
 import verifiers as vf
-from verifiers.envs.smola_tool_env import SmolaToolEnv
+from verifiers.envs.smol_tool_env import SmolToolEnv
 
 try:    
     from smolagents.default_tools import PythonInterpreterTool
@@ -140,7 +140,7 @@ python_tool = PythonInterpreterTool(
 )
 calculator_tool = CalculatorTool()
 
-vf_env = SmolaToolEnv(
+vf_env = SmolToolEnv(
     dataset=dataset,
     system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
     few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
@@ -149,9 +149,9 @@ vf_env = SmolaToolEnv(
 )
 ```
 
-**Use SmolaToolEnv when:**
+**Use SmolToolEnv when:**
 - Need advanced tool capabilities
-- Want SmolaAgents ecosystem integration
+- Want SmolAgents ecosystem integration
 - Examples: Complex scientific computation, multi-step tool workflows
 
 ## DoubleCheckEnv: Self-Verification
@@ -282,7 +282,7 @@ Choose your environment type based on task requirements:
 |-------------|----------|----------|
 | **SingleTurnEnv** | Simple Q&A | Math problems, classification |
 | **ToolEnv** | Need external tools | Code execution, calculations |
-| **SmolaToolEnv** | Advanced tools | Complex scientific computation |
+| **SmolToolEnv** | Advanced tools | Complex scientific computation |
 | **DoubleCheckEnv** | Self-verification | Critical reasoning tasks |
 | **TextArenaEnv** | Games/simulations | Wordle, strategy games |
 | **ReasoningGymEnv** | Benchmarks | ARC, logical reasoning |

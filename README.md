@@ -25,7 +25,7 @@ RL environments and algorithms should be modular, reusable, and hackable.
 - `Environment` classes for encapsulating your tasks, parsers, rollout logic, and reward functions, including:
 	- `SingleTurnEnv` for "R1-style" reasoning via vLLM's `chat()` method.
 	- `ToolEnv` for multi-turn tool use with custom Python functions.
-	- `SmolaToolEnv` for multi-turn tool use with Hugging Face [smolagents](https://huggingface.co/docs/smolagents/en/index) tools.
+	- `SmolToolEnv` for multi-turn tool use with Hugging Face [smolagents](https://huggingface.co/docs/smolagents/en/index) tools.
 	- `CodeMathEnv` for interactive Python execution.
 	- `MultiTurnEnv` abstract class for implementing custom multi-turn rollout logic on top of vLLM's `chat()` method -- just override `env_response` and `is_completed` and you're good to go.
 	- `ReasoningGymEnv` -- direct training for any [reasoning-gym](https://github.com/open-thought/reasoning-gym/tree/main/reasoning_gym) task.
@@ -152,7 +152,7 @@ trainer = vf.GRPOTrainer(
 trainer.train()
 ```
 
-**Level 4:** Implement your own multi-turn agent environment using `ToolEnv`, `SmolaToolEnv`, or `CodeEnv`:
+**Level 4:** Implement your own multi-turn agent environment using `ToolEnv`, `SmolToolEnv`, or `CodeEnv`:
 ```python
 import verifiers as vf
 vf_env = vf.ToolEnv(
