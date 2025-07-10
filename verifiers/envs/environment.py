@@ -152,17 +152,6 @@ class Environment(ABC):
     
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
-    
-    def sanitize_sampling_args(self,
-                               client: OpenAI | AsyncOpenAI,
-                               sampling_args: Dict[str, Any]) -> Dict[str, Any]:
-        from urllib.parse import urlparse
-        url = urlparse(str(client.base_url))
-        if url.netloc not in ["localhost", "127.0.0.1", "0.0.0.0"]:
-            sanitized_args = deepcopy(sampling_args)
-            sanitized_args.pop('extra_body', None)
-            return sanitized_args
-        return sampling_args
 
     async def get_model_response(self,
                            prompt: str | List[Dict[str, str]],
@@ -170,7 +159,6 @@ class Environment(ABC):
                            model: str,
                            sampling_args: Dict[str, Any] = {},
                            message_type: Literal['chat', 'completion'] | None = None,
-                           sanitize_sampling_args: bool = True,
                            **kwargs: Any) -> Tuple[str, Response]:
         """
         Get model response for a given prompt (chat or completion).
@@ -178,10 +166,6 @@ class Environment(ABC):
         Convenience function for wrapping (chat, completion) API calls.
         Returns special error messages for context length issues.
         """
-        if sanitize_sampling_args:
-            sanitized_args = self.sanitize_sampling_args(client, sampling_args)
-        else:
-            sanitized_args = sampling_args
         if message_type is None:
             message_type = self.message_type
 
@@ -190,7 +174,7 @@ class Environment(ABC):
             response = await client.chat.completions.create(
                 model=model,
                 messages=prompt, # type: ignore
-                **sanitized_args
+                **sampling_args
             )
             return response.choices[0].message.content, response 
         elif message_type == 'completion':
@@ -198,7 +182,7 @@ class Environment(ABC):
             response = await client.completions.create(
                 model=model,
                 prompt=prompt,
-                **sanitized_args
+                **sampling_args
             )
             return response.choices[0].text, response 
 
