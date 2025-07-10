@@ -41,7 +41,7 @@ Do not make up tools or arguments that aren't listed.
 """
 
 """
-Templates for SmolaAgents-style tool prompts.
+Templates for SmolAgents-style tool prompts.
 """
 
 DEFAULT_SMOLA_PROMPT_TEMPLATE = """You are an intelligent assistant designed to solve problems that require careful reasoning.

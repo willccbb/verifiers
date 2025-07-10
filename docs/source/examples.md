@@ -116,9 +116,9 @@ trainer = vf.GRPOTrainer(
 trainer.train()
 ```
 
-## SmolaAgents Integration with SmolaToolEnv
+## SmolAgents Integration with SmolaToolEnv
 
-Using SmolaAgents for advanced tool integration:
+Using SmolAgents for advanced tool integration:
 
 ```python
 import verifiers as vf
@@ -136,7 +136,7 @@ dataset = vf.load_example_dataset("math", "train", n=6000)
 eval_aime24 = vf.load_example_dataset("aime2024", n=30)
 eval_aime25 = vf.load_example_dataset("aime2025", n=30)
 
-# Use SmolaAgents' PythonInterpreterTool with custom calculator
+# Use SmolAgents' PythonInterpreterTool with custom calculator
 python_tool = PythonInterpreterTool(
     authorized_imports=["math", "sympy", "numpy"]
 )

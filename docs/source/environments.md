@@ -8,7 +8,7 @@ Environments are the orchestration layer of the verifiers framework. They manage
 Environment (base class)
 ├── SingleTurnEnv     # One-shot Q&A tasks
 ├── ToolEnv           # Tool-augmented reasoning  
-├── SmolaToolEnv      # SmolaAgents integration
+├── SmolaToolEnv      # SmolAgents integration
 ├── DoubleCheckEnv    # Multi-stage verification
 ├── TextArenaEnv      # Game environments
 ├── ReasoningGymEnv   # Reasoning benchmarks
@@ -119,9 +119,9 @@ vf_env = vf.ToolEnv(
 - Reasoning alone is insufficient  
 - Examples: Complex math, data analysis, code execution
 
-## SmolaToolEnv: SmolaAgents Integration
+## SmolaToolEnv: SmolAgents Integration
 
-Advanced tool integration using SmolaAgents:
+Advanced tool integration using SmolAgents:
 
 ```python
 import verifiers as vf
@@ -151,7 +151,7 @@ vf_env = SmolaToolEnv(
 
 **Use SmolaToolEnv when:**
 - Need advanced tool capabilities
-- Want SmolaAgents ecosystem integration
+- Want SmolAgents ecosystem integration
 - Examples: Complex scientific computation, multi-step tool workflows
 
 ## DoubleCheckEnv: Self-Verification

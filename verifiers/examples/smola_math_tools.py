@@ -13,7 +13,7 @@ except ImportError:
     raise ImportError("Please install smolagents to use SmolAgents tools.")
 
 """
-Multi-GPU training (single node, 4 training + 4 inference) using SmolaAgents tools
+Multi-GPU training (single node, 4 training + 4 inference) using SmolAgents tools
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_server.py \
     --model 'Qwen/Qwen2.5-7B-Instruct' \
@@ -34,7 +34,7 @@ eval_aime24 = load_example_dataset("aime2024", n=30)
 eval_aime25 = load_example_dataset("aime2025", n=30)
 eval_dataset = concatenate_datasets([eval_aime24, eval_aime25]).shuffle(seed=0)
 
-# Use SmolaAgents' PythonInterpreterTool as a replacement for the python tool
+# Use SmolAgents' PythonInterpreterTool as a replacement for the python tool
 python_tool = PythonInterpreterTool(
     authorized_imports=["math", "sympy", "numpy"]
 )

@@ -92,7 +92,7 @@ class SmolaToolEnv(MultiTurnEnv):
             return False
 
     def call_tool(self, tool_json: str, **kwargs: Any) -> str:
-        """Call a SmolaAgents Tool object based on JSON command."""
+        """Call a SmolAgents Tool object based on JSON command."""
         try:
             command = json.loads(tool_json)
             if not isinstance(command, dict):
