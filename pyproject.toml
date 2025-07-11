@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
+    "setuptools",
     "requests",
     "torch>=2.7.0",
     "transformers",

@@ -33,11 +33,11 @@ from vllm.utils import set_ulimit
 from vllm.usage.usage_lib import UsageContext
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
+#os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
 # Weight update throttling
 MAX_CONCURRENT_WEIGHT_UPDATES = 10
-#weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
+weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
 background_tasks = set()
@@ -171,15 +171,13 @@ async def run_server(args: Namespace):
         """
         data = await request.json()
         name = data.get("name")
-        dtype_str = data.get("dtype")
+        dtype = data.get("dtype")
         shape = data.get("shape")
-        
-        dtype = getattr(torch, dtype_str.split(".")[-1])
         shape_tuple = tuple(shape)
         
         async def throttled_update():
-            #async with weight_update_semaphore:
-            await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
+            async with weight_update_semaphore:
+                await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
         
         # fire and forget with throttling
         create_background_task(throttled_update())
