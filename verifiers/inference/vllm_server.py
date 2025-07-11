@@ -33,10 +33,9 @@ from vllm.utils import set_ulimit
 from vllm.usage.usage_lib import UsageContext
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-#os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
 # Weight update throttling
-MAX_CONCURRENT_WEIGHT_UPDATES = 10
+MAX_CONCURRENT_WEIGHT_UPDATES = 1
 weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
@@ -151,7 +150,6 @@ async def run_server(args: Namespace):
         host = data.get("host")
         port = data.get("port")
         world_size = data.get("world_size")
-        # fire and forget
         create_background_task(engine.collective_rpc("init_communicator", args=(host, port, world_size)))
         return {"status": "ok"}
 
@@ -178,7 +176,7 @@ async def run_server(args: Namespace):
         async def throttled_update():
             async with weight_update_semaphore:
                 await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
-        
+
         # fire and forget with throttling
         create_background_task(throttled_update())
         return {"status": "ok"}
@@ -192,7 +190,7 @@ async def run_server(args: Namespace):
     @app.post("/close_communicator")
     async def close_communicator(request: Request):
         # fire and forget
-        create_background_task(engine.collective_rpc("close_communicator"))
+        await engine.collective_rpc("close_communicator")
         return {"status": "ok"}
 
     vllm_config = await engine.get_vllm_config()
