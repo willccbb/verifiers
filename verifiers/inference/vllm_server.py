@@ -37,7 +37,7 @@ os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
 # Weight update throttling
 MAX_CONCURRENT_WEIGHT_UPDATES = 10
-weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
+#weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
 background_tasks = set()
@@ -77,14 +77,14 @@ class WeightSyncWorkerExtension:
         self.pynccl_comm = PyNcclCommunicator(pg, device=self.device) # type: ignore
         self.client_rank = world_size - 1
 
-    def update_named_param(self, name: str, dtype: torch.dtype, shape: Sequence[int]) -> None:
+    def update_named_param(self, name: str, dtype: str, shape: Sequence[int]) -> None:
         """
         Receives updated weights from the client process and updates the named parameter in the model.
 
         Args:
             name (`str`):
                 Name of the weight tensor being updated.
-            dtype (`torch.dtype`):
+            torch_dtype (`str`):
                 Data type of the weight tensor (e.g., `torch.float32`).
             shape (`Sequence[int]`):
                 Shape of the weight tensor.
@@ -92,7 +92,8 @@ class WeightSyncWorkerExtension:
         if self.pynccl_comm is None:
             raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
 
-        weight = torch.empty(shape, dtype=dtype, device=self.device) # type: ignore
+        torch_dtype = getattr(torch, dtype.split(".")[-1])
+        weight = torch.empty(shape, dtype=torch_dtype, device=self.device) # type: ignore
         self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore 
         self.pynccl_comm.group.barrier()
         self.model_runner.model.load_weights(weights=[(name, weight)]) # type: ignore
@@ -177,8 +178,8 @@ async def run_server(args: Namespace):
         shape_tuple = tuple(shape)
         
         async def throttled_update():
-            async with weight_update_semaphore:
-                await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
+            #async with weight_update_semaphore:
+            await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
         
         # fire and forget with throttling
         create_background_task(throttled_update())
