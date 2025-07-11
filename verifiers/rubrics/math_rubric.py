@@ -1,6 +1,6 @@
 from typing import List
 
-from verifiers import RewardFunc
+from verifiers import RewardFunc, Parser
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 
@@ -9,10 +9,8 @@ class MathRubric(Rubric):
     def __init__(self,
                  funcs: List[RewardFunc] = [],
                  weights: List[float] = [],
-                 parser: XMLParser | None = None):
+                 parser: Parser = XMLParser(fields=["think", "answer"])):
         super().__init__(funcs=funcs, weights=weights, parser=parser)
-        if not isinstance(self.parser, XMLParser):
-            self.parser = XMLParser(fields=["think", "answer"])
         self.add_reward_func(self.correct_answer_reward_func)
         self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
 

@@ -11,7 +11,15 @@ from openai import OpenAI, AsyncOpenAI
 from openai.types.completion import Completion
 from openai.types.chat.chat_completion import ChatCompletion
 
-from verifiers import RewardFunc
+from verifiers import (
+    MessageType,
+    ModelResponse,
+    ChatMessage,
+    Info,
+    RewardFunc,
+    State,
+    SamplingArgs,
+)
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
 
@@ -21,7 +29,6 @@ if TYPE_CHECKING:
 DEFAULT_MAX_CONCURRENT = 512
 DATASET_MAX_CONCURRENT = 32
 
-Response = Union[Completion, ChatCompletion, None]
 
 class Environment(ABC):
     """
@@ -33,12 +40,12 @@ class Environment(ABC):
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
                  system_prompt: str | None = None,
-                 few_shot: List[Dict[str, Any]] = [],
+                 few_shot: List[ChatMessage] = [],
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
-                 sampling_args: Dict[str, Any] = {},
+                 sampling_args: SamplingArgs = {},
                  max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                 message_type: Literal['chat', 'completion'] = 'chat',
+                 message_type: MessageType = 'chat',
                  **kwargs: Any):
         self.client = client
         self.model = model
@@ -87,35 +94,35 @@ class Environment(ABC):
             raise ValueError('Either dataset or eval_dataset must be provided')
     
     def format_prompt(self,
-                      prompt: str,
+                      prompt_str: str,
                       system_prompt: str | None = None,
-                      few_shot: List[Dict[str, Any]] | None = None
-                      ) -> List[Dict[str, Any]]:
+                      few_shot: List[ChatMessage] | None = None
+                      ) -> List[ChatMessage]:
         messages = []
         if system_prompt:
             messages.append({'role': 'system', 'content': system_prompt})
         if few_shot:
             messages.extend(few_shot)
-        messages.append({'role': 'user', 'content': prompt})
+        messages.append({'role': 'user', 'content': prompt_str})
         return messages
 
     def format_dataset(self,
                        dataset: Dataset,
                        system_prompt: str | None = None,
-                       few_shot: List[Dict[str, Any]] | None = None,
+                       few_shot: List[ChatMessage] | None = None,
                        question_key: str = "question",
                        answer_key: str = "answer") -> Dataset:
         # skip if "prompt" already exists
         if "prompt" in dataset.column_names:
             return dataset
         # extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(prompt: str) -> List[Dict[str, Any]]:
+        def format_prompt_fn(prompt_str: str) -> List[ChatMessage]:
             messages = []
             if system_prompt:
                 messages.append({'role': 'system', 'content': system_prompt})
             if few_shot:
                 messages.extend(few_shot)
-            messages.append({'role': 'user', 'content': prompt})
+            messages.append({'role': 'user', 'content': prompt_str})
             return messages
         
         if answer_key == "answer":
@@ -154,12 +161,12 @@ class Environment(ABC):
         return self.rubric.get_reward_weights()
 
     async def get_model_response(self,
-                           prompt: str | List[Dict[str, str]],
+                           prompt: Union[str, List[ChatMessage]],
                            client: AsyncOpenAI,
                            model: str,
-                           sampling_args: Dict[str, Any] = {},
-                           message_type: Literal['chat', 'completion'] | None = None,
-                           **kwargs: Any) -> Tuple[str, Response]:
+                           sampling_args: SamplingArgs = {},
+                           message_type: MessageType | None = None,
+                           **kwargs: Any) -> ModelResponse:
         """
         Get model response for a given prompt (chat or completion).
         
@@ -176,7 +183,7 @@ class Environment(ABC):
                 messages=prompt, # type: ignore
                 **sampling_args
             )
-            return response.choices[0].message.content, response 
+            return response
         elif message_type == 'completion':
             assert isinstance(prompt, str)
             response = await client.completions.create(
@@ -184,18 +191,18 @@ class Environment(ABC):
                 prompt=prompt,
                 **sampling_args
             )
-            return response.choices[0].text, response 
+            return response
 
     @abstractmethod
     async def rollout(self,
-                client: AsyncOpenAI,
-                model: str,
-                prompt: str | List[Dict[str, Any]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
+                      client: AsyncOpenAI,
+                      model: str,
+                      prompt: Union[str, List[ChatMessage]],
+                      answer: str,
+                      task: str = "default",
+                      info: Info = {},
+                      sampling_args: SamplingArgs = {},
+                      **kwargs: Any) -> Tuple[Union[str, List[ChatMessage]], State]:
         """
         Run a rollout for a given prompt.
         Returns a tuple of (completion, state).
@@ -205,13 +212,13 @@ class Environment(ABC):
     async def run_rollouts(self,
                            client: AsyncOpenAI,
                            model: str,
-                           prompts: List[str | List[Dict[str, str]]],
+                           prompts: List[Union[str, List[ChatMessage]]],
                            answers: List[str],
                            tasks: List[str] = [],
-                           infos: List[Dict[str, Any]] = [],
-                           sampling_args: Dict[str, Any] = {},
+                           infos: List[Info] = [],
+                           sampling_args: SamplingArgs = {},
                            max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                           **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
+                           **kwargs: Any) -> List[Tuple[Union[str, List[ChatMessage]], State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -231,7 +238,7 @@ class Environment(ABC):
                          inputs: Dict[str, List[Any]] | Dataset,
                          client: AsyncOpenAI | None = None,
                          model: str | None = None,
-                         sampling_args: Dict[str, Any] = {},
+                         sampling_args: SamplingArgs = {},
                          max_concurrent: int | None = None,
                          score_rollouts: bool = True,
                          **kwargs: Any) -> Dict[str, Any]:

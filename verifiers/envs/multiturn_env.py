@@ -4,26 +4,37 @@ from typing import List, Dict, Any, Tuple, Union
 
 from openai import AsyncOpenAI
 
-from verifiers.envs.environment import Environment
-
+from verifiers.envs.environment import (
+    Environment,
+    ChatMessage,
+    ChatCompletion,
+    SamplingArgs,
+    Info,
+    State,
+    MessageType,
+)
 
 class MultiTurnEnv(Environment):
-    def __init__(self, max_turns: int = 10, **kwargs):
+    def __init__(self,
+                 message_type: MessageType = 'chat',
+                 max_turns: int = 10,
+                 **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
+        self.message_type = message_type
 
     @abstractmethod
     def is_completed(self,
-                     messages: List[Dict[str, Any]],
-                     state: Dict[str, Any],
+                     messages: List[ChatMessage],
+                     state: State,
                      **kwargs: Any) -> bool:
         pass
 
     @abstractmethod
     def env_response(self,
-                     messages: List[Dict[str, Any]],
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                     messages: List[ChatMessage],
+                     state: State,
+                     **kwargs: Any) -> Tuple[ChatMessage, State]:
         """
         Generate a response from the environment (message, state).
         """
@@ -32,32 +43,41 @@ class MultiTurnEnv(Environment):
     async def rollout(self,
                       client: AsyncOpenAI,
                       model: str,
-                      prompt: Union[str, List[Dict[str, Any]]],
+                      prompt: Union[str, List[ChatMessage]],
                       answer: str,
                       task: str = "default",
-                      info: Dict[str, Any] = {},
-                      sampling_args: Dict[str, Any] = {},
-                      **kwargs: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+                      info: Info = {},
+                      sampling_args: SamplingArgs = {},
+                      **kwargs: Any) -> Tuple[List[ChatMessage], State]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
         assert isinstance(prompt, list)
         messages = deepcopy(prompt) 
         is_completed = False
-        state = {'answer': answer, 'responses': []}
+        state = {
+            'prompt': prompt,
+            'completion': [],
+            'answer': answer,
+            'task': task,
+            'info': info,
+            'responses': []
+        }
         completion = []
         turn = 0
         while not is_completed:
             if self.is_completed(messages, state, **kwargs):
                 is_completed = True
                 break
-            response_text, response = await self.get_model_response(
+            response = await self.get_model_response(
                 prompt=messages,
                 client=client,
                 model=model,
                 sampling_args=sampling_args,
                 message_type=self.message_type
             )
+            assert isinstance(response, ChatCompletion)
+            response_text = response.choices[0].message.content or ""
             messages.append({"role": "assistant", "content": response_text})
             completion.append({"role": "assistant", "content": response_text})
             state['responses'].append(response)

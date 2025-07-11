@@ -2,8 +2,13 @@ from typing import List, Dict, Any, Tuple
 
 from datasets import Dataset
 from openai import OpenAI
-from verifiers import RewardFunc
-from verifiers.envs.multiturn_env import MultiTurnEnv
+
+from verifiers import (
+    RewardFunc,
+    ChatMessage,
+    State,
+    MultiTurnEnv,
+)
 from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics import MathRubric
 
@@ -34,13 +39,13 @@ class DoubleCheckEnv(MultiTurnEnv):
         return self.rubric.get_reward_weights()
 
     def is_completed(self,
-                     messages: List[Dict[str, str]],
-                     state: Dict[str, Any],
+                     messages: List[ChatMessage],
+                     state: State,
                      **kwargs: Any) -> bool:
         return len(messages) > 1 and messages[-2]['content'] == 'Are you sure?'
     
     def env_response(self,
-                     messages: List[Dict[str, str]],
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+                     messages: List[ChatMessage],
+                     state: State,
+                     **kwargs: Any) -> Tuple[ChatMessage, State]:
         return {'role': 'user', 'content': 'Are you sure?'}, state

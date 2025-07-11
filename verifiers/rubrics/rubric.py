@@ -1,12 +1,9 @@
 import asyncio
-from asyncio import Semaphore
-import concurrent.futures
-
 import inspect
 import logging
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Union
 
-from verifiers import RewardFunc
+from verifiers import RewardFunc, ChatMessage, State, Info
 from verifiers.parsers import Parser
 
 
@@ -54,12 +51,12 @@ class Rubric:
 
     async def call_reward_func(self,
                                func: RewardFunc,
-                               prompt: Union[str, List[Dict[str, Any]]],
-                               completion: Union[str, List[Dict[str, Any]]],
-                               answer: Any,
-                               state: Dict[str, Any],
+                               prompt: Union[str, List[ChatMessage]],
+                               completion: Union[str, List[ChatMessage]],
+                               answer: str,
+                               state: State,
                                task: str = "default",
-                               info: dict = {},
+                               info: Info = {},
                                **kwargs) -> float:
         """
         Invoke `func` with only the required arguments.
@@ -98,12 +95,12 @@ class Rubric:
         return ans
     
     async def score_rollout(self,
-                            prompt: Union[str, List[Dict[str, Any]]],
-                            completion: Union[str, List[Dict[str, Any]]],
-                            answer: Any,
-                            state: Dict[str, Any],
+                            prompt: Union[str, List[ChatMessage]],
+                            completion: Union[str, List[ChatMessage]],
+                            answer: str,
+                            state: State,
                             task: str = "default",
-                            info: dict = {},
+                            info: Info = {},
                             **kwargs) -> Dict[str, float]:
         """
         Evaluate all reward functions asynchronously for a single rollout.
@@ -118,12 +115,12 @@ class Rubric:
         return rewards
     
     async def score_rollouts(self,
-                             prompts: List[Union[str, List[Dict[str, Any]]]],
-                             completions: List[Union[str, List[Dict[str, Any]]]],
-                             answers: List[Any],
-                             states: List[Dict[str, Any]],
+                             prompts: List[Union[str, List[ChatMessage]]],
+                             completions: List[Union[str, List[ChatMessage]]],
+                             answers: List[str],
+                             states: List[State],
                              tasks: List[str],
-                             infos: List[Dict[str, Any]] = [],
+                             infos: List[Info] = [],
                              **kwargs) -> Dict[str, List[float]]:
         """
         Compute reward scores for a group of rollouts.

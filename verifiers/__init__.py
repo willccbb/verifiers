@@ -1,7 +1,18 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, Literal, Union, Dict, Any
 import logging
 import sys
 
+from openai.types.completion import Completion
+from openai.types.chat.chat_completion import ChatCompletion
+
+# typing aliases
+MessageType = Literal['chat', 'completion']
+ModelResponse = Union[Completion, ChatCompletion, None]
+ChatMessageField = Literal['role', 'content']
+ChatMessage = Dict[ChatMessageField, str]
+Info = Dict[str, Any]
+State = Dict[str, Any]
+SamplingArgs = Dict[str, Any]
 RewardFunc = Callable[..., float]
 
 try:
