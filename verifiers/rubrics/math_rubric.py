@@ -17,8 +17,9 @@ class MathRubric(Rubric):
     def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
         """Reward function that checks if the final answer matches the expected answer."""
         try:
-            from math_verify import parse, verify # type: ignore
-            response = self.parser.parse_answer(completion)
-            return 1.0 if verify(parse(answer), parse(response)) else 0.0
-        except Exception:
-            return 0.0
+            from verifiers.rubrics.utils.math_utils import grade_answer_mathd, grade_answer_sympy
+            response = self.parser.parse_answer(completion) or ""
+            return 1.0 if grade_answer_mathd(response, answer) or grade_answer_sympy(response, answer) else 0.0
+        except Exception as e:
+            self.logger.error(f"Please install math_verify to use this reward function.")
+            raise e

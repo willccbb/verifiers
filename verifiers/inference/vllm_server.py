@@ -33,6 +33,7 @@ from vllm.utils import set_ulimit
 from vllm.usage.usage_lib import UsageContext
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
 
 # Weight update throttling
 MAX_CONCURRENT_WEIGHT_UPDATES = 10

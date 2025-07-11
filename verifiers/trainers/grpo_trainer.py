@@ -395,10 +395,10 @@ class GRPOTrainer(Trainer):
         port = args.vllm_server_port
         vllm_base_url = f"http://{host}:{port}/v1"
         import httpx
-        self.oai_client = openai.OpenAI(
+        self.oai_client = openai.AsyncOpenAI(
             base_url=vllm_base_url,
             api_key="EMPTY",
-            http_client=httpx.Client(
+            http_client=httpx.AsyncClient(
                 limits=httpx.Limits(max_connections=args.max_concurrent),
                 timeout=args.async_generation_timeout)
         )

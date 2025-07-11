@@ -7,7 +7,7 @@ import time
 import requests
 from requests import ConnectionError
 from requests.adapters import HTTPAdapter
-from openai import OpenAI
+from openai import AsyncOpenAI
 import torch
 from trl.import_utils import is_requests_available, is_vllm_available
 
@@ -17,7 +17,7 @@ from vllm.distributed.utils import StatelessProcessGroup # type: ignore
 logger = logging.getLogger(__name__)
 
 
-class VLLMClient(OpenAI):
+class VLLMClient(AsyncOpenAI):
     """
     A client class to interact with a vLLM server.
 
