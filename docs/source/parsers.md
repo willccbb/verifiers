@@ -7,7 +7,7 @@ Parsers extract structured information from model outputs. While the framework s
 ```
 Parser (base class)
 ├── XMLParser      # Recommended: XML-tagged field extraction
-└── SmolParser     # Specialized for SmolAgents tool format
+└── SmolAgentsParser     # Specialized for SmolAgents tool format
 ```
 
 ## Why XMLParser?

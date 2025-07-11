@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from verifiers.parsers import Parser
 
-class SmolParser(Parser):
+class SmolAgentsParser(Parser):
     def __init__(self, fields: List[Union[str, Tuple[str, ...]]]):
         """
         Initialize the parser with field definitions.
@@ -159,7 +159,7 @@ class SmolParser(Parser):
         allowed names (preferring the canonical if present).
         
         Example usage:
-            parser = SmolParser(['reasoning', ('code', 'answer')])
+            parser = SmolAgentsParser(['reasoning', ('code', 'answer')])
             formatted_str = parser.format(reasoning="...", code="...")
         """
         parts = []

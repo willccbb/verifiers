@@ -2,9 +2,9 @@ from datasets import concatenate_datasets
 
 import verifiers as vf
 from verifiers.utils import load_example_dataset
-from verifiers.prompts.system_prompts import MATH_SMOLA_PROMPT_TEMPLATE
-from verifiers.prompts.few_shots import CALCULATOR_SMOLA_FEW_SHOTS
-from verifiers.envs.smol_tool_env import SmolToolEnv
+from verifiers.prompts.system_prompts import MATH_SMOLAGENTS_PROMPT_TEMPLATE
+from verifiers.prompts.few_shots import CALCULATOR_SMOLAGENTS_FEW_SHOTS
+from verifiers.envs.smolagents_tool_env import SmolAgentsToolEnv
 
 try:    
     from smolagents.default_tools import PythonInterpreterTool # type: ignore
@@ -25,7 +25,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python verifiers/inference/vllm_server.py \
     --host 0.0.0.0 \
     --port 8000
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/smol_math_tools.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/smolagents_math_tools.py
 """
 
 dataset = load_example_dataset("math", "train", n=6000)
@@ -41,11 +41,11 @@ python_tool = PythonInterpreterTool(
 # Add our custom calculator tool
 calculator_tool = CalculatorTool()
 
-vf_env = SmolToolEnv(
+vf_env = SmolAgentsToolEnv(
     dataset=dataset,
     eval_dataset=eval_dataset,
-    system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
-    few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
+    system_prompt=MATH_SMOLAGENTS_PROMPT_TEMPLATE,
+    few_shot=CALCULATOR_SMOLAGENTS_FEW_SHOTS,
     tools=[python_tool, calculator_tool],
     max_steps=5
 )
@@ -53,7 +53,7 @@ print(vf_env.system_prompt)
 
 model_name = "Qwen/Qwen2.5-7B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-run_name = "math-smol-grpo_" + model_name.split("/")[-1].lower()
+run_name = "math-smolagents-grpo_" + model_name.split("/")[-1].lower()
 
 args = vf.grpo_defaults(run_name=run_name)
 trainer = vf.GRPOTrainer(

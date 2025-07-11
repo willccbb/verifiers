@@ -44,7 +44,7 @@ Do not make up tools or arguments that aren't listed.
 Templates for SmolAgents-style tool prompts.
 """
 
-DEFAULT_SMOLA_PROMPT_TEMPLATE = """You are an intelligent assistant designed to solve problems that require careful reasoning.
+DEFAULT_SMOLAGENTS_PROMPT_TEMPLATE = """You are an intelligent assistant designed to solve problems that require careful reasoning.
 
 When tackling a task, you should:
 1. Break the problem down into steps
@@ -77,7 +77,7 @@ Your final answer or response to the user's request.
 First use the <reasoning> tag to think through the problem. When you need to use a tool, use the <tool> tag with the appropriate JSON format. When you're ready to provide the final answer, use the <answer> tag.
 """
 
-MATH_SMOLA_PROMPT_TEMPLATE = """You are an intelligent math assistant designed to solve math problems that require careful reasoning.
+MATH_SMOLAGENTS_PROMPT_TEMPLATE = """You are an intelligent math assistant designed to solve math problems that require careful reasoning.
 
 When solving a math problem, you should:
 1. Break the problem down into steps

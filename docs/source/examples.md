@@ -116,13 +116,13 @@ trainer = vf.GRPOTrainer(
 trainer.train()
 ```
 
-## SmolAgents Integration with SmolToolEnv
+## SmolAgents Integration with SmolAgentsToolEnv
 
 Using SmolAgents for advanced tool integration:
 
 ```python
 import verifiers as vf
-from verifiers.envs.smol_tool_env import SmolToolEnv
+from verifiers.envs.smolagents_tool_env import SmolAgentsToolEnv
 from verifiers.prompts.system_prompts import MATH_SMOLA_PROMPT_TEMPLATE
 from verifiers.prompts.few_shots import CALCULATOR_SMOLA_FEW_SHOTS
 
@@ -142,7 +142,7 @@ python_tool = PythonInterpreterTool(
 )
 calculator_tool = CalculatorTool()
 
-vf_env = SmolToolEnv(
+vf_env = SmolAgentsToolEnv(
     dataset=dataset,
     eval_dataset=eval_dataset,
     system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
@@ -153,7 +153,7 @@ vf_env = SmolToolEnv(
 
 model_name = "Qwen/Qwen2.5-7B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-run_name = "math-smol-grpo_" + model_name.split("/")[-1].lower()
+run_name = "math-smolagents-grpo_" + model_name.split("/")[-1].lower()
 
 args = vf.grpo_defaults(run_name=run_name)
 trainer = vf.GRPOTrainer(

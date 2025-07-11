@@ -9,7 +9,7 @@ Rubric (base class)
 ├── ToolRubric      # Evaluates tool usage and execution
 ├── JudgeRubric     # LLM-based evaluation
 ├── MathRubric      # Mathematical verification (deprecated)
-├── SmolToolRubric  # SmolAgents-specific evaluation
+├── SmolAgentsToolRubric  # SmolAgents-specific evaluation
 └── RubricGroup     # Combines multiple rubrics
 ```
 

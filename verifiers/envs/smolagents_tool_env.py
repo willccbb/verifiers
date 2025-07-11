@@ -6,11 +6,11 @@ from datasets import Dataset
 
 from verifiers import RewardFunc
 from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers.smol_parser import SmolParser
+from verifiers.parsers.smolagents_parser import SmolAgentsParser
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
-from verifiers.rubrics.smol_tool_rubric import SmolToolRubric
+from verifiers.rubrics.smolagents_tool_rubric import SmolAgentsToolRubric
 
-class SmolToolEnv(MultiTurnEnv):
+class SmolAgentsToolEnv(MultiTurnEnv):
     def __init__(self,
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
@@ -34,9 +34,9 @@ class SmolToolEnv(MultiTurnEnv):
         self.dataset_name = dataset
         self.max_steps = max_steps
         self.tools = {tool.name: tool for tool in tools}
-        self.rubric = SmolToolRubric(tools=tools)
-        self.llm_parser = SmolParser(fields=["reasoning", ("tool", "answer")])
-        self.env_parser = SmolParser(fields=["result"])
+        self.rubric = SmolAgentsToolRubric(tools=tools)
+        self.llm_parser = SmolAgentsParser(fields=["reasoning", ("tool", "answer")])
+        self.env_parser = SmolAgentsParser(fields=["result"])
 
     def _format_tool_descriptions(self, tools: List[Any]) -> str:
         """Formats tool schemas into a user-friendly description string."""

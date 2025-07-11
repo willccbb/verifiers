@@ -8,7 +8,7 @@ Environments are the orchestration layer of the verifiers framework. They manage
 Environment (base class)
 ├── SingleTurnEnv     # One-shot Q&A tasks
 ├── ToolEnv           # Tool-augmented reasoning  
-├── SmolToolEnv       # SmolAgents integration
+├── SmolAgentsToolEnv  # SmolAgents integration
 ├── DoubleCheckEnv    # Multi-stage verification
 ├── TextArenaEnv      # Game environments
 ├── ReasoningGymEnv   # Reasoning benchmarks
@@ -119,13 +119,13 @@ vf_env = vf.ToolEnv(
 - Reasoning alone is insufficient  
 - Examples: Complex math, data analysis, code execution
 
-## SmolToolEnv: SmolAgents Integration
+## SmolAgentsToolEnv: SmolAgents Integration
 
 Advanced tool integration using SmolAgents:
 
 ```python
 import verifiers as vf
-from verifiers.envs.smol_tool_env import SmolToolEnv
+from verifiers.envs.smolagents_tool_env import SmolAgentsToolEnv
 
 try:    
     from smolagents.default_tools import PythonInterpreterTool
@@ -140,16 +140,16 @@ python_tool = PythonInterpreterTool(
 )
 calculator_tool = CalculatorTool()
 
-vf_env = SmolToolEnv(
+vf_env = SmolAgentsToolEnv(
     dataset=dataset,
-    system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
-    few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
+    system_prompt=MATH_SMOLAGENTS_PROMPT_TEMPLATE,
+    few_shot=CALCULATOR_SMOLAGENTS_FEW_SHOTS,
     tools=[python_tool, calculator_tool],
     max_steps=5
 )
 ```
 
-**Use SmolToolEnv when:**
+**Use SmolAgentsToolEnv when:**
 - Need advanced tool capabilities
 - Want SmolAgents ecosystem integration
 - Examples: Complex scientific computation, multi-step tool workflows
@@ -282,7 +282,7 @@ Choose your environment type based on task requirements:
 |-------------|----------|----------|
 | **SingleTurnEnv** | Simple Q&A | Math problems, classification |
 | **ToolEnv** | Need external tools | Code execution, calculations |
-| **SmolToolEnv** | Advanced tools | Complex scientific computation |
+| **SmolAgentsToolEnv** | Advanced tools | Complex scientific computation |
 | **DoubleCheckEnv** | Self-verification | Critical reasoning tasks |
 | **TextArenaEnv** | Games/simulations | Wordle, strategy games |
 | **ReasoningGymEnv** | Benchmarks | ARC, logical reasoning |

@@ -282,7 +282,7 @@ CALCULATOR_FEW_SHOT = [
 Few shot examples for SmolAgents tool-based assistants.
 """
 
-CALCULATOR_SMOLA_FEW_SHOTS = [
+CALCULATOR_SMOLAGENTS_FEW_SHOTS = [
     {
         'role': 'user',
         'content': 'Janet has 3 times as many marbles as Tom. If Tom has 12 marbles, how many marbles do they have together?'
@@ -373,7 +373,7 @@ So Samantha can make 4 complete batches of cookies with her 10 cups of flour.
     }
 ]
 
-SEARCH_SMOLA_FEW_SHOTS = [
+SEARCH_SMOLAGENTS_FEW_SHOTS = [
     {
         'role': 'user', 
         'content': 'Question: Which of the following is an example of mechanical weathering?\\n\\nChoices:\\nA. A rock turns red when iron minerals are exposed to oxygen.\\nB. A rock breaks apart after water freezes and expands in a crack.\\nC. A rock dissolves as acidic rainwater flows over its surface.\\nD. A rock changes composition when exposed to extreme heat.'
@@ -428,7 +428,7 @@ B
     }
 ]
 
-TOOL_SMOLA_FEW_SHOTS = [
+TOOL_SMOLAGENTS_FEW_SHOTS = [
     {
         'role': 'user',
         'content': 'What is the current working directory?'
