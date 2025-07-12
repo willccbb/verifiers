@@ -1,15 +1,23 @@
+import os, sys
 import random
 from typing import Tuple, List, Dict, Any
 
 from datasets import Dataset
 import nltk 
-nltk.download('words', quiet=True)
-nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+
+# monkey-patch nltk.download to always be quiet before importing textarena
+_original_nltk_download = nltk.download
+nltk.download = lambda *args, **kwargs: _original_nltk_download(*args, **{**kwargs, 'quiet': True})
+
 import textarena as ta 
 
-from verifiers import MultiTurnEnv
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
+from verifiers import (
+    ChatMessage,
+    State,
+    MultiTurnEnv,
+    XMLParser,
+    Rubric
+)
 
 
 GUESS_SYSTEM_PROMPT = """You are a competitive game player. \
@@ -36,6 +44,9 @@ class TextArenaEnv(MultiTurnEnv):
         self.num_samples = num_samples
         self.num_eval_samples = num_eval_samples
         self.seed = seed
+
+        nltk.download('words', quiet=True)
+        nltk.download('averaged_perceptron_tagger_eng', quiet=True)
         dataset, eval_dataset = self.ta_to_hf()
         parser = XMLParser(fields=["think", "guess"], answer_field="guess")
         rubric = Rubric(parser=parser)
@@ -63,8 +74,8 @@ class TextArenaEnv(MultiTurnEnv):
         self.rubric = rubric
 
     def is_completed(self,
-                     messages: List[Dict[str, Any]],
-                     state: Dict[str, Any],
+                     messages: List[ChatMessage],
+                     state: State,
                      **kwargs: Any) -> bool:
         if 'is_finished' in state and state['is_finished']:
             state.pop('ta_env')
@@ -72,16 +83,14 @@ class TextArenaEnv(MultiTurnEnv):
         return False
 
     def env_response(self,
-                     messages: List[Dict[str, Any]],
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+                     messages: List[ChatMessage],
+                     state: State,
+                     **kwargs: Any) -> Tuple[ChatMessage, State]:
         # load env 
         if 'ta_env' not in state:
             ta_env = ta.make(env_id=self.game)
-            ta_env.reset()
-            ta_env = ta.wrappers.LLMObservationWrapper(env=ta_env)
+            ta_env.reset(num_players=1)
             ta_env.state.game_state['secret_word'] = state['answer']
-            id, obs = ta_env.get_observation()
             state['ta_env'] = ta_env
         else:
             ta_env = state['ta_env']
@@ -89,22 +98,23 @@ class TextArenaEnv(MultiTurnEnv):
         turn = self.parser.parse(messages[-1]["content"])
         guess = turn.guess
         # step env
-        is_finished, game_state = ta_env.step(str(guess))
+        is_finished, _ = ta_env.step(str(guess))
         state['is_finished'] = is_finished
         _, observation = ta_env.get_observation()
         if "Feedback:" in observation:
             feedback = observation.split("Feedback:")[-1]
         else:
             feedback = observation
-        env_message = {"role": "user", "content": feedback}
+        env_message: ChatMessage = {"role": "user", "content": str(feedback)}
         return env_message, state
 
     def ta_to_hf(self) -> Tuple[Dataset, Dataset]:
         dataset_rows = []
         eval_dataset_rows = []
         ta_env = ta.make(env_id=self.game)
-        user_prompt = ta_env._generate_player_prompt(player_id=0, game_state={}) # type: ignore
-        words = ta_env.word_list # type: ignore
+        ta_env.reset(num_players=1)
+        _, user_prompt = ta_env.get_observation()
+        words = ta_env.word_list
         # set seed 
         random.seed(self.seed)
         for i in range(self.num_samples + self.num_eval_samples):

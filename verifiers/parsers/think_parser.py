@@ -1,8 +1,9 @@
-import re
-from typing import List, Dict, Tuple, Union, Callable
+from typing import List, Callable
 
-from verifiers.parsers import Parser
-from verifiers.utils.data_utils import extract_boxed_answer
+from verifiers import (
+    ChatMessage,
+    Parser,
+)
 
 
 class ThinkParser(Parser):
@@ -35,7 +36,7 @@ class ThinkParser(Parser):
                 return 1.0
             return 0.0
 
-        def format_reward_func(completion: List[Dict[str, str]], **kwargs) -> float:
+        def format_reward_func(completion: List[ChatMessage], **kwargs) -> float:
             messages = self.get_assistant_messages(completion)
             return sum(follows_format(m["content"]) for m in messages) / len(messages)
         return format_reward_func

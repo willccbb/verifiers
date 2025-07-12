@@ -76,14 +76,14 @@ class WeightSyncWorkerExtension:
         self.pynccl_comm = PyNcclCommunicator(pg, device=self.device) # type: ignore
         self.client_rank = world_size - 1
 
-    def update_named_param(self, name: str, dtype: torch.dtype, shape: Sequence[int]) -> None:
+    def update_named_param(self, name: str, dtype: str, shape: Sequence[int]) -> None:
         """
         Receives updated weights from the client process and updates the named parameter in the model.
 
         Args:
             name (`str`):
                 Name of the weight tensor being updated.
-            dtype (`torch.dtype`):
+            torch_dtype (`str`):
                 Data type of the weight tensor (e.g., `torch.float32`).
             shape (`Sequence[int]`):
                 Shape of the weight tensor.
@@ -91,8 +91,9 @@ class WeightSyncWorkerExtension:
         if self.pynccl_comm is None:
             raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
 
-        weight = torch.empty(shape, dtype=dtype, device=self.device) # type: ignore
-        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore 
+        torch_dtype = getattr(torch, dtype.split(".")[-1])
+        weight = torch.empty(shape, dtype=torch_dtype, device=self.device) # type: ignore
+        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore
         self.pynccl_comm.group.barrier()
         self.model_runner.model.load_weights(weights=[(name, weight)]) # type: ignore
 
@@ -149,7 +150,6 @@ async def run_server(args: Namespace):
         host = data.get("host")
         port = data.get("port")
         world_size = data.get("world_size")
-        # fire and forget
         create_background_task(engine.collective_rpc("init_communicator", args=(host, port, world_size)))
         return {"status": "ok"}
 
@@ -169,16 +169,14 @@ async def run_server(args: Namespace):
         """
         data = await request.json()
         name = data.get("name")
-        dtype_str = data.get("dtype")
+        dtype = data.get("dtype")
         shape = data.get("shape")
-        
-        dtype = getattr(torch, dtype_str.split(".")[-1])
         shape_tuple = tuple(shape)
         
         async def throttled_update():
             async with weight_update_semaphore:
                 await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
-        
+
         # fire and forget with throttling
         create_background_task(throttled_update())
         return {"status": "ok"}
@@ -192,7 +190,7 @@ async def run_server(args: Namespace):
     @app.post("/close_communicator")
     async def close_communicator(request: Request):
         # fire and forget
-        create_background_task(engine.collective_rpc("close_communicator"))
+        await engine.collective_rpc("close_communicator")
         return {"status": "ok"}
 
     vllm_config = await engine.get_vllm_config()
@@ -221,7 +219,7 @@ async def run_server(args: Namespace):
 def main():
     parser = FlexibleArgumentParser(description="vLLM OpenAI-compatible server with weight synchronization")
     parser = make_arg_parser(parser)
-    args = parser.parse_args()
+    args = parser.parse_args() or Namespace()
     validate_parsed_serve_args(args)
     print(args)
     uvloop.run(run_server(args))

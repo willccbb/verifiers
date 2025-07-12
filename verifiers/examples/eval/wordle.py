@@ -4,11 +4,6 @@ from openai import OpenAI
 import verifiers as vf
 from verifiers.envs.textarena_env import TextArenaEnv
 
-# first time:
-import nltk
-nltk.download('words', quiet=True)
-nltk.download('averaged_perceptron_tagger_eng', quiet=True)
-
 client = OpenAI()
 vf_env = TextArenaEnv(
     game="Wordle-v0",

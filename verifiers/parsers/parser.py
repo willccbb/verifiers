@@ -1,6 +1,11 @@
 import logging
 from typing import Any, List, Dict, Callable
 
+from verifiers import (
+    ChatMessage,
+    Messages,
+)
+
 class Parser:
     """
     Parser class for parsing LLM rollouts.
@@ -18,11 +23,11 @@ class Parser:
     def parse(self, text: str) -> Any:
         return text
     
-    def get_assistant_messages(self, completion: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def get_assistant_messages(self, completion: List[ChatMessage]) -> List[ChatMessage]:
         """Helper function to extract assistant messages from a completion."""
         return [msg for msg in completion if msg['role'] == 'assistant']
     
-    def parse_answer(self, completion: List[Dict[str, str]] | str) -> str | None:
+    def parse_answer(self, completion: Messages) -> str | None:
         if isinstance(completion, str):
             return self.parse(completion)
         else:

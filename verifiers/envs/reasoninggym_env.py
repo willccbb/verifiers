@@ -1,7 +1,6 @@
-from typing import Any, Tuple, List
+from typing import Tuple, List
 
 from datasets import Dataset
-from openai import OpenAI
 import reasoning_gym as rg
 from reasoning_gym.composite import DatasetSpec
 from reasoning_gym.dataset import ProceduralDataset
@@ -10,13 +9,14 @@ from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
 from verifiers.envs.singleturn_env import SingleTurnEnv
 
+
 class ReasoningGymEnv(SingleTurnEnv):
     def __init__(self,
                  gym: str | List[str | dict],
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,   
                  seed: int = 0,
-                 **kwargs: Any):
+                 **kwargs):
         self.gym = gym
         self.num_samples = num_samples
         self.num_eval_samples = num_eval_samples
@@ -49,8 +49,6 @@ class ReasoningGymEnv(SingleTurnEnv):
     def build_rg_dataset(self, gym: str | List[str | dict], num_samples: int = 1000, seed: int = 0) -> ProceduralDataset:
         if isinstance(gym, str):
             return rg.create_dataset(gym, size=num_samples, seed=seed)
-        if not isinstance(gym, list):
-            raise ValueError("'gym' must be str or list")
         dataset_specs = []
         for dataset_config in gym:
             if isinstance(dataset_config, str):

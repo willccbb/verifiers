@@ -1,27 +1,32 @@
 import asyncio
 import logging
-from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Tuple, Optional, Union, TYPE_CHECKING
+from typing import List, Literal, Tuple, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
 from datasets import Dataset
 from openai import OpenAI, AsyncOpenAI
-from openai.types.completion import Completion
-from openai.types.chat.chat_completion import ChatCompletion
 
-from verifiers import RewardFunc
-from verifiers.parsers import Parser
-from verifiers.rubrics import Rubric
+from verifiers import (
+    ChatMessage,
+    GenerateInputs,
+    GenerateOutputs,
+    Info,
+    Messages,
+    MessageType,
+    ModelResponse,
+    Parser,
+    ProcessedOutputs,
+    RewardFunc,
+    Rubric,
+    SamplingArgs,
+    State
+)
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
-DEFAULT_MAX_CONCURRENT = 512
-DATASET_MAX_CONCURRENT = 32
-
-Response = Union[Completion, ChatCompletion, None]
 
 class Environment(ABC):
     """
@@ -33,19 +38,18 @@ class Environment(ABC):
                  dataset: Dataset | None = None,
                  eval_dataset: Dataset | None = None,
                  system_prompt: str | None = None,
-                 few_shot: List[Dict[str, Any]] = [],
+                 few_shot: List[ChatMessage] = [],
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
-                 sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                 message_type: Literal['chat', 'completion'] = 'chat',
-                 **kwargs: Any):
+                 sampling_args: SamplingArgs = {},
+                 message_type: MessageType = 'chat',
+                 max_workers: int = 512,
+                 **kwargs):
         self.client = client
         self.model = model
         self.message_type: Literal['chat', 'completion'] = message_type
         self.system_prompt = system_prompt
         self.few_shot = few_shot
-        self.max_concurrent = max_concurrent
         
         if self.message_type == 'chat':
             if dataset is not None:
@@ -79,6 +83,7 @@ class Environment(ABC):
         for k, v in sampling_args.items():
             if k != 'extra_body':
                 self.sampling_args[k] = v
+        self.max_workers = max_workers
         self.logger = logging.getLogger(f'verifiers.envs.{self.__class__.__name__}')
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -87,48 +92,48 @@ class Environment(ABC):
             raise ValueError('Either dataset or eval_dataset must be provided')
     
     def format_prompt(self,
-                      prompt: str,
+                      prompt_str: str,
                       system_prompt: str | None = None,
-                      few_shot: List[Dict[str, Any]] | None = None
-                      ) -> List[Dict[str, Any]]:
+                      few_shot: List[ChatMessage] | None = None
+                      ) -> List[ChatMessage]:
         messages = []
         if system_prompt:
             messages.append({'role': 'system', 'content': system_prompt})
         if few_shot:
             messages.extend(few_shot)
-        messages.append({'role': 'user', 'content': prompt})
+        messages.append({'role': 'user', 'content': prompt_str})
         return messages
 
     def format_dataset(self,
                        dataset: Dataset,
                        system_prompt: str | None = None,
-                       few_shot: List[Dict[str, Any]] | None = None,
+                       few_shot: List[ChatMessage] | None = None,
                        question_key: str = "question",
                        answer_key: str = "answer") -> Dataset:
         # skip if "prompt" already exists
         if "prompt" in dataset.column_names:
             return dataset
         # extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(prompt: str) -> List[Dict[str, Any]]:
+        def format_prompt_fn(prompt_str: str) -> List[ChatMessage]:
             messages = []
             if system_prompt:
                 messages.append({'role': 'system', 'content': system_prompt})
             if few_shot:
                 messages.extend(few_shot)
-            messages.append({'role': 'user', 'content': prompt})
+            messages.append({'role': 'user', 'content': prompt_str})
             return messages
         
         if answer_key == "answer":
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
+            })
         else:
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
-            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
+            })
 
-    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
+    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs) -> Dataset:
         if self.dataset is None:
             raise ValueError('dataset is not set')
         if seed is not None:
@@ -137,7 +142,7 @@ class Environment(ABC):
             return self.dataset.select(range(n))
         return self.dataset
 
-    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs) -> Dataset | None:
         if self.eval_dataset is None:
             self.logger.warning('eval_dataset is not set, falling back to train dataset')
             return self.get_dataset(n, seed, **kwargs)
@@ -147,19 +152,19 @@ class Environment(ABC):
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
-    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
+    def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
     
-    def get_reward_weights(self, **kwargs: Any) -> List[float]:
+    def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
 
     async def get_model_response(self,
-                           prompt: str | List[Dict[str, str]],
+                           prompt: Messages,
                            client: AsyncOpenAI,
                            model: str,
-                           sampling_args: Dict[str, Any] = {},
-                           message_type: Literal['chat', 'completion'] | None = None,
-                           **kwargs: Any) -> Tuple[str, Response]:
+                           sampling_args: SamplingArgs = {},
+                           message_type: MessageType | None = None,
+                           **kwargs) -> ModelResponse:
         """
         Get model response for a given prompt (chat or completion).
         
@@ -176,7 +181,7 @@ class Environment(ABC):
                 messages=prompt, # type: ignore
                 **sampling_args
             )
-            return response.choices[0].message.content, response 
+            return response
         elif message_type == 'completion':
             assert isinstance(prompt, str)
             response = await client.completions.create(
@@ -184,18 +189,18 @@ class Environment(ABC):
                 prompt=prompt,
                 **sampling_args
             )
-            return response.choices[0].text, response 
+            return response
 
     @abstractmethod
     async def rollout(self,
-                client: AsyncOpenAI,
-                model: str,
-                prompt: str | List[Dict[str, Any]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]:
+                      client: AsyncOpenAI,
+                      model: str,
+                      prompt: Messages,
+                      answer: str = "",
+                      task: str = "default",
+                      info: Info = {},
+                      sampling_args: SamplingArgs = {},
+                      **kwargs) -> Tuple[Messages, State]:
         """
         Run a rollout for a given prompt.
         Returns a tuple of (completion, state).
@@ -205,13 +210,12 @@ class Environment(ABC):
     async def run_rollouts(self,
                            client: AsyncOpenAI,
                            model: str,
-                           prompts: List[str | List[Dict[str, str]]],
+                           prompts: List[Messages],
                            answers: List[str],
                            tasks: List[str] = [],
-                           infos: List[Dict[str, Any]] = [],
-                           sampling_args: Dict[str, Any] = {},
-                           max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                           **kwargs: Any) -> List[Tuple[Union[str, List[Dict[str, Any]]], Dict[str, Any]]]:
+                           infos: List[Info] = [],
+                           sampling_args: SamplingArgs = {},
+                           **kwargs) -> List[Tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -220,7 +224,6 @@ class Environment(ABC):
             self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
             for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
         ]
- 
         return await tqdm_asyncio.gather(
             *rollout_tasks,
             total=len(prompts),
@@ -228,13 +231,12 @@ class Environment(ABC):
         )
 
     async def a_generate(self,
-                         inputs: Dict[str, List[Any]] | Dataset,
+                         inputs: GenerateInputs | Dataset,
                          client: AsyncOpenAI | None = None,
                          model: str | None = None,
-                         sampling_args: Dict[str, Any] = {},
-                         max_concurrent: int | None = None,
+                         sampling_args: SamplingArgs = {},
                          score_rollouts: bool = True,
-                         **kwargs: Any) -> Dict[str, Any]:
+                         **kwargs) -> GenerateOutputs:
         """
         Generate completions and rewards for a given set of inputs.
         """
@@ -247,15 +249,13 @@ class Environment(ABC):
             model = self.model
         gen_sampling_args = deepcopy(self.sampling_args)
         gen_sampling_args.update(sampling_args)
-        if max_concurrent is None:
-            max_concurrent = self.max_concurrent
 
         # run rollouts    
         if isinstance(inputs, Dataset):
             # get prompt column
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
-            results = deepcopy(inputs)
+            results = {col: deepcopy(inputs[col]) for col in inputs}
         if 'prompt' not in results:
             raise ValueError('prompt column not found in inputs')
         if 'answer' not in results and 'info' not in results:
@@ -275,13 +275,10 @@ class Environment(ABC):
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
-            max_concurrent=max_concurrent,
             **kwargs
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
         results['state'] = [rollout[1] for rollout in rollouts]
-        if 'task' not in results:
-            results['task'] = ['default'] * len(results['prompt'])
         if score_rollouts:
             results_rewards = await self.rubric.score_rollouts( 
                 prompts=results['prompt'],
@@ -290,26 +287,25 @@ class Environment(ABC):
                 states=results['state'],
                 tasks=results['task'],
                 infos=results['info'],
-                max_concurrent=max_concurrent,
                 apply_weights=True
-            )       
+            )
+            # add rewards to results    
             results.update(results_rewards)
         return results
 
     def generate(self,
-                 inputs: Dict[str, List[Any]] | Dataset,
+                 inputs: GenerateInputs | Dataset,
                  client: AsyncOpenAI | OpenAI,
                  model: str | None = None,
-                 sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+                 sampling_args: SamplingArgs = {},
                  score_rollouts: bool = True,
-                 **kwargs: Any) -> Dict[str, Any]:
+                 **kwargs) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
-        coro = self.a_generate(inputs, client, model, sampling_args, max_concurrent, score_rollouts, **kwargs)
+        coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, **kwargs)
         
         def setup_executor(loop):
-            loop.set_default_executor(ThreadPoolExecutor(max_workers=max_concurrent))
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=self.max_workers))
         
         try:
             loop = asyncio.new_event_loop()
@@ -329,8 +325,8 @@ class Environment(ABC):
     
     def process_chat_format(
         self,
-        prompt: List[Dict[str, str]],
-        completion: List[Dict[str, str]],
+        prompt: List[ChatMessage],
+        completion: List[ChatMessage],
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False
     ) -> Tuple[List[int], List[int], List[int], List[int]]:
@@ -346,7 +342,11 @@ class Environment(ABC):
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
         # tokenize just the prompt
-        prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+        prompt_text = processing_class.apply_chat_template(
+            prompt, # type: ignore
+            tokenize=False,
+            add_generation_prompt=True
+        )
         assert isinstance(prompt_text, str)
         prompt_ids = processing_class.encode(prompt_text)
         prompt_mask = [0] * len(prompt_ids)
@@ -365,11 +365,11 @@ class Environment(ABC):
             
             # tokenize the full prefix
             prefix_text = processing_class.apply_chat_template(
-                conversation_prefix, 
+                conversation_prefix, # type: ignore
                 tokenize=False, 
                 add_generation_prompt=False,
             )
-            assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
+            assert isinstance(prefix_text, str)
             current_ids = processing_class.encode(prefix_text)
             assert current_ids[:len(prev_ids)-1] == prev_ids[:-1], f"Tokenization difference in chat format. Current ids: {current_ids[:len(prev_ids)-1]}, previous ids: {prev_ids[:-1]}"
             
@@ -429,16 +429,16 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_env_results(
         self,
-        prompts: List[Union[str, List[Dict[str, Any]]]],
-        completions: List[Union[str, List[Dict[str, Any]]]],
-        states: List[Dict[str, Any]],
+        prompts: List[Messages],
+        completions: List[Messages],
+        states: List[State],
         rewards: List[float],
         processing_class: "PreTrainedTokenizerBase",
         max_completion_length: int = -1,
         max_seq_length: int = -1,
         mask_truncated_completions: bool = False,
         mask_env_responses: bool = False,
-    ) -> Dict[str, List[Any]]:
+    ) -> ProcessedOutputs:
         """
         Main tokenization pipeline that handles both chat and completion formats.
         
@@ -501,11 +501,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
     def evaluate(self,
                  client: AsyncOpenAI | OpenAI,
                  model: str,
-                 sampling_args: Dict[str, Any] = {},
+                 sampling_args: SamplingArgs = {},
                  num_samples: int = -1,
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                 **kwargs: Any
-                ) -> Dict[str, Any]:
+                 **kwargs) -> GenerateOutputs:
         """
         Evaluate model on the Environment evaluation dataset.
         """
@@ -517,48 +515,23 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             inputs = self.get_eval_dataset(n=num_samples)
         assert inputs is not None, 'No dataset found'
         results = self.generate(
-            inputs, client, model, sampling_args, max_concurrent, **kwargs
+            inputs, client, model, sampling_args, **kwargs
         )
         return results
 
     def make_dataset(self,
-                     results: Dict[str, Any] | None = None,
+                     results: GenerateOutputs,
                      push_to_hub: bool = False,
                      hub_name: str | None = None,
-                     client: AsyncOpenAI | OpenAI | None = None,
-                     model: str | None = None,
-                     max_concurrent: int | None = None,
-                     num_samples: int = -1,
-                     sampling_args: Dict[str, Any] = {'temperature': 0.6},
                      state_columns: List[str] = [],
                      extra_columns: List[str] = [],
-                     **kwargs: Any) -> Dataset:
+                     **kwargs) -> Dataset:
         """
         Make a dataset from the evaluation results.
         """
-        if results is None and client is None:
-            raise ValueError('Either results or client must be provided')
         if push_to_hub and hub_name is None:
             raise ValueError('hub_name must be provided if push_to_hub is True')
         
-        if results is None:
-            # use class-level client and model if not provided
-            if client is None:
-                assert self.client is not None
-                client = self.client
-            if model is None:
-                assert self.model is not None
-                model = self.model
-            if max_concurrent is None:
-                max_concurrent = self.max_concurrent
-            results = self.evaluate(
-                client,
-                model, 
-                sampling_args,
-                num_samples, 
-                max_concurrent, 
-                **kwargs
-            )
         cols = ['prompt', 'completion', 'answer', 'reward']
         if results['task'][0] is not None:
             cols.append('task')

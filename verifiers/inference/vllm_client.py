@@ -7,7 +7,7 @@ import time
 import requests
 from requests import ConnectionError
 from requests.adapters import HTTPAdapter
-from openai import OpenAI
+from openai import AsyncOpenAI
 import torch
 from trl.import_utils import is_requests_available, is_vllm_available
 
@@ -17,7 +17,7 @@ from vllm.distributed.utils import StatelessProcessGroup # type: ignore
 logger = logging.getLogger(__name__)
 
 
-class VLLMClient(OpenAI):
+class VLLMClient(AsyncOpenAI):
     """
     A client class to interact with a vLLM server.
 
@@ -75,8 +75,8 @@ class VLLMClient(OpenAI):
         self.session = requests.Session()
         # Configure connection pooling to handle rapid requests better
         adapter = HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=10,
+            pool_connections=1024,
+            pool_maxsize=1024,
             max_retries=3,
             pool_block=False
         )
