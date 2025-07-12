@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Tuple, Union
 
 from datasets import concatenate_datasets
 from openai import AsyncOpenAI
@@ -37,8 +37,8 @@ class EnvGroupRubric(Rubric):
     async def score_rollout(self,
                             prompt: Union[str, List[ChatMessage]],
                             completion: Union[str, List[ChatMessage]],
-                            answer: Any,
-                            state: State,
+                            answer: str = "",
+                            state: State = {},
                             task: str = "default",
                             info: dict = {},
                             **kwargs) -> Dict[str, float]:
@@ -143,11 +143,11 @@ class EnvGroup(Environment):
                       client: AsyncOpenAI,
                       model: str,
                       prompt: Union[str, List[ChatMessage]],
-                      answer: str,
+                      answer: str = "",
                       task: str = "default",
                       info: Info = {},
                       sampling_args: SamplingArgs = {},
-                      **kwargs: Any) -> Tuple[Union[str, List[ChatMessage]], State]:
+                      **kwargs) -> Tuple[Union[str, List[ChatMessage]], State]:
         """
         Route rollout to the appropriate sub-environment based on task.
         

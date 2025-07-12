@@ -1,18 +1,18 @@
 from abc import abstractmethod
 from copy import deepcopy
-from typing import List, Dict, Any, Tuple, Union
+from typing import Tuple
 
 from openai import AsyncOpenAI
 
 from verifiers import (
-    Environment,
-    Completion,
     ChatCompletion,
     ChatMessage,
+    Completion,
+    Environment,
+    Info,
     Message,
     Messages,
     MessageType,
-    Info,
     SamplingArgs,
     State,
 )
@@ -30,14 +30,14 @@ class MultiTurnEnv(Environment):
     def is_completed(self,
                      messages: Messages,
                      state: State,
-                     **kwargs: Any) -> bool:
+                     **kwargs) -> bool:
         pass
 
     @abstractmethod
     def env_response(self,
                      messages: Messages,
                      state: State,
-                     **kwargs: Any) -> Tuple[Message, State]:
+                     **kwargs) -> Tuple[Message, State]:
         """
         Generate a response from the environment (message, state).
         """
@@ -47,11 +47,11 @@ class MultiTurnEnv(Environment):
                       client: AsyncOpenAI,
                       model: str,
                       prompt: Messages,
-                      answer: str,
+                      answer: str = "",
                       task: str = "default",
                       info: Info = {},
                       sampling_args: SamplingArgs = {},
-                      **kwargs: Any) -> Tuple[Messages, State]:
+                      **kwargs) -> Tuple[Messages, State]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """

@@ -29,6 +29,13 @@ class GenerateInputs(TypedDict):
 
 GenerateOutputs = Dict[str, Any]
 
+class ProcessedOutputs(TypedDict):
+    prompt_ids: List[int]
+    prompt_mask: List[int]
+    completion_ids: List[int]
+    completion_mask: List[int]
+    rewards: List[float]
+
 try:
     import torch._dynamo # type: ignore
     torch._dynamo.config.suppress_errors = True # type: ignore

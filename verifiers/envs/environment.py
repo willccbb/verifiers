@@ -1,36 +1,31 @@
 import asyncio
 import logging
-from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Sequence, Tuple, TYPE_CHECKING
+from typing import List, Literal, Tuple, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
 from datasets import Dataset
 from openai import OpenAI, AsyncOpenAI
-from openai.types.completion import Completion
-from openai.types.chat.chat_completion import ChatCompletion
 
 from verifiers import (
-    MessageType,
-    ModelResponse,
     ChatMessage,
-    Messages,
-    Info,
-    RewardFunc,
-    State,
-    SamplingArgs,
     GenerateInputs,
     GenerateOutputs,
+    Info,
+    Messages,
+    MessageType,
+    ModelResponse,
+    Parser,
+    ProcessedOutputs,
+    RewardFunc,
+    Rubric,
+    SamplingArgs,
+    State
 )
-from verifiers.parsers import Parser
-from verifiers.rubrics import Rubric
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-
-DEFAULT_MAX_CONCURRENT = 512
-DATASET_MAX_CONCURRENT = 32
 
 
 class Environment(ABC):
@@ -47,15 +42,13 @@ class Environment(ABC):
                  parser: Parser = Parser(),
                  rubric: Rubric = Rubric(),
                  sampling_args: SamplingArgs = {},
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                  message_type: MessageType = 'chat',
-                 **kwargs: Any):
+                 **kwargs):
         self.client = client
         self.model = model
         self.message_type: Literal['chat', 'completion'] = message_type
         self.system_prompt = system_prompt
         self.few_shot = few_shot
-        self.max_concurrent = max_concurrent
         
         if self.message_type == 'chat':
             if dataset is not None:
@@ -131,14 +124,14 @@ class Environment(ABC):
         if answer_key == "answer":
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
-            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
+            })
         else:
             return dataset.map(lambda x: {
                 "prompt": format_prompt_fn(x[question_key]),
                 "answer": x[answer_key]
-            }, num_proc=min(self.max_concurrent, DATASET_MAX_CONCURRENT))
+            })
 
-    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset:
+    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs) -> Dataset:
         if self.dataset is None:
             raise ValueError('dataset is not set')
         if seed is not None:
@@ -147,7 +140,7 @@ class Environment(ABC):
             return self.dataset.select(range(n))
         return self.dataset
 
-    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs: Any) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None, **kwargs) -> Dataset | None:
         if self.eval_dataset is None:
             self.logger.warning('eval_dataset is not set, falling back to train dataset')
             return self.get_dataset(n, seed, **kwargs)
@@ -157,10 +150,10 @@ class Environment(ABC):
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
-    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
+    def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
     
-    def get_reward_weights(self, **kwargs: Any) -> List[float]:
+    def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
 
     async def get_model_response(self,
@@ -169,7 +162,7 @@ class Environment(ABC):
                            model: str,
                            sampling_args: SamplingArgs = {},
                            message_type: MessageType | None = None,
-                           **kwargs: Any) -> ModelResponse:
+                           **kwargs) -> ModelResponse:
         """
         Get model response for a given prompt (chat or completion).
         
@@ -201,11 +194,11 @@ class Environment(ABC):
                       client: AsyncOpenAI,
                       model: str,
                       prompt: Messages,
-                      answer: str,
+                      answer: str = "",
                       task: str = "default",
                       info: Info = {},
                       sampling_args: SamplingArgs = {},
-                      **kwargs: Any) -> Tuple[Messages, State]:
+                      **kwargs) -> Tuple[Messages, State]:
         """
         Run a rollout for a given prompt.
         Returns a tuple of (completion, state).
@@ -220,8 +213,7 @@ class Environment(ABC):
                            tasks: List[str] = [],
                            infos: List[Info] = [],
                            sampling_args: SamplingArgs = {},
-                           max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                           **kwargs: Any) -> List[Tuple[Messages, State]]:
+                           **kwargs) -> List[Tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -242,9 +234,8 @@ class Environment(ABC):
                          client: AsyncOpenAI | None = None,
                          model: str | None = None,
                          sampling_args: SamplingArgs = {},
-                         max_concurrent: int | None = None,
                          score_rollouts: bool = True,
-                         **kwargs: Any) -> GenerateOutputs:
+                         **kwargs) -> GenerateOutputs:
         """
         Generate completions and rewards for a given set of inputs.
         """
@@ -257,8 +248,6 @@ class Environment(ABC):
             model = self.model
         gen_sampling_args = deepcopy(self.sampling_args)
         gen_sampling_args.update(sampling_args)
-        if max_concurrent is None:
-            max_concurrent = self.max_concurrent
 
         # run rollouts    
         if isinstance(inputs, Dataset):
@@ -285,7 +274,6 @@ class Environment(ABC):
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
-            max_concurrent=max_concurrent,
             **kwargs
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
@@ -298,7 +286,6 @@ class Environment(ABC):
                 states=results['state'],
                 tasks=results['task'],
                 infos=results['info'],
-                max_concurrent=max_concurrent,
                 apply_weights=True
             )
             # add rewards to results    
@@ -309,16 +296,15 @@ class Environment(ABC):
                  inputs: GenerateInputs | Dataset,
                  client: AsyncOpenAI | OpenAI,
                  model: str | None = None,
-                 sampling_args: Dict[str, Any] = {},
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
+                 sampling_args: SamplingArgs = {},
                  score_rollouts: bool = True,
-                 **kwargs: Any) -> GenerateOutputs:
+                 **kwargs) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
-        coro = self.a_generate(inputs, client, model, sampling_args, max_concurrent, score_rollouts, **kwargs)
+        coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, **kwargs)
         
         def setup_executor(loop):
-            loop.set_default_executor(ThreadPoolExecutor(max_workers=max_concurrent))
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=512))
         
         try:
             loop = asyncio.new_event_loop()
@@ -451,7 +437,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         max_seq_length: int = -1,
         mask_truncated_completions: bool = False,
         mask_env_responses: bool = False,
-    ) -> Dict[str, List[Any]]:
+    ) -> ProcessedOutputs:
         """
         Main tokenization pipeline that handles both chat and completion formats.
         
@@ -514,11 +500,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
     def evaluate(self,
                  client: AsyncOpenAI | OpenAI,
                  model: str,
-                 sampling_args: Dict[str, Any] = {},
+                 sampling_args: SamplingArgs = {},
                  num_samples: int = -1,
-                 max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                 **kwargs: Any
-                ) -> Dict[str, Any]:
+                 **kwargs) -> GenerateOutputs:
         """
         Evaluate model on the Environment evaluation dataset.
         """
@@ -530,48 +514,23 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             inputs = self.get_eval_dataset(n=num_samples)
         assert inputs is not None, 'No dataset found'
         results = self.generate(
-            inputs, client, model, sampling_args, max_concurrent, **kwargs
+            inputs, client, model, sampling_args, **kwargs
         )
         return results
 
     def make_dataset(self,
-                     results: Dict[str, Any] | None = None,
+                     results: GenerateOutputs,
                      push_to_hub: bool = False,
                      hub_name: str | None = None,
-                     client: AsyncOpenAI | OpenAI | None = None,
-                     model: str | None = None,
-                     max_concurrent: int | None = None,
-                     num_samples: int = -1,
-                     sampling_args: Dict[str, Any] = {'temperature': 0.6},
                      state_columns: List[str] = [],
                      extra_columns: List[str] = [],
-                     **kwargs: Any) -> Dataset:
+                     **kwargs) -> Dataset:
         """
         Make a dataset from the evaluation results.
         """
-        if results is None and client is None:
-            raise ValueError('Either results or client must be provided')
         if push_to_hub and hub_name is None:
             raise ValueError('hub_name must be provided if push_to_hub is True')
         
-        if results is None:
-            # use class-level client and model if not provided
-            if client is None:
-                assert self.client is not None
-                client = self.client
-            if model is None:
-                assert self.model is not None
-                model = self.model
-            if max_concurrent is None:
-                max_concurrent = self.max_concurrent
-            results = self.evaluate(
-                client,
-                model, 
-                sampling_args,
-                num_samples, 
-                max_concurrent, 
-                **kwargs
-            )
         cols = ['prompt', 'completion', 'answer', 'reward']
         if results['task'][0] is not None:
             cols.append('task')

@@ -1,10 +1,11 @@
-from typing import List, Any, Tuple, Union
+from typing import Tuple
 
 from verifiers import (
-    ChatMessage,
+    Message,
+    Messages,
     MessageType,
-    State,
     MultiTurnEnv,
+    State
 )
 
 class SingleTurnEnv(MultiTurnEnv):
@@ -18,16 +19,16 @@ class SingleTurnEnv(MultiTurnEnv):
         self.message_type = message_type
 
     def is_completed(self,
-                     messages: Union[str, List[ChatMessage]],
+                     messages: Messages,
                      state: State,
-                     **kwargs: Any) -> bool:
+                     **kwargs) -> bool:
         if len(state['responses']) > 0:
             return True
         return False
 
     def env_response(self,
-                     messages: Union[str, List[ChatMessage]],
+                     messages: Messages,
                      state: State,
-                     **kwargs: Any) -> Tuple[Union[str, ChatMessage], State]:
+                     **kwargs) -> Tuple[Message, State]:
         # never called in MultiTurnEnv.rollout
         return {'role': 'user', 'content': ""}, state

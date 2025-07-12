@@ -4,13 +4,15 @@ from datasets import Dataset
 from openai import OpenAI
 
 from verifiers import (
-    RewardFunc,
     ChatMessage,
+    Messages,
+    RewardFunc,
     State,
     MultiTurnEnv,
 )
 from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics import MathRubric
+
 
 class DoubleCheckEnv(MultiTurnEnv):
     def __init__(self,
@@ -32,20 +34,20 @@ class DoubleCheckEnv(MultiTurnEnv):
         )
         self.rubric = MathRubric()
 
-    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
+    def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
     
-    def get_reward_weights(self, **kwargs: Any) -> List[float]:
+    def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
 
     def is_completed(self,
-                     messages: List[ChatMessage],
+                     messages: Messages,
                      state: State,
-                     **kwargs: Any) -> bool:
-        return len(messages) > 1 and messages[-2]['content'] == 'Are you sure?'
+                     **kwargs) -> bool:
+        return len(state['responses']) == 1
     
     def env_response(self,
-                     messages: List[ChatMessage],
+                     messages: Messages,
                      state: State,
-                     **kwargs: Any) -> Tuple[ChatMessage, State]:
+                     **kwargs) -> Tuple[ChatMessage, State]:
         return {'role': 'user', 'content': 'Are you sure?'}, state

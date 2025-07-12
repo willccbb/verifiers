@@ -2,7 +2,11 @@ import re
 from typing import List, Dict, Any, Union, Tuple, Optional, Callable
 from types import SimpleNamespace
 
-from verifiers.parsers import Parser
+from verifiers import (
+    ChatMessage,
+    Messages,
+    Parser,
+)
 
 class XMLParser(Parser):
     def __init__(self, fields: List[Union[str, Tuple[str, ...]]], answer_field: str = "answer"):
@@ -65,7 +69,7 @@ class XMLParser(Parser):
                     results[alt] = None
         return SimpleNamespace(**results)
 
-    def parse_answer(self, completion: List[Dict[str, str]] | str) -> str | None:
+    def parse_answer(self, completion: Messages) -> str | None:
         """Extract the last answer from a completion."""
         if isinstance(completion, str):
             return self.parse(completion)
@@ -98,7 +102,7 @@ class XMLParser(Parser):
         - At least one field from the schema is present in each message
         - Fields have proper content and spacing
         """
-        def format_reward_func(completion):
+        def format_reward_func(completion: List[ChatMessage]):
             """Reward function that checks if each step follows the expected format."""
             model_messages = self.get_assistant_messages(completion)
             if not model_messages:

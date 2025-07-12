@@ -2,9 +2,14 @@ import inspect
 import json
 from typing import List, Dict, Any, Callable, Tuple
 
-from verifiers import RewardFunc
-from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers import XMLParser
+from verifiers import (
+    Message,
+    Messages,
+    MultiTurnEnv,
+    RewardFunc,
+    State,
+    XMLParser
+)
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.rubrics import ToolRubric
 
@@ -103,10 +108,10 @@ class ToolEnv(MultiTurnEnv):
         )
         self.env_parser = env_parser
 
-    def get_reward_funcs(self, **kwargs: Any) -> List[RewardFunc]:
+    def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
     
-    def get_reward_weights(self, **kwargs: Any) -> List[float]:
+    def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
  
     def is_completed(self,
@@ -115,7 +120,7 @@ class ToolEnv(MultiTurnEnv):
                      **kwargs: Any) -> bool:
         return self.parser.parse_answer(messages) is not None
 
-    def call_tool(self, tool_json: str, max_chars: int = 1024, **kwargs: Any) -> str:
+    def call_tool(self, tool_json: str, max_chars: int = 1024, **kwargs) -> str:
         """Call a tool based on JSON command."""
         try:
             command = json.loads(tool_json)
@@ -144,18 +149,18 @@ class ToolEnv(MultiTurnEnv):
             return f"Error: {str(e)}. " + "Please format your tool call as '{{\"name\": \"tool_name\", \"args\": {{\"arg1\": \"value1\", \"arg2\": \"value2\"}}}}'"
 
     def env_response(self,
-                     messages: List[Dict[str, str]], 
-                     state: Dict[str, Any],
-                     **kwargs: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+                     messages: Messages, 
+                     state: State,
+                     **kwargs) -> Tuple[Message, State]:
         try:
             parsed = self.parser.parse(messages[-1]['content'])
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, 'tool') and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
                 if len(result.strip()) > 0:
-                    return {'role': 'user', 'content': self.env_parser.format(result=result)}, {}
+                    return {'role': 'user', 'content': self.env_parser.format(result=result)}, state
                 else:
-                    return {'role': 'user', 'content': "Error: Tool execution returned empty output."}, {}
+                    return {'role': 'user', 'content': "Error: Tool execution returned empty output."}, state
         except Exception:
             pass
-        return {'role': 'user', 'content': "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}, {}
+        return {'role': 'user', 'content': "Error: Tool command not found or invalid XML format. Please ensure correct formatting."}, state
