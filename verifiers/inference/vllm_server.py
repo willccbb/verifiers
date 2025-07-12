@@ -94,7 +94,6 @@ class WeightSyncWorkerExtension:
         torch_dtype = getattr(torch, dtype.split(".")[-1])
         weight = torch.empty(shape, dtype=torch_dtype, device=self.device) # type: ignore
         self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore
-        time.sleep(0.001) 
         self.pynccl_comm.group.barrier()
         self.model_runner.model.load_weights(weights=[(name, weight)]) # type: ignore
 
@@ -220,7 +219,7 @@ async def run_server(args: Namespace):
 def main():
     parser = FlexibleArgumentParser(description="vLLM OpenAI-compatible server with weight synchronization")
     parser = make_arg_parser(parser)
-    args = parser.parse_args()
+    args = parser.parse_args() or Namespace()
     validate_parsed_serve_args(args)
     print(args)
     uvloop.run(run_server(args))

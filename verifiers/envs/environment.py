@@ -43,6 +43,7 @@ class Environment(ABC):
                  rubric: Rubric = Rubric(),
                  sampling_args: SamplingArgs = {},
                  message_type: MessageType = 'chat',
+                 max_workers: int = 512,
                  **kwargs):
         self.client = client
         self.model = model
@@ -82,6 +83,7 @@ class Environment(ABC):
         for k, v in sampling_args.items():
             if k != 'extra_body':
                 self.sampling_args[k] = v
+        self.max_workers = max_workers
         self.logger = logging.getLogger(f'verifiers.envs.{self.__class__.__name__}')
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -222,7 +224,6 @@ class Environment(ABC):
             self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
             for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
         ]
- 
         return await tqdm_asyncio.gather(
             *rollout_tasks,
             total=len(prompts),
@@ -304,7 +305,7 @@ class Environment(ABC):
         coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, **kwargs)
         
         def setup_executor(loop):
-            loop.set_default_executor(ThreadPoolExecutor(max_workers=512))
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=self.max_workers))
         
         try:
             loop = asyncio.new_event_loop()

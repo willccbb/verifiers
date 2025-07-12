@@ -28,6 +28,7 @@ from trl.trainer.utils import (
 )
 import wandb
 import numpy as np
+import time
 
 from verifiers import Environment
 from verifiers.trainers.grpo_config import GRPOConfig
@@ -321,8 +322,6 @@ class GRPOTrainer(Trainer):
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
-        
-
 
         # dummy data collator
         def data_collator(features):
@@ -599,11 +598,9 @@ class GRPOTrainer(Trainer):
             gather_if_zero3 = deepspeed.zero.GatheredParameters
         else:
             gather_if_zero3 = nullcontext
-            
+
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
-        
-        # Debug log
         self.logger.info(f"Process {self.accelerator.process_index}: Starting weight sync to vLLM")
 
         # ALL processes must participate in model operations for DeepSpeed ZeRO-3
@@ -622,10 +619,9 @@ class GRPOTrainer(Trainer):
                     if "original_module" in name:
                         continue
                     name = name.replace("modules_to_save.default.", "")
-                
+
                     if self.accelerator.is_main_process:
                         self.vllm_client.update_named_param(name, param.data)
-                    
                 self.model.unmerge_adapter() # type: ignore
         else:
             # For non-PEFT models, gather and update each parameter individually
@@ -633,11 +629,11 @@ class GRPOTrainer(Trainer):
                 with gather_if_zero3([param]):
                     if self.accelerator.is_main_process:
                         self.vllm_client.update_named_param(name, param.data)
- 
+
         # Reset cache on vLLM (main process only)
         if self.accelerator.is_main_process:
             self.vllm_client.reset_prefix_cache()
-        
+
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
     
@@ -758,7 +754,7 @@ class GRPOTrainer(Trainer):
             # Calculate the target: we want to always be num_batches_ahead batches ahead
             # This means we should have submitted up to batch_id_to_retrieve + num_batches_ahead
             target_batch_id = batch_id_to_retrieve + self.async_generator.num_batches_ahead
-            
+
             # Submit any missing batches to maintain the pipeline
             # On first call, this submits batches 0 through num_batches_ahead
             # On subsequent calls, this submits new batches to stay ahead
@@ -815,7 +811,7 @@ class GRPOTrainer(Trainer):
                 self.logger.info(f"Retrieving batch {batch_id_to_retrieve} for processing")
                 
                 # Get batch result
-                batch_result = self.async_generator.get_batch(batch_id_to_retrieve) 
+                batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                 processed_results = batch_result.processed_results
                 
                 # Package raw data for broadcast (not tensors yet)
@@ -947,7 +943,7 @@ class GRPOTrainer(Trainer):
                      model: PreTrainedModel,
                      inputs: Dict[str, torch.Tensor],
                      return_outputs: bool = False,
-                     num_items_in_batch: int | None = None) -> torch.Tensor: 
+                     num_items_in_batch: int | None = None) -> torch.Tensor:  # type: ignore
         mode = "train" 
         # Compute the per-token log probabilities for the model
         prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
@@ -1246,10 +1242,9 @@ class GRPOTrainer(Trainer):
         
         clipped_completions_ratio = 1 - len(term_lengths) / len(completion_lengths)
         self._metrics[mode]["completions/clipped_ratio"].append(clipped_completions_ratio)
-        
+
         if len(term_lengths) == 0:
             term_lengths = [0]
         self._metrics[mode]["completions/mean_terminated_length"].append(float(sum(term_lengths)) / len(term_lengths))
         self._metrics[mode]["completions/min_terminated_length"].append(float(min(term_lengths)))
         self._metrics[mode]["completions/max_terminated_length"].append(float(max(term_lengths)))
-    

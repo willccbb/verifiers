@@ -79,7 +79,7 @@ class AsyncBatchGenerator:
         
         # Synchronization
         self._lock = threading.Lock()
-        
+
     def start(self):
         """Start the async generation worker thread"""
         if self.started:
@@ -116,7 +116,7 @@ class AsyncBatchGenerator:
         """
         if not self.started:
             raise RuntimeError("AsyncBatchGenerator not started")
-            
+
         with self._lock:
             if request.batch_id in self.pending_batches:
                 return True  # Already submitted
@@ -152,7 +152,7 @@ class AsyncBatchGenerator:
             with self._lock:
                 if batch_id in self.completed_batches:
                     return self.completed_batches.pop(batch_id)
-                    
+
             # Check for new results
             try:
                 result = self.result_queue.get(timeout=0.1)
@@ -187,7 +187,7 @@ class AsyncBatchGenerator:
         if not self.generation_times:
             return 0.0
         return sum(self.generation_times) / len(self.generation_times)
-        
+
     def should_submit_more(self) -> bool:
         """Check if we should submit more batches for generation"""
         with self._lock:
@@ -202,17 +202,14 @@ class AsyncBatchGenerator:
                 request = self.request_queue.get(timeout=0.1)
                 if request is None:  # Poison pill
                     break
-                    
+
                 # Generate batch
                 start_time = time.time()
                 result = self._generate_batch(request)
                 generation_time = time.time() - start_time
                 result.generation_time = generation_time
                 self.generation_times.append(generation_time)
-                        
-                # Put result in queue
                 self.result_queue.put(result)
-                
             except queue.Empty:
                 continue
 
@@ -229,6 +226,7 @@ class AsyncBatchGenerator:
             score_rollouts=True,
             max_concurrent=request.max_concurrent,
         )
+
         
         # Extract all reward-related keys
         all_reward_dict = {}
@@ -247,6 +245,7 @@ class AsyncBatchGenerator:
             max_completion_length=request.max_completion_length,
             mask_truncated_completions=request.mask_truncated_completions
         )
+
         
         return BatchResult(
             batch_id=request.batch_id,
