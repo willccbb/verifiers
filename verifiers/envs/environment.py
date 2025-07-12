@@ -3,7 +3,7 @@ import logging
 from asyncio import Semaphore
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Tuple, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, Sequence, Tuple, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
 from datasets import Dataset
@@ -15,10 +15,13 @@ from verifiers import (
     MessageType,
     ModelResponse,
     ChatMessage,
+    Messages,
     Info,
     RewardFunc,
     State,
     SamplingArgs,
+    GenerateInputs,
+    GenerateOutputs,
 )
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
@@ -161,7 +164,7 @@ class Environment(ABC):
         return self.rubric.get_reward_weights()
 
     async def get_model_response(self,
-                           prompt: Union[str, List[ChatMessage]],
+                           prompt: Messages,
                            client: AsyncOpenAI,
                            model: str,
                            sampling_args: SamplingArgs = {},
@@ -197,12 +200,12 @@ class Environment(ABC):
     async def rollout(self,
                       client: AsyncOpenAI,
                       model: str,
-                      prompt: Union[str, List[ChatMessage]],
+                      prompt: Messages,
                       answer: str,
                       task: str = "default",
                       info: Info = {},
                       sampling_args: SamplingArgs = {},
-                      **kwargs: Any) -> Tuple[Union[str, List[ChatMessage]], State]:
+                      **kwargs: Any) -> Tuple[Messages, State]:
         """
         Run a rollout for a given prompt.
         Returns a tuple of (completion, state).
@@ -212,13 +215,13 @@ class Environment(ABC):
     async def run_rollouts(self,
                            client: AsyncOpenAI,
                            model: str,
-                           prompts: List[Union[str, List[ChatMessage]]],
+                           prompts: List[Messages],
                            answers: List[str],
                            tasks: List[str] = [],
                            infos: List[Info] = [],
                            sampling_args: SamplingArgs = {},
                            max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-                           **kwargs: Any) -> List[Tuple[Union[str, List[ChatMessage]], State]]:
+                           **kwargs: Any) -> List[Tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -235,13 +238,13 @@ class Environment(ABC):
         )
 
     async def a_generate(self,
-                         inputs: Dict[str, List[Any]] | Dataset,
+                         inputs: GenerateInputs | Dataset,
                          client: AsyncOpenAI | None = None,
                          model: str | None = None,
                          sampling_args: SamplingArgs = {},
                          max_concurrent: int | None = None,
                          score_rollouts: bool = True,
-                         **kwargs: Any) -> Dict[str, Any]:
+                         **kwargs: Any) -> GenerateOutputs:
         """
         Generate completions and rewards for a given set of inputs.
         """
@@ -262,7 +265,7 @@ class Environment(ABC):
             # get prompt column
             results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
         else:
-            results = deepcopy(inputs)
+            results = {col: deepcopy(inputs[col]) for col in inputs}
         if 'prompt' not in results:
             raise ValueError('prompt column not found in inputs')
         if 'answer' not in results and 'info' not in results:
@@ -287,8 +290,6 @@ class Environment(ABC):
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
         results['state'] = [rollout[1] for rollout in rollouts]
-        if 'task' not in results:
-            results['task'] = ['default'] * len(results['prompt'])
         if score_rollouts:
             results_rewards = await self.rubric.score_rollouts( 
                 prompts=results['prompt'],
@@ -299,18 +300,19 @@ class Environment(ABC):
                 infos=results['info'],
                 max_concurrent=max_concurrent,
                 apply_weights=True
-            )       
+            )
+            # add rewards to results    
             results.update(results_rewards)
         return results
 
     def generate(self,
-                 inputs: Dict[str, List[Any]] | Dataset,
+                 inputs: GenerateInputs | Dataset,
                  client: AsyncOpenAI | OpenAI,
                  model: str | None = None,
                  sampling_args: Dict[str, Any] = {},
                  max_concurrent: int = DEFAULT_MAX_CONCURRENT,
                  score_rollouts: bool = True,
-                 **kwargs: Any) -> Dict[str, Any]:
+                 **kwargs: Any) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
         coro = self.a_generate(inputs, client, model, sampling_args, max_concurrent, score_rollouts, **kwargs)
@@ -336,8 +338,8 @@ class Environment(ABC):
     
     def process_chat_format(
         self,
-        prompt: List[Dict[str, str]],
-        completion: List[Dict[str, str]],
+        prompt: List[ChatMessage],
+        completion: List[ChatMessage],
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False
     ) -> Tuple[List[int], List[int], List[int], List[int]]:
@@ -353,7 +355,11 @@ class Environment(ABC):
             prompt_ids, prompt_mask, completion_ids, completion_mask
         """
         # tokenize just the prompt
-        prompt_text = processing_class.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+        prompt_text = processing_class.apply_chat_template(
+            prompt, # type: ignore
+            tokenize=False,
+            add_generation_prompt=True
+        )
         assert isinstance(prompt_text, str)
         prompt_ids = processing_class.encode(prompt_text)
         prompt_mask = [0] * len(prompt_ids)
@@ -372,11 +378,11 @@ class Environment(ABC):
             
             # tokenize the full prefix
             prefix_text = processing_class.apply_chat_template(
-                conversation_prefix, 
+                conversation_prefix, # type: ignore
                 tokenize=False, 
                 add_generation_prompt=False,
             )
-            assert isinstance(prefix_text, str), f"Expected string from apply_chat_template, got {type(prefix_text)}"
+            assert isinstance(prefix_text, str)
             current_ids = processing_class.encode(prefix_text)
             assert current_ids[:len(prev_ids)-1] == prev_ids[:-1], f"Tokenization difference in chat format. Current ids: {current_ids[:len(prev_ids)-1]}, previous ids: {prev_ids[:-1]}"
             
@@ -436,9 +442,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_env_results(
         self,
-        prompts: List[Union[str, List[Dict[str, Any]]]],
-        completions: List[Union[str, List[Dict[str, Any]]]],
-        states: List[Dict[str, Any]],
+        prompts: List[Messages],
+        completions: List[Messages],
+        states: List[State],
         rewards: List[float],
         processing_class: "PreTrainedTokenizerBase",
         max_completion_length: int = -1,
