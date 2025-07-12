@@ -1,8 +1,8 @@
 from typing import List, Dict
 
 from verifiers import RewardFunc
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import MathRubric
+from verifiers import XMLParser
+from verifiers.rubrics.math_rubric import MathRubric
 
 
 class CodeMathRubric(MathRubric):
@@ -27,7 +27,7 @@ class CodeMathRubric(MathRubric):
             for i, msg in enumerate(completion):
                 if msg['role'] == 'assistant':
                     parsed = self.parser.parse(msg['content'])
-                    if hasattr(parsed, 'code') and parsed.code is not None:
+                    if hasattr(parsed, 'code') and parsed.code is not None: # type: ignore
                         total_code_steps += 1
                         # Look for the next user message (environment response)
                         if i + 1 < len(completion) and completion[i + 1]['role'] == 'user':

@@ -35,7 +35,7 @@ from vllm.usage.usage_lib import UsageContext
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 # Weight update throttling
-MAX_CONCURRENT_WEIGHT_UPDATES = 1
+MAX_CONCURRENT_WEIGHT_UPDATES = 10
 weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
@@ -93,7 +93,8 @@ class WeightSyncWorkerExtension:
 
         torch_dtype = getattr(torch, dtype.split(".")[-1])
         weight = torch.empty(shape, dtype=torch_dtype, device=self.device) # type: ignore
-        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore 
+        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore
+        time.sleep(0.001) 
         self.pynccl_comm.group.barrier()
         self.model_runner.model.load_weights(weights=[(name, weight)]) # type: ignore
 

@@ -58,7 +58,7 @@ from .parsers.xml_parser import XMLParser
 from .rubrics.rubric import Rubric
 from .rubrics.judge_rubric import JudgeRubric
 from .rubrics.rubric_group import RubricGroup
-from .rubrics.math_rubric import MathRubric
+from .rubrics.tool_rubric import ToolRubric
 
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
@@ -116,8 +116,8 @@ __all__ = [
     "XMLParser",
     "Rubric",
     "JudgeRubric",
-    "MathRubric",
     "RubricGroup",
+    "ToolRubric",
     "Environment",
     "MultiTurnEnv",
     "SingleTurnEnv",

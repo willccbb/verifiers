@@ -20,7 +20,7 @@ class Parser:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def parse(self, text: str):
+    def parse(self, text: str) -> Any:
         return text
     
     def get_assistant_messages(self, completion: List[ChatMessage]) -> List[ChatMessage]:
