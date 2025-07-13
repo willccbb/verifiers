@@ -69,9 +69,9 @@ class GRPOConfig(TrainingArguments):
             "* gradient_accumulation_steps) must be evenly divisible by this value."
         },
     )
-    max_completion_length: int = field(
-        default=1024,
-        metadata={"help": "Maximum length of the generated completion."},
+    max_completion_length: Optional[int] = field(
+        default=None,
+        metadata={"help": "Deprecated. Use `max_seq_len` instead."},
     )
     ds3_gather_for_generation: bool = field(
         default=True,
@@ -99,6 +99,18 @@ class GRPOConfig(TrainingArguments):
         default=None,
         metadata={
             "help": "Number of optimization steps per generation. If `None`, it defaults to gradient_accumulation_steps."
+        },
+    )
+    max_tokens: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Maximum number of tokens to generate per turn."
+        },
+    )
+    max_seq_len: Optional[int] = field(
+        default=2048,
+        metadata={
+            "help": "Maximum number of tokens to generate per turn."
         },
     )
     temperature: float = field(
@@ -146,7 +158,7 @@ class GRPOConfig(TrainingArguments):
             "help": "Frequency penalty (default 0.0)"
         }, 
     )
-    max_num_processes: int = field(
+    max_data_workers: int = field(
         default=8,
         metadata={"help": "Maximum number of processes to use for filtering the dataset."},
     )

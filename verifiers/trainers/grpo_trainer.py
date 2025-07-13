@@ -264,10 +264,28 @@ class GRPOTrainer(Trainer):
         # Training arguments
         self.per_device_train_batch_size = args.per_device_train_batch_size
         self.max_prompt_length = args.max_prompt_length
+        self.max_seq_len = args.max_seq_len # max sequence length
         self.max_completion_length = args.max_completion_length  # = |o_i| in the GRPO paper
+        if self.max_completion_length is not None:
+            self.logger.warning("max_completion_length is deprecated. Use max_seq_len instead.")
+            if self.max_seq_len is None and self.max_prompt_length is not None:
+                self.max_seq_len = self.max_prompt_length + self.max_completion_length
+                self.logger.info(f"max_seq_len is set to {self.max_seq_len} (max_prompt_length={self.max_prompt_length} + max_completion_length={self.max_completion_length})")
+            else:
+                self.max_seq_len = self.max_completion_length
+                self.logger.info(f"max_seq_len is set to {self.max_seq_len} (max_completion_length={self.max_completion_length})")
+        if self.max_seq_len is None:
+            raise ValueError("max_seq_len is required when max_completion_length is not provided")
+        if self.max_prompt_length is None:
+            self.max_prompt_length = self.max_seq_len
+            self.logger.info(f"max_prompt_length is set to {self.max_prompt_length} (max_seq_len={self.max_seq_len})")
+        self.max_tokens = args.max_tokens # max tokens per generation
+        if self.max_tokens is None:
+            self.max_tokens = self.max_seq_len
+            self.logger.info(f"max_tokens is set to {self.max_tokens} (max_seq_len={self.max_seq_len})")
         self.num_generations = args.num_generations  # = G in the GRPO paper
         self.max_concurrent = args.max_concurrent
-        self.max_num_processes = args.max_num_processes
+        self.max_data_workers = args.max_data_workers
         self.temperature = args.temperature
         self.top_p = args.top_p
         self.min_p = args.min_p
@@ -318,7 +336,7 @@ class GRPOTrainer(Trainer):
                 return len(prompt_ids) <= max_length
             
             original_size = len(train_dataset)
-            train_dataset = train_dataset.filter(filter_by_prompt_length, num_proc=self.max_num_processes)
+            train_dataset = train_dataset.filter(filter_by_prompt_length, num_proc=self.max_data_workers)
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
                 self.logger.info(f"Filtered dataset from {original_size} to {filtered_size} examples ({original_size - filtered_size} prompts were too long)")
@@ -676,7 +694,7 @@ class GRPOTrainer(Trainer):
         args = {
             'temperature': self.temperature,
             'top_p': self.top_p,
-            'max_tokens': self.max_completion_length,
+            'max_tokens': self.max_tokens,
             'n': 1,
             'presence_penalty': self.presence_penalty,
             'frequency_penalty': self.frequency_penalty,
@@ -877,31 +895,32 @@ class GRPOTrainer(Trainer):
             all_advantages = self._compute_advantages(all_rewards)
             
             # Now create tensors only for this process's slice
-            prompt_ids_list = []
-            prompt_mask_list = []
-            completion_ids_list = []
-            completion_mask_list = []
+            input_ids_list = []
+            input_mask_list = []
             
             for i in range(process_slice.start, process_slice.stop):
-                prompt_ids_list.append(torch.tensor(broadcast_data['prompt_ids'][i], device=self.accelerator.device))
-                prompt_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i], device=self.accelerator.device))
-                completion_ids_list.append(torch.tensor(broadcast_data['completion_ids'][i], device=self.accelerator.device))
-                completion_mask_list.append(torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
-            # Pad sequences
-            prompt_ids = pad(prompt_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
-            prompt_mask = pad(prompt_mask_list, padding_side='left') # type: ignore
-            completion_ids = pad(completion_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-            completion_mask = pad(completion_mask_list)
-            
+                prompt_ids = torch.tensor(broadcast_data['prompt_ids'][i], device=self.accelerator.device)
+                prompt_mask = torch.tensor(broadcast_data['prompt_mask'][i], device=self.accelerator.device)
+                completion_ids = torch.tensor(broadcast_data['completion_ids'][i], device=self.accelerator.device)
+                completion_mask = torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device)
+                input_ids = torch.cat([prompt_ids, completion_ids], dim=0)
+                input_mask = torch.cat([prompt_mask, completion_mask], dim=0)
+                input_ids_list.append(input_ids)
+                input_mask_list.append(input_mask)
+
+            input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
+            input_mask = pad(input_mask_list, padding_side='right') # type: ignore
+
             # Truncate if needed
-            if self.max_prompt_length is not None and prompt_ids.size(1) > self.max_prompt_length:
-                prompt_ids = prompt_ids[:, -self.max_prompt_length:]
-                prompt_mask = prompt_mask[:, -self.max_prompt_length:]
-            
-            if self.max_completion_length is not None and completion_ids.size(1) > self.max_completion_length:
-                completion_ids = completion_ids[:, :self.max_completion_length]
-                completion_mask = completion_mask[:, :self.max_completion_length]
+            if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
+                input_ids = input_ids[:, -self.max_seq_len:]
+                input_mask = input_mask[:, -self.max_seq_len:]
+
+            # Truncate if needed
+            if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
+                input_ids = input_ids[:, -self.max_seq_len:]
+                input_mask = input_mask[:, -self.max_seq_len:]
             
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
@@ -931,10 +950,8 @@ class GRPOTrainer(Trainer):
             
             # Concatenate all data for shuffling
             full_batch = {
-                "prompt_ids": prompt_ids,
-                "prompt_mask": prompt_mask,
-                "completion_ids": completion_ids,
-                "completion_mask": completion_mask,
+                "input_ids": input_ids,
+                "input_mask": input_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
             }
@@ -976,12 +993,9 @@ class GRPOTrainer(Trainer):
                      num_items_in_batch: int | None = None) -> torch.Tensor:  # type: ignore
         mode = "train" 
         # Compute the per-token log probabilities for the model
-        prompt_ids, prompt_mask = inputs["prompt_ids"], inputs["prompt_mask"]
-        completion_ids, completion_mask = inputs["completion_ids"], inputs["completion_mask"]
-        input_ids = torch.cat([prompt_ids, completion_ids], dim=1)
-        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
-        logits_to_keep = completion_ids.size(1)  # we only need to compute the logits for the completion tokens
-        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
+        input_ids, input_mask = inputs["input_ids"], inputs["input_mask"]
+        logits_to_keep = input_ids.size(1)
+        per_token_logps = self._get_per_token_logps(model, input_ids, input_mask, logits_to_keep)
 
         # Compute the loss
         advantages = inputs["advantages"]
@@ -1008,26 +1022,26 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep
+                        self.ref_model, input_ids, input_mask, logits_to_keep
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter(): # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep
+                            self.model, input_ids, input_mask, logits_to_keep
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
             )
             per_token_loss = per_token_loss + self.beta * per_token_kl
-            mean_kl = (per_token_kl * completion_mask).sum() / completion_mask.sum()
+            mean_kl = (per_token_kl * input_mask).sum() / input_mask.sum()
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).nanmean().item()) # type: ignore
 
         if self.loss_type == "grpo":
-            loss = ((per_token_loss * completion_mask).sum(-1) / completion_mask.sum(-1).clamp(min=1.0)).mean()
+            loss = ((per_token_loss * input_mask).sum(-1) / input_mask.sum(-1).clamp(min=1.0)).mean()
         elif self.loss_type == "bnpo":
-            loss = (per_token_loss * completion_mask).sum() / completion_mask.sum().clamp(min=1.0)
+            loss = (per_token_loss * input_mask).sum() / input_mask.sum().clamp(min=1.0)
         elif self.loss_type == "dr_grpo":
-            loss = (per_token_loss * completion_mask).sum() / (per_token_loss.size(0) * self.max_completion_length) # type: ignore
+            loss = (per_token_loss * input_mask).sum() / (per_token_loss.size(0) * self.max_completion_length) # type: ignore
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
 
@@ -1036,9 +1050,9 @@ class GRPOTrainer(Trainer):
         is_high_clipped = (coef_1 > 1 + self.epsilon_high) & (advantages.unsqueeze(1) > 0)
         is_region_clipped = is_low_clipped | is_high_clipped
 
-        low_clip = (is_low_clipped * completion_mask).sum() / completion_mask.sum()
-        high_clip = (is_high_clipped * completion_mask).sum() / completion_mask.sum()
-        clip_ratio = (is_region_clipped * completion_mask).sum() / completion_mask.sum()
+        low_clip = (is_low_clipped * input_mask).sum() / input_mask.sum()
+        high_clip = (is_high_clipped * input_mask).sum() / input_mask.sum()
+        clip_ratio = (is_region_clipped * input_mask).sum() / input_mask.sum()
 
         gathered_low_clip = self.accelerator.gather_for_metrics(low_clip)
         self._metrics[mode]["clip_ratio/low_mean"].append(gathered_low_clip.nanmean().item()) # type: ignore

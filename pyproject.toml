@@ -43,6 +43,7 @@ all = [
     "nest-asyncio>=1.6.0",
     "ipykernel",
     "ipywidgets",
+    "math-verify==0.8.0",
     "duckduckgo-search",
     "brave-search",
     "reasoning-gym",
@@ -71,6 +72,7 @@ jupyter = [
 ]
 
 envs = [
+    "math-verify==0.8.0",
     "requests",
     "duckduckgo-search",
     "brave-search",
