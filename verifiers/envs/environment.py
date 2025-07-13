@@ -436,8 +436,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         states: List[State],
         rewards: List[float],
         processing_class: "PreTrainedTokenizerBase",
-        max_completion_length: int = -1,
-        max_seq_length: int = -1,
+        max_seq_len: int = -1,
         mask_truncated_completions: bool = False,
         mask_env_responses: bool = False,
     ) -> ProcessedOutputs:
@@ -467,18 +466,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                     prompt, completion, processing_class
                 )
             is_truncated = False
-            if max_completion_length > 0 and len(completion_ids) > max_completion_length:
-                completion_ids = completion_ids[:max_completion_length]
-                completion_mask = completion_mask[:max_completion_length]
+            if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
+                if len(prompt_ids) > max_seq_len:
+                    prompt_ids = prompt_ids[:max_seq_len]
+                completion_ids = completion_ids[:max_seq_len - len(prompt_ids)]
+                completion_mask = completion_mask[:max_seq_len - len(prompt_ids)]
                 is_truncated = True
-            if max_seq_length > 0 and len(prompt_ids) + len(completion_ids) > max_seq_length:
-                if len(prompt_ids) > max_seq_length:
-                    prompt_ids = prompt_ids[:max_seq_length]
-                completion_ids = completion_ids[:max_seq_length - len(prompt_ids)]
-                completion_mask = completion_mask[:max_seq_length - len(prompt_ids)]
-                is_truncated = True
-                assert len(prompt_ids) + len(completion_ids) <= max_seq_length, \
-                    f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_length: {max_seq_length}"
+                assert len(prompt_ids) + len(completion_ids) <= max_seq_len, \
+                    f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_len: {max_seq_len}"
             if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
             assert len(prompt_ids) == len(prompt_mask), \

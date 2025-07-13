@@ -591,23 +591,27 @@ class GRPOTrainer(Trainer):
     def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
         all_logps = []
+        self.logger.info(f"input_ids.shape: {input_ids.shape}, attention_mask.shape: {attention_mask.shape}")
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
-
-            # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
+            self.logger.info(f"input_ids_batch.shape: {input_ids_batch.shape}, attention_mask_batch.shape: {attention_mask_batch.shape}")
             logits = model(
                 input_ids=input_ids_batch, attention_mask=attention_mask_batch, logits_to_keep=logits_to_keep + 1
             ).logits
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
+            self.logger.info(f"logits.shape: {logits.shape}")
             input_ids_batch = input_ids_batch[:, -logits_to_keep:]
+            self.logger.info(f"input_ids_batch.shape: {input_ids_batch.shape}")
             # For transformers<=4.48, logits_to_keep argument isn't supported, so here we drop logits ourselves.
             # See https://github.com/huggingface/trl/issues/2770
             logits = logits[:, -logits_to_keep:]
+            self.logger.info(f"logits.shape: {logits.shape}")
             # Divide logits by sampling temperature.
             # See https://huggingface.co/blog/the_n_implementation_details_of_rlhf_with_ppo#policy-training-implementation-details
             logits = logits / self.temperature
             logps = selective_log_softmax(logits, input_ids_batch)  # compute logprobs for the input tokens
+            self.logger.info(f"logps.shape: {logps.shape}")
             all_logps.append(logps)
         return torch.cat(all_logps, dim=0)
 
@@ -833,7 +837,7 @@ class GRPOTrainer(Trainer):
                         env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks, 'info': all_infos},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
-                        max_completion_length=self.max_completion_length,
+                        max_seq_len=self.max_seq_len,
                         mask_truncated_completions=self.mask_truncated_completions,
                         max_concurrent=self.max_concurrent,
                         device=self.accelerator.device,
@@ -899,29 +903,17 @@ class GRPOTrainer(Trainer):
             input_mask_list = []
             
             for i in range(process_slice.start, process_slice.stop):
+                input_ids_list.append(torch.tensor(broadcast_data['prompt_ids'][i] + broadcast_data['completion_ids'][i], device=self.accelerator.device))
+                input_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i] + broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
-                prompt_ids = torch.tensor(broadcast_data['prompt_ids'][i], device=self.accelerator.device)
-                prompt_mask = torch.tensor(broadcast_data['prompt_mask'][i], device=self.accelerator.device)
-                completion_ids = torch.tensor(broadcast_data['completion_ids'][i], device=self.accelerator.device)
-                completion_mask = torch.tensor(broadcast_data['completion_mask'][i], device=self.accelerator.device)
-                input_ids = torch.cat([prompt_ids, completion_ids], dim=0)
-                input_mask = torch.cat([prompt_mask, completion_mask], dim=0)
-                input_ids_list.append(input_ids)
-                input_mask_list.append(input_mask)
-
-            input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-            input_mask = pad(input_mask_list, padding_side='right') # type: ignore
+            input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
+            input_mask = pad(input_mask_list, padding_side='left') # type: ignore
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
                 input_ids = input_ids[:, -self.max_seq_len:]
                 input_mask = input_mask[:, -self.max_seq_len:]
-
-            # Truncate if needed
-            if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
-                input_ids = input_ids[:, -self.max_seq_len:]
-                input_mask = input_mask[:, -self.max_seq_len:]
-            
+ 
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
             
@@ -994,9 +986,9 @@ class GRPOTrainer(Trainer):
         mode = "train" 
         # Compute the per-token log probabilities for the model
         input_ids, input_mask = inputs["input_ids"], inputs["input_mask"]
-        logits_to_keep = input_ids.size(1)
+        logits_to_keep = input_ids.size(1) - 1
         per_token_logps = self._get_per_token_logps(model, input_ids, input_mask, logits_to_keep)
-
+        self.logger.info(f"per_token_logps.shape: {per_token_logps.shape}")
         # Compute the loss
         advantages = inputs["advantages"]
         # When using num_iterations == 1, old_per_token_logps == per_token_logps,
@@ -1017,6 +1009,7 @@ class GRPOTrainer(Trainer):
         per_token_loss2 = coef_2 * advantages.unsqueeze(1)
         per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
         
+        self.logger.info(f"per_token_loss.shape: {per_token_loss.shape}, input_mask.shape: {input_mask.shape}, advantages.shape: {advantages.shape}")
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
             with torch.no_grad():
@@ -1035,7 +1028,6 @@ class GRPOTrainer(Trainer):
             per_token_loss = per_token_loss + self.beta * per_token_kl
             mean_kl = (per_token_kl * input_mask).sum() / input_mask.sum()
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).nanmean().item()) # type: ignore
-
         if self.loss_type == "grpo":
             loss = ((per_token_loss * input_mask).sum(-1) / input_mask.sum(-1).clamp(min=1.0)).mean()
         elif self.loss_type == "bnpo":
