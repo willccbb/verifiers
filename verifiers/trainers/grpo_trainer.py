@@ -900,19 +900,19 @@ class GRPOTrainer(Trainer):
             
             # Now create tensors only for this process's slice
             input_ids_list = []
-            input_mask_list = []
+            attention_mask_list = []
             
             for i in range(process_slice.start, process_slice.stop):
                 input_ids_list.append(torch.tensor(broadcast_data['prompt_ids'][i] + broadcast_data['completion_ids'][i], device=self.accelerator.device))
-                input_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i] + broadcast_data['completion_mask'][i], device=self.accelerator.device))
+                attention_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i] + broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
             input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
-            input_mask = pad(input_mask_list, padding_side='right') # type: ignore
+            attention_mask = pad(attention_mask_list, padding_side='right') # type: ignore
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
                 input_ids = input_ids[:, -self.max_seq_len:]
-                input_mask = input_mask[:, -self.max_seq_len:]
+                attention_mask = attention_mask[:, -self.max_seq_len:]
  
             # Take this process's slice of advantages
             advantages = all_advantages[process_slice]
@@ -943,7 +943,7 @@ class GRPOTrainer(Trainer):
             # Concatenate all data for shuffling
             full_batch = {
                 "input_ids": input_ids,
-                "input_mask": input_mask,
+                "attention_mask": attention_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
             }
