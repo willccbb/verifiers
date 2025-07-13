@@ -2,27 +2,6 @@ from datasets import load_dataset
 import verifiers as vf
 from transformers.trainer_callback import TrainerCallback
 
-# Resource tracking
-import os
-import psutil
-import threading
-import logging
-
-def log_resources(step_num):
-    """Log current resource usage for debugging"""
-    process = psutil.Process(os.getpid())
-    num_threads = threading.active_count()
-    num_fds = process.num_fds() if hasattr(process, 'num_fds') else 0
-    memory_mb = process.memory_info().rss / 1024 / 1024
-    connections = len(process.connections())
-    print(f"[Step {step_num}] Threads: {num_threads}, FDs: {num_fds}, Memory: {memory_mb:.1f}MB, Connections: {connections}")
-
-# Add a custom callback to track resources
-class ResourceTrackingCallback(TrainerCallback):
-    def on_step_begin(self, args, state, control, **kwargs):
-        log_resources(state.global_step)
-
-#model = 'Qwen/Qwen2.5-1.5B-Instruct'
 """
 inference:
 CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT
@@ -76,7 +55,7 @@ args = vf.grpo_defaults(run_name='reverse_text_warmup')
 args.per_device_train_batch_size = 12
 args.num_generations = 4
 args.num_iterations = 2
-args.num_train_epochs = 2
+args.num_train_epochs = 1
 args.gradient_accumulation_steps = 3
 args.max_steps = 100
 
@@ -85,8 +64,7 @@ trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
     env=vf_env,
-    #peft_config=vf.lora_defaults(),
+    peft_config=vf.lora_defaults(),
     args=args,
-    callbacks=[ResourceTrackingCallback()]
 )
 trainer.train()

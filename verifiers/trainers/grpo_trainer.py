@@ -348,6 +348,8 @@ class GRPOTrainer(Trainer):
             if truncated_dataset_size < dataset_size:
                 self.logger.info(f"Truncating dataset from {dataset_size} to {truncated_dataset_size} examples ({dataset_size - truncated_dataset_size} examples were too long)")
                 self.train_dataset = self.train_dataset.select(range(truncated_dataset_size))
+            self.logger.info(f"Batches per epoch: {truncated_dataset_size / global_batch_size}")
+            self.logger.info(f"Steps per epoch: {truncated_dataset_size / global_batch_size * self.num_iterations} (num_iterations={self.num_iterations})")
 
         # Reference model
         if self.beta == 0.0:
@@ -487,8 +489,7 @@ class GRPOTrainer(Trainer):
         # Store the wrapped dataloader for async access
         self._async_dataloader = AsyncDataLoaderWrapper(
             dataloader, 
-            buffer_size=max(5, self.num_batches_ahead * 2),
-            gradient_accumulation_steps=self.gradient_accumulation_steps
+            buffer_size=max(5, self.num_batches_ahead * 2)
         )
         return self.accelerator.prepare(self._async_dataloader)
 
@@ -775,7 +776,7 @@ class GRPOTrainer(Trainer):
                 self.logger.info(f"Syncing weights to vLLM at step {self.state.global_step}")
                 self._move_model_to_vllm()
                 self._last_loaded_step = self.state.global_step
-            
+
             # Start async generator if not started
             if not self._async_started and self.accelerator.is_main_process:
                 self.async_generator.start()
@@ -798,9 +799,9 @@ class GRPOTrainer(Trainer):
             target_batch_id = min(target_batch_id, max_batch_id)
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
-                first_step_for_batch = batch_id * steps_per_batch
-                if first_step_for_batch >= self.state.max_steps:
-                    self.logger.info(f"Reached max steps {self.state.max_steps}, stopping batch generation")
+                first_grad_step_for_batch = batch_id * steps_per_batch
+                if first_grad_step_for_batch >= self.state.max_steps * self.gradient_accumulation_steps:
+                    self.logger.info(f"Reached max global steps {self.state.max_steps}, stopping batch generation")
                     break
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)

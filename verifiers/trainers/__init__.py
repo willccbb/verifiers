@@ -9,7 +9,6 @@ def grpo_defaults(run_name: str) -> GRPOConfig:
         learning_rate=1e-6,
         lr_scheduler_type="constant_with_warmup",
         warmup_steps=10,
-        num_train_epochs=1,
         max_steps=500,
         bf16=True,
         max_grad_norm=0.001,
