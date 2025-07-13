@@ -12,6 +12,8 @@ nltk.download = lambda *args, **kwargs: _original_nltk_download(*args, **{**kwar
 import textarena as ta 
 
 from verifiers import (
+    Message,
+    Messages,
     ChatMessage,
     State,
     MultiTurnEnv,
@@ -38,6 +40,8 @@ class TextArenaEnv(MultiTurnEnv):
                  game: str = "Wordle-v0",
                  num_samples: int = 1000,
                  num_eval_samples: int = 100,
+                 system_prompt: str = GUESS_SYSTEM_PROMPT,
+                 parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
                  seed: int = 0,
                  **kwargs):
         self.game = game
@@ -48,7 +52,6 @@ class TextArenaEnv(MultiTurnEnv):
         nltk.download('words', quiet=True)
         nltk.download('averaged_perceptron_tagger_eng', quiet=True)
         dataset, eval_dataset = self.ta_to_hf()
-        parser = XMLParser(fields=["think", "guess"], answer_field="guess")
         rubric = Rubric(parser=parser)
         def check_answer_reward_func(completion, answer, **kwargs) -> float:
             guess = self.parser.parse_answer(completion)
@@ -64,7 +67,7 @@ class TextArenaEnv(MultiTurnEnv):
         super().__init__(
             dataset=dataset,
             eval_dataset=eval_dataset,
-            system_prompt=GUESS_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             parser=parser,
             rubric=rubric,
             message_type='chat',
@@ -74,7 +77,7 @@ class TextArenaEnv(MultiTurnEnv):
         self.rubric = rubric
 
     def is_completed(self,
-                     messages: List[ChatMessage],
+                     messages: Messages,
                      state: State,
                      **kwargs: Any) -> bool:
         if 'is_finished' in state and state['is_finished']:
@@ -83,9 +86,9 @@ class TextArenaEnv(MultiTurnEnv):
         return False
 
     def env_response(self,
-                     messages: List[ChatMessage],
+                     messages: Messages,
                      state: State,
-                     **kwargs: Any) -> Tuple[ChatMessage, State]:
+                     **kwargs: Any) -> Tuple[Message, State]:
         # load env 
         if 'ta_env' not in state:
             ta_env = ta.make(env_id=self.game)
@@ -95,6 +98,7 @@ class TextArenaEnv(MultiTurnEnv):
         else:
             ta_env = state['ta_env']
         # parse guess
+        assert isinstance(messages[-1], dict) 
         turn = self.parser.parse(messages[-1]["content"])
         guess = turn.guess
         # step env
