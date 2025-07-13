@@ -1018,12 +1018,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, completion_mask, logits_to_keep
+                        self.ref_model, input_ids, attention_mask, logits_to_keep
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter(): # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, completion_mask, logits_to_keep
+                            self.model, input_ids, attention_mask, logits_to_keep
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
