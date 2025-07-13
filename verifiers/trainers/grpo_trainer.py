@@ -132,6 +132,54 @@ class RepeatSampler(Sampler):
         return self.num_samples * self.mini_repeat_count * self.repeat_count
 
 
+class DistributedRepeatSampler(RepeatSampler):
+    def __init__(
+        self,
+        data_source: Sized,
+        mini_repeat_count: int,
+        batch_size: int,
+        repeat_count: int,
+        shuffle: bool = True,
+        seed: Optional[int] = None,
+        rank: int = 0,
+        num_replicas: int = 1,
+    ):
+        super().__init__(
+            data_source,
+            mini_repeat_count,
+            batch_size,
+            repeat_count,
+            shuffle,
+            seed,
+        )
+        self.rank = rank
+        self.num_replicas = num_replicas
+        # Adjust num_samples for sharded size
+        self.num_samples = (len(data_source) + num_replicas - 1) // num_replicas  # Ceiling division for balance
+
+    def __iter__(self):
+        if self.shuffle:
+            indexes = torch.randperm(len(self.data_source), generator=self.generator).tolist()
+        else:
+            indexes = list(range(len(self.data_source)))
+
+        # Shard the indexes
+        sharded_indexes = indexes[self.rank : len(indexes) : self.num_replicas]
+
+        # Chunk the sharded indexes
+        chunks = [sharded_indexes[i : i + self.batch_size] for i in range(0, len(sharded_indexes), self.batch_size)]
+        chunks = [chunk for chunk in chunks if len(chunk) == self.batch_size]
+
+        for chunk in chunks:
+            for _ in range(self.repeat_count):
+                for index in chunk:
+                    for _ in range(self.mini_repeat_count):
+                        yield index
+
+    def __len__(self) -> int:
+        return self.num_samples * self.mini_repeat_count * self.repeat_count
+
+
 # torch.nanstd doesn't exist, so we define it here
 def nanstd(tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -517,13 +565,15 @@ class GRPOTrainer(Trainer):
         #                      2          5    15  15  16  16  17  17   <- Take the stored generations and use the second slice to compute the loss
         #                                          ...
 
-        return RepeatSampler(
+        return DistributedRepeatSampler(
             data_source=self.train_dataset, # type: ignore
             mini_repeat_count=self.num_generations,
-            batch_size=self.generation_batch_size // self.num_generations,
+            batch_size=self.generation_batch_size // self.num_generations // self.accelerator.num_processes,
             repeat_count=self.num_iterations * self.gradient_accumulation_steps,
             shuffle=self.shuffle_dataset,
             seed=self.args.seed,
+            rank=self.accelerator.process_index,
+            num_replicas=self.accelerator.num_processes,
         )
 
     def _enable_gradient_checkpointing(self, model: PreTrainedModel, args: GRPOConfig) -> PreTrainedModel:
