@@ -338,10 +338,12 @@ class GRPOTrainer(Trainer):
         )
 
         if self.train_dataset is not None:
-            unique_prompts_per_device_batch = self.per_device_train_batch_size // self.num_generations
+            unique_prompts_per_device_batch = self.per_device_train_batch_size / self.num_generations
             unique_prompts_per_gradient_step = unique_prompts_per_device_batch * self.gradient_accumulation_steps
             global_batch_size = unique_prompts_per_gradient_step * self.accelerator.num_processes
             dataset_size = len(self.train_dataset) # type: ignore
+            self.logger.info(f"Dataset size: {dataset_size}, global batch size: {global_batch_size}")
+            self.logger.info(f"Unique prompts per device batch: {unique_prompts_per_device_batch}, unique prompts per gradient step: {unique_prompts_per_gradient_step}")
             truncated_dataset_size = (dataset_size // global_batch_size) * global_batch_size
             if truncated_dataset_size < dataset_size:
                 self.logger.info(f"Truncating dataset from {dataset_size} to {truncated_dataset_size} examples ({dataset_size - truncated_dataset_size} examples were too long)")

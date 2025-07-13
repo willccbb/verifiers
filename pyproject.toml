@@ -32,6 +32,7 @@ all = [
     "requests",
     "torch>=2.6.0",
     "transformers",
+    "deepspeed==0.17.0",
     "accelerate>=1.4.0",
     "peft",
     "wandb",
