@@ -13,7 +13,6 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs
 
 model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
-# evaluate on the first 32 examples, train on the rest
 TRAIN_SIZE = 100
 EVAL_SIZE = 10
 train_dataset = dataset.select(range(TRAIN_SIZE)) # type: ignore
