@@ -304,12 +304,11 @@ class Environment(ABC):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
         coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, **kwargs)
         
-        def setup_executor(loop):
-            loop.set_default_executor(ThreadPoolExecutor(max_workers=self.max_workers))
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
         
         try:
             loop = asyncio.new_event_loop()
-            setup_executor(loop)
+            loop.set_default_executor(executor)
             asyncio.set_event_loop(loop)
             try:
                 return loop.run_until_complete(coro)
@@ -320,8 +319,11 @@ class Environment(ABC):
             import nest_asyncio # type: ignore
             nest_asyncio.apply()
             loop = asyncio.get_running_loop()
-            setup_executor(loop)
+            loop.set_default_executor(executor)
             return loop.run_until_complete(coro)
+        finally:
+            # Critical: shutdown the executor to prevent thread leaks
+            executor.shutdown(wait=False)
     
     def process_chat_format(
         self,
