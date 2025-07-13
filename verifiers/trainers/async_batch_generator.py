@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import time
 import torch
 from collections import deque
+import asyncio
 
 
 @dataclass
@@ -65,6 +66,7 @@ class AsyncBatchGenerator:
         # Queues for communication
         self.request_queue = queue.Queue()
         self.result_queue = queue.Queue(maxsize=self.max_queue_size)
+        self.is_generating = False
         
         # Tracking
         self.pending_batches = set()  # batch_ids currently being processed
@@ -196,29 +198,39 @@ class AsyncBatchGenerator:
             
     def _generation_worker(self):
         """Worker thread that processes generation requests"""
-        while not self.stop_event.is_set():
-            try:
-                # Get next request
-                request = self.request_queue.get(timeout=0.1)
-                if request is None:  # Poison pill
-                    break
+        # Create event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    # Get next request
+                    request = self.request_queue.get(timeout=0.1)
+                    if request is None:  # Poison pill
+                        break
 
-                # Generate batch
-                start_time = time.time()
-                result = self._generate_batch(request)
-                generation_time = time.time() - start_time
-                result.generation_time = generation_time
-                self.generation_times.append(generation_time)
-                self.result_queue.put(result)
-            except queue.Empty:
-                continue
+                    # Generate batch using the async method
+                    start_time = time.time()
+                    result = loop.run_until_complete(self._generate_batch_async(request))
+                    generation_time = time.time() - start_time
+                    result.generation_time = generation_time
+                    self.generation_times.append(generation_time)
+                    self.result_queue.put(result)
+                except queue.Empty:
+                    continue
+        finally:
+            # Clean up the event loop
+            loop.close()
+            asyncio.set_event_loop(None)
 
-    def _generate_batch(self, request: BatchRequest) -> BatchResult:
+    async def _generate_batch_async(self, request: BatchRequest) -> BatchResult:
         """
-        Generate a single batch. This runs in the worker thread.
+        Generate a single batch asynchronously.
         """
         # Call environment generation
-        env_results = self.env.generate(
+        self.is_generating = True
+        env_results = await self.env.a_generate(
             request.env_inputs,
             client=self.client,
             model=self.model_name,
@@ -226,7 +238,7 @@ class AsyncBatchGenerator:
             score_rollouts=True,
             max_concurrent=request.max_concurrent,
         )
-
+        self.is_generating = False
         
         # Extract all reward-related keys
         all_reward_dict = {}

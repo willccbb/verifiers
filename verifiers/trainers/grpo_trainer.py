@@ -601,6 +601,13 @@ class GRPOTrainer(Trainer):
         else:
             gather_if_zero3 = nullcontext
 
+        # check if background batch generation is complete
+        if self.accelerator.is_main_process:
+            while self.async_generator.is_generating:
+                time.sleep(0.5)
+                self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background batch generation to complete")
+        
+
         # Ensure all processes are synchronized before weight update
         self.accelerator.wait_for_everyone()
         self.logger.info(f"Process {self.accelerator.process_index}: Starting weight sync to vLLM")
