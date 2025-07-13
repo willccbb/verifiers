@@ -1,6 +1,5 @@
 from datasets import load_dataset
 import verifiers as vf
-from transformers.trainer_callback import TrainerCallback
 
 """
 inference:
