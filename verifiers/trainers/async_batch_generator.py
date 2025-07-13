@@ -6,7 +6,6 @@ import time
 import torch
 from collections import deque
 import asyncio
-import logging
 
 from verifiers import GenerateOutputs
 
@@ -232,9 +231,7 @@ class AsyncBatchGenerator:
 
                     # Generate batch using the async method
                     start_time = time.time()
-                    self.logger.info(f"Generating batch {request.batch_id}")
                     result = loop.run_until_complete(self._generate_batch_async(request))
-                    self.logger.info(f"Generated batch {request.batch_id}")
                     generation_time = time.time() - start_time
                     result.generation_time = generation_time
                     self.generation_times.append(generation_time)

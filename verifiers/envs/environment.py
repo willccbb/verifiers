@@ -50,9 +50,7 @@ class Environment(ABC):
         self.message_type: Literal['chat', 'completion'] = message_type
         self.system_prompt = system_prompt
         self.few_shot = few_shot
-        
-        self.batches_processed = 0
-        
+         
         if self.message_type == 'chat':
             if dataset is not None:
                 self.dataset = self.format_dataset(dataset, self.system_prompt, self.few_shot)
@@ -269,7 +267,6 @@ class Environment(ABC):
         if 'info' not in results:
             results['info'] = [{}] * len(results['prompt'])
 
-        self.logger.info(f"Running {len(results['prompt'])} rollouts (run_rollouts) for batch {self.batches_processed}")
         rollouts = await self.run_rollouts( 
             prompts=results['prompt'],
             answers=results['answer'],
@@ -280,7 +277,6 @@ class Environment(ABC):
             sampling_args=gen_sampling_args,
             **kwargs
         )
-        self.logger.info(f"Ran {len(rollouts)} rollouts (run_rollouts) for batch {self.batches_processed}")
         results['completion'] = [rollout[0] for rollout in rollouts]
         results['state'] = [rollout[1] for rollout in rollouts]
         if score_rollouts:
@@ -458,7 +454,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         all_prompt_masks = []
         all_completion_ids = []
         all_completion_masks = []
-        self.logger.info(f"Processing {len(prompts)} results (process_env_results) for batch {self.batches_processed}")
         for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
             # Format-specific processing
             if is_chat_format:
@@ -494,8 +489,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
             all_completion_masks.append(completion_mask)
-        self.logger.info(f"Processed {len(all_prompt_ids)} results (process_env_results) for batch {self.batches_processed}")
-        self.batches_processed += 1
         return {
             "prompt_ids": all_prompt_ids,
             "prompt_mask": all_prompt_masks,

@@ -350,7 +350,7 @@ class GRPOTrainer(Trainer):
                 self.train_dataset = self.train_dataset.select(range(truncated_dataset_size))
             self.logger.info(f"Batches per epoch: {truncated_dataset_size / global_batch_size}")
             self.logger.info(f"Steps per epoch: {truncated_dataset_size / global_batch_size * self.num_iterations} (num_iterations={self.num_iterations})")
-
+            self.logger.info(f"Number of epochs: {self.state.max_steps / (truncated_dataset_size / global_batch_size * self.num_iterations)}")
         # Reference model
         if self.beta == 0.0:
             # If beta is 0.0, the reference model is not needed
@@ -764,8 +764,6 @@ class GRPOTrainer(Trainer):
         """
         # Ensure all processes are synchronized at the start
         self.accelerator.wait_for_everyone()
-        self.logger.info(f"Preparing trainer inputs at step {self._step} (prepare_inputs)")
-        self.logger.info(f"Next batch id: {self._next_batch_id}")
         # inputs = list of dicts for all gradient accumulation steps 
         generate_every = self.gradient_accumulation_steps * self.num_iterations
  
@@ -801,7 +799,7 @@ class GRPOTrainer(Trainer):
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 first_grad_step_for_batch = batch_id * steps_per_batch
                 if first_grad_step_for_batch >= self.state.max_steps * self.gradient_accumulation_steps:
-                    self.logger.info(f"Reached max global steps {self.state.max_steps}, stopping batch generation")
+                    self.logger.info(f"Reached max global steps ({self.state.max_steps}), stopping batch generation")
                     break
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
@@ -827,7 +825,6 @@ class GRPOTrainer(Trainer):
                         local_batch_size=local_batch_size,
                     )
                     self.async_generator.submit_batch(request)
-                    self.logger.info(f"Submitted batch {batch_id} with {len(all_prompts)} prompts (num processes: {self.accelerator.num_processes})")
                     batches_submitted += 1
                 self.accelerator.wait_for_everyone()
 
