@@ -35,8 +35,9 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs
 model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
 # evaluate on the first 32 examples, train on the rest
-eval_dataset = dataset.select(range(32)) # type: ignore
-train_dataset = dataset.select(range(32, len(dataset))) # type: ignore
+EVAL_SIZE = 0
+eval_dataset = dataset.select(range(EVAL_SIZE)) # type: ignore
+train_dataset = dataset.select(range(EVAL_SIZE, len(dataset))) # type: ignore
 
 parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
 system_prompt = f"""Reverse the given text.

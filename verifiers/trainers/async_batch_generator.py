@@ -69,7 +69,7 @@ class AsyncBatchGenerator:
         
         # Queues for communication
         self.request_queue = queue.Queue()
-        self.result_queue = queue.Queue(maxsize=self.max_queue_size)
+        self.result_queue = queue.Queue()
         self.is_generating = False
         
         # Tracking
@@ -232,13 +232,18 @@ class AsyncBatchGenerator:
 
                     # Generate batch using the async method
                     start_time = time.time()
+                    self.logger.info(f"Generating batch {request.batch_id}")
                     result = loop.run_until_complete(self._generate_batch_async(request))
+                    self.logger.info(f"Generated batch {request.batch_id}")
                     generation_time = time.time() - start_time
                     result.generation_time = generation_time
                     self.generation_times.append(generation_time)
                     self.result_queue.put(result)
                 except queue.Empty:
                     continue
+                except Exception as e:
+                    self.logger.error(f"Error in generation worker: {e}")
+                    raise e
         finally:
             # Clean up the client
             if self.client:
