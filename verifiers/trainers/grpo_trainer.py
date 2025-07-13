@@ -661,6 +661,12 @@ class GRPOTrainer(Trainer):
         if self.accelerator.is_main_process:
             self.vllm_client.reset_prefix_cache()
 
+        # Wait for all background tasks to complete
+        if self.accelerator.is_main_process:
+            while self.vllm_client.get_num_background_tasks() > 0:
+                time.sleep(0.5)
+                self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background tasks to complete")
+
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
     

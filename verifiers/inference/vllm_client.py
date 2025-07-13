@@ -75,8 +75,8 @@ class VLLMClient(AsyncOpenAI):
         self.session = requests.Session()
         # Configure connection pooling to handle rapid requests better
         adapter = HTTPAdapter(
-            pool_connections=1024,
-            pool_maxsize=1024,
+            pool_connections=10,
+            pool_maxsize=10,
             max_retries=3,
             pool_block=False
         )
@@ -212,6 +212,14 @@ class VLLMClient(AsyncOpenAI):
         response = self.session.post(url)
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
+
+    def get_num_background_tasks(self):
+        """
+        Gets the number of background tasks.
+        """
+        url = f"{self.server_url}/get_num_background_tasks"
+        response = self.session.post(url)
+        return response.json()["num_background_tasks"]
 
     def close_communicator(self):
         """

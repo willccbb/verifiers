@@ -35,7 +35,7 @@ from vllm.usage.usage_lib import UsageContext
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 # Weight update throttling
-MAX_CONCURRENT_WEIGHT_UPDATES = 10
+MAX_CONCURRENT_WEIGHT_UPDATES = 100
 weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
@@ -187,6 +187,10 @@ async def run_server(args: Namespace):
         create_background_task(engine.reset_prefix_cache())
         return {"status": "ok"}
 
+    @app.post("/get_num_background_tasks")
+    async def get_num_background_tasks():
+        return {"num_background_tasks": len(background_tasks)}
+    
     @app.post("/close_communicator")
     async def close_communicator(request: Request):
         # fire and forget
