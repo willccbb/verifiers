@@ -317,15 +317,75 @@ class AsyncBatchGenerator:
 
     def evaluate(self, num_samples: int = -1) -> GenerateOutputs:
         """
-        Run evaluation synchronously by submitting to worker thread.
+        Run evaluation synchronously by creating a separate thread with its own event loop.
         """
-        if self.worker_loop is None:
+        if not self.started:
             raise RuntimeError("AsyncBatchGenerator not started")
         
-        # Create a special evaluation request
-        eval_future = asyncio.run_coroutine_threadsafe(
-            self._evaluate_async(num_samples),
-            self.worker_loop
-        )
-        # Wait for evaluation to complete
-        return eval_future.result(timeout=self.generation_timeout) 
+        # Run evaluation in a separate thread to avoid event loop conflicts
+        result_container = []
+        exception_container = []
+        
+        def run_evaluation():
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Create a new client for this evaluation
+            import httpx
+            from openai import AsyncOpenAI
+            eval_client = AsyncOpenAI(
+                base_url=self.client_config['base_url'],
+                api_key=self.client_config['api_key'],
+                http_client=httpx.AsyncClient(
+                    limits=httpx.Limits(max_connections=self.client_config['http_client_args']['limits']['max_connections']),
+                    timeout=self.client_config['http_client_args']['timeout']
+                )
+            )
+            
+            async def run_eval():
+                try:
+                    # Get evaluation dataset
+                    if self.env.eval_dataset is None:
+                        self.env.logger.info('eval_dataset is not set, falling back to train dataset')
+                        assert self.env.dataset is not None
+                        inputs = self.env.get_dataset(n=num_samples)
+                    else:
+                        inputs = self.env.get_eval_dataset(n=num_samples)
+                    assert inputs is not None, 'No dataset found'
+                    
+                    # Run generation on eval dataset
+                    results = await self.env.a_generate(
+                        inputs, 
+                        client=eval_client, 
+                        model=self.model_name, 
+                        sampling_args=self.sampling_args
+                    )
+                    result_container.append(results)
+                except Exception as e:
+                    exception_container.append(e)
+                finally:
+                    await eval_client.close()
+            
+            try:
+                loop.run_until_complete(run_eval())
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+        
+        # Run evaluation in a separate thread
+        import threading
+        eval_thread = threading.Thread(target=run_evaluation)
+        eval_thread.start()
+        eval_thread.join(timeout=self.generation_timeout)
+        
+        if eval_thread.is_alive():
+            raise TimeoutError(f"Evaluation timed out after {self.generation_timeout}s")
+        
+        if exception_container:
+            raise exception_container[0]
+ 
+        if not result_container:
+            raise RuntimeError("Evaluation completed but no results were returned")
+        
+        return result_container[0] 

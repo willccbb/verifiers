@@ -350,7 +350,7 @@ class GRPOTrainer(Trainer):
                 self.train_dataset = self.train_dataset.select(range(truncated_dataset_size))
             self.logger.info(f"Batches per epoch: {truncated_dataset_size / global_batch_size}")
             self.logger.info(f"Steps per epoch: {truncated_dataset_size / global_batch_size * self.num_iterations} (num_iterations={self.num_iterations})")
-            self.logger.info(f"Number of epochs: {self.state.max_steps / (truncated_dataset_size / global_batch_size * self.num_iterations)}")
+            self.logger.info(f"Number of epochs:")
         # Reference model
         if self.beta == 0.0:
             # If beta is 0.0, the reference model is not needed
@@ -617,7 +617,7 @@ class GRPOTrainer(Trainer):
         # All processes wait if generation is happening
         while is_generating:
             time.sleep(0.5)
-            self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background batch generation to complete")
+            self.logger.info(f"Waiting for background batch generation to complete before weight syncing.")
             
             # Check again and broadcast
             if self.accelerator.is_main_process:
@@ -666,7 +666,7 @@ class GRPOTrainer(Trainer):
         if self.accelerator.is_main_process:
             while self.vllm_client.get_num_background_tasks() > 0:
                 time.sleep(0.5)
-                self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background tasks to complete")
+                self.logger.info(f"Waiting for weight syncing background tasks to complete before submitting new batches.")
 
         # Ensure all processes wait for the main process to finish updating weights
         self.accelerator.wait_for_everyone()
@@ -831,8 +831,6 @@ class GRPOTrainer(Trainer):
             # Update next batch id
             if self.accelerator.is_main_process:
                 self._next_batch_id = self._next_batch_id + batches_submitted
-                if batches_submitted > 0:
-                    self.logger.info(f"Submitted {batches_submitted} batches, next_batch_id now {self._next_batch_id}")
             self.accelerator.wait_for_everyone()
             # Synchronize next_batch_id across all processes
             next_batch_id_list = [self._next_batch_id if self.accelerator.is_main_process else 0]
@@ -842,8 +840,6 @@ class GRPOTrainer(Trainer):
             
             # Now retrieve the batch we need for this step
             if self.accelerator.is_main_process:
-                self.logger.info(f"Retrieving batch {batch_id_to_retrieve} for processing")
-                
                 # Get batch result
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                 processed_results = batch_result.processed_results
