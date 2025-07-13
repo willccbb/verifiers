@@ -64,7 +64,7 @@ rubric = vf.Rubric(funcs=[
 
 vf_env = vf.SingleTurnEnv(
     dataset=train_dataset, # type: ignore
-    eval_dataset=eval_dataset, # type: ignore
+    #eval_dataset=eval_dataset, # type: ignore
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
@@ -74,8 +74,6 @@ args = vf.grpo_defaults(run_name='reverse_text_warmup')
 args.per_device_train_batch_size = 12
 args.num_generations = 12
 args.gradient_accumulation_steps = 8
-args.eval_strategy = "steps"
-args.eval_steps = 10
 args.max_steps = 100
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)

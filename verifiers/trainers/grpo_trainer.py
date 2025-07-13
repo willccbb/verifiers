@@ -1036,15 +1036,15 @@ class GRPOTrainer(Trainer):
         This bypasses the standard batch-by-batch evaluation and uses the environment's
         built-in evaluation logic instead.
         """
+        # Skip evaluation if no eval dataset is available
+        if self.env.eval_dataset is None:
+            self.logger.info("Skipping evaluation - no eval dataset available")
+            return {}
+            
         self.logger.info("Running evaluation using environment's evaluate method")
         
-        # Call env.evaluate with appropriate parameters
-        eval_results = self.env.evaluate(
-            client=self.oai_client,
-            model=self._get_model_name(),
-            sampling_args=self._get_sampling_args(),
-            max_concurrent=self.max_concurrent,
-        )
+        # Use async generator's evaluate method to run in the same event loop
+        eval_results = self.async_generator.evaluate(num_samples=-1)
         
         # Process results to compute metrics
         metrics = {}

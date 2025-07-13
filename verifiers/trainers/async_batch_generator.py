@@ -6,6 +6,9 @@ import time
 import torch
 from collections import deque
 import asyncio
+import logging
+
+from verifiers import GenerateOutputs
 
 
 @dataclass
@@ -78,7 +81,9 @@ class AsyncBatchGenerator:
         # Thread management
         self.worker_thread = None
         self.stop_event = threading.Event()
-        self.started = False
+        self.logger = logging.getLogger(f'AsyncBatchGenerator-{id(self)}')
+        self.is_generating = False  # Track if currently generating
+        self.worker_loop = None  # Will be set in worker thread
         
         # Synchronization
         self._lock = threading.Lock()
@@ -202,6 +207,7 @@ class AsyncBatchGenerator:
         # Create event loop for this thread
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        self.worker_loop = loop # Store the event loop reference
         
         # Create the AsyncOpenAI client within this event loop
         import httpx
@@ -282,3 +288,40 @@ class AsyncBatchGenerator:
             completions=env_results['completion'],
             prompts=env_results['prompt']
         ) 
+
+    async def _evaluate_async(self, num_samples: int = -1) -> GenerateOutputs:
+        """
+        Run evaluation in the worker thread's event loop.
+        """
+        # Get evaluation dataset
+        if self.env.eval_dataset is None:
+            self.env.logger.info('eval_dataset is not set, falling back to train dataset')
+            assert self.env.dataset is not None
+            inputs = self.env.get_dataset(n=num_samples)
+        else:
+            inputs = self.env.get_eval_dataset(n=num_samples)
+        assert inputs is not None, 'No dataset found'
+        
+        # Run generation on eval dataset
+        results = await self.env.a_generate(
+            inputs, 
+            client=self.client, 
+            model=self.model_name, 
+            sampling_args=self.sampling_args
+        )
+        return results
+
+    def evaluate(self, num_samples: int = -1) -> GenerateOutputs:
+        """
+        Run evaluation synchronously by submitting to worker thread.
+        """
+        if self.worker_loop is None:
+            raise RuntimeError("AsyncBatchGenerator not started")
+        
+        # Create a special evaluation request
+        eval_future = asyncio.run_coroutine_threadsafe(
+            self._evaluate_async(num_samples),
+            self.worker_loop
+        )
+        # Wait for evaluation to complete
+        return eval_future.result(timeout=self.generation_timeout) 
