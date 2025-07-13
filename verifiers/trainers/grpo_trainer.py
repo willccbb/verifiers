@@ -591,27 +591,21 @@ class GRPOTrainer(Trainer):
     def _get_per_token_logps(self, model, input_ids, attention_mask, logits_to_keep, batch_size=None) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(0)  # Chunk inputs into smaller batches to reduce memory peak
         all_logps = []
-        self.logger.info(f"input_ids.shape: {input_ids.shape}, attention_mask.shape: {attention_mask.shape}")
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
-            self.logger.info(f"input_ids_batch.shape: {input_ids_batch.shape}, attention_mask_batch.shape: {attention_mask_batch.shape}")
             logits = model(
                 input_ids=input_ids_batch, attention_mask=attention_mask_batch, logits_to_keep=logits_to_keep + 1
             ).logits
             logits = logits[:, :-1, :]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
-            self.logger.info(f"logits.shape: {logits.shape}")
             input_ids_batch = input_ids_batch[:, -logits_to_keep:]
-            self.logger.info(f"input_ids_batch.shape: {input_ids_batch.shape}")
             # For transformers<=4.48, logits_to_keep argument isn't supported, so here we drop logits ourselves.
             # See https://github.com/huggingface/trl/issues/2770
             logits = logits[:, -logits_to_keep:]
-            self.logger.info(f"logits.shape: {logits.shape}")
             # Divide logits by sampling temperature.
             # See https://huggingface.co/blog/the_n_implementation_details_of_rlhf_with_ppo#policy-training-implementation-details
             logits = logits / self.temperature
             logps = selective_log_softmax(logits, input_ids_batch)  # compute logprobs for the input tokens
-            self.logger.info(f"logps.shape: {logps.shape}")
             all_logps.append(logps)
         return torch.cat(all_logps, dim=0)
 
@@ -991,7 +985,6 @@ class GRPOTrainer(Trainer):
         completion_mask = attention_mask[:, 1:]
         logits_to_keep = completion_mask.size(1)
         per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
-        self.logger.info(f"per_token_logps.shape: {per_token_logps.shape}")
         # Compute the loss
         advantages = inputs["advantages"]
         # When using num_iterations == 1, old_per_token_logps == per_token_logps,
@@ -1012,7 +1005,6 @@ class GRPOTrainer(Trainer):
         per_token_loss2 = coef_2 * advantages.unsqueeze(1)
         per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
         
-        self.logger.info(f"per_token_loss.shape: {per_token_loss.shape}, completion_mask.shape: {completion_mask.shape}, advantages.shape: {advantages.shape}")
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
             with torch.no_grad():
