@@ -602,11 +602,28 @@ class GRPOTrainer(Trainer):
         else:
             gather_if_zero3 = nullcontext
 
-        # check if background batch generation is complete
+        # Check if background batch generation is complete on main process
+        # and broadcast the state to all processes
+        is_generating = False
         if self.accelerator.is_main_process:
-            while self.async_generator.is_generating:
-                time.sleep(0.5)
-                self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background batch generation to complete")
+            is_generating = self.async_generator.is_generating
+            
+        # Broadcast generation state from main process to all processes
+        is_generating_list = [is_generating]
+        broadcast_object_list(is_generating_list, from_process=0)
+        is_generating = is_generating_list[0]
+        
+        # All processes wait if generation is happening
+        while is_generating:
+            time.sleep(0.5)
+            self.logger.info(f"Process {self.accelerator.process_index}: Waiting for background batch generation to complete")
+            
+            # Check again and broadcast
+            if self.accelerator.is_main_process:
+                is_generating = self.async_generator.is_generating
+            is_generating_list = [is_generating]
+            broadcast_object_list(is_generating_list, from_process=0)
+            is_generating = is_generating_list[0]
         
 
         # Ensure all processes are synchronized before weight update
