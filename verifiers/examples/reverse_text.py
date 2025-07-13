@@ -35,9 +35,10 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs
 model_name = 'willcb/Qwen2.5-0.5B-Reverse-SFT'
 dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train').map(lambda x: {'question': x['text'], 'answer': x['text'][::-1]})
 # evaluate on the first 32 examples, train on the rest
+TRAIN_SIZE = 100
 EVAL_SIZE = 0
-eval_dataset = dataset.select(range(EVAL_SIZE)) # type: ignore
-train_dataset = dataset.select(range(EVAL_SIZE, len(dataset))) # type: ignore
+train_dataset = dataset.select(range(TRAIN_SIZE)) # type: ignore
+eval_dataset = dataset.select(range(TRAIN_SIZE, TRAIN_SIZE + EVAL_SIZE)) # type: ignore
 
 parser = vf.XMLParser(['think', 'answer'], answer_field='answer')
 system_prompt = f"""Reverse the given text.
@@ -73,8 +74,10 @@ vf_env = vf.SingleTurnEnv(
 )
 args = vf.grpo_defaults(run_name='reverse_text_warmup')
 args.per_device_train_batch_size = 12
-args.num_generations = 12
-args.gradient_accumulation_steps = 8
+args.num_generations = 4
+args.num_iterations = 2
+args.num_train_epochs = 2
+args.gradient_accumulation_steps = 3
 args.max_steps = 100
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)

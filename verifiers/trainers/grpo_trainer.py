@@ -344,7 +344,7 @@ class GRPOTrainer(Trainer):
             dataset_size = len(self.train_dataset) # type: ignore
             self.logger.info(f"Dataset size: {dataset_size}, global batch size: {global_batch_size}")
             self.logger.info(f"Unique prompts per device batch: {unique_prompts_per_device_batch}, unique prompts per gradient step: {unique_prompts_per_gradient_step}")
-            truncated_dataset_size = (dataset_size // global_batch_size) * global_batch_size
+            truncated_dataset_size = int((dataset_size // global_batch_size) * global_batch_size)
             if truncated_dataset_size < dataset_size:
                 self.logger.info(f"Truncating dataset from {dataset_size} to {truncated_dataset_size} examples ({dataset_size - truncated_dataset_size} examples were too long)")
                 self.train_dataset = self.train_dataset.select(range(truncated_dataset_size))
@@ -763,7 +763,8 @@ class GRPOTrainer(Trainer):
         """
         # Ensure all processes are synchronized at the start
         self.accelerator.wait_for_everyone()
-        
+        self.logger.info(f"Preparing trainer inputs at step {self._step} (prepare_inputs)")
+        self.logger.info(f"Next batch id: {self._next_batch_id}")
         # inputs = list of dicts for all gradient accumulation steps 
         generate_every = self.gradient_accumulation_steps * self.num_iterations
  
@@ -792,17 +793,19 @@ class GRPOTrainer(Trainer):
             # On first call, this submits batches 0 through num_batches_ahead
             # On subsequent calls, this submits new batches to stay ahead
             batches_submitted = 0
-            steps_per_batch = generate_every 
-            max_batch_id = (self.state.max_steps - 1) // steps_per_batch
+            steps_per_batch = generate_every
+            max_batch_id = (self.state.max_steps * self.gradient_accumulation_steps - 1) // steps_per_batch
             target_batch_id = min(target_batch_id, max_batch_id)
             
             for batch_id in range(self._next_batch_id, target_batch_id + 1):
                 first_step_for_batch = batch_id * steps_per_batch
                 if first_step_for_batch >= self.state.max_steps:
+                    self.logger.info(f"Reached max steps {self.state.max_steps}, stopping batch generation")
                     break
                 batch_offset = batch_id - batch_id_to_retrieve
                 all_prompts, all_answers, all_tasks, all_infos = self._gather_batch_data(batch_offset)
                 if not all_prompts:
+                    self.logger.info(f"No prompts for batch {batch_id}, stopping batch generation")
                     break
                 local_batch_size = len(all_prompts) // self.accelerator.num_processes
                 

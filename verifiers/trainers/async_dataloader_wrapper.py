@@ -1,3 +1,4 @@
+import logging
 from typing import Any, List
 from torch.utils.data import DataLoader
 from collections import deque
@@ -27,6 +28,7 @@ class AsyncDataLoaderWrapper:
         # epoch tracking for RepeatSampler
         self.batches_per_epoch = len(dataloader) 
         self.batches_yielded = 0
+        self.logger = logging.getLogger(f'AsyncDataLoaderWrapper-{id(self)}')
         
     def __iter__(self):
         """Reset and return iterator"""
@@ -61,6 +63,7 @@ class AsyncDataLoaderWrapper:
         If n=0, returns the current batch (if available).
         Returns fewer batches if not enough are available.
         """
+        self.logger.info(f"peek_ahead({n}): buffer has {len(self._buffer)} batches, exhausted: {self._exhausted}")
         with self._lock:
             if n == 0:
                 # Return current batch if available
