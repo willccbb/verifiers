@@ -837,7 +837,7 @@ class GRPOTrainer(Trainer):
                         env_inputs={'prompt': all_prompts, 'answer': all_answers, 'task': all_tasks, 'info': all_infos},
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
-                        max_seq_len=self.max_seq_len,
+                        max_seq_len=self.max_seq_len or -1,
                         mask_truncated_completions=self.mask_truncated_completions,
                         max_concurrent=self.max_concurrent,
                         device=self.accelerator.device,
@@ -906,8 +906,8 @@ class GRPOTrainer(Trainer):
                 input_ids_list.append(torch.tensor(broadcast_data['prompt_ids'][i] + broadcast_data['completion_ids'][i], device=self.accelerator.device))
                 input_mask_list.append(torch.tensor(broadcast_data['prompt_mask'][i] + broadcast_data['completion_mask'][i], device=self.accelerator.device))
 
-            input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='left') # type: ignore
-            input_mask = pad(input_mask_list, padding_side='left') # type: ignore
+            input_ids = pad(input_ids_list, padding_value=self.processing_class.pad_token_id, padding_side='right') # type: ignore
+            input_mask = pad(input_mask_list, padding_side='right') # type: ignore
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
@@ -985,9 +985,9 @@ class GRPOTrainer(Trainer):
                      num_items_in_batch: int | None = None) -> torch.Tensor:  # type: ignore
         mode = "train" 
         # Compute the per-token log probabilities for the model
-        input_ids, input_mask = inputs["input_ids"], inputs["input_mask"]
+        input_ids, attention_mask = inputs["input_ids"], inputs["attention_mask"]
         logits_to_keep = input_ids.size(1) - 1
-        per_token_logps = self._get_per_token_logps(model, input_ids, input_mask, logits_to_keep)
+        per_token_logps = self._get_per_token_logps(model, input_ids, attention_mask, logits_to_keep)
         self.logger.info(f"per_token_logps.shape: {per_token_logps.shape}")
         # Compute the loss
         advantages = inputs["advantages"]
@@ -1009,31 +1009,31 @@ class GRPOTrainer(Trainer):
         per_token_loss2 = coef_2 * advantages.unsqueeze(1)
         per_token_loss = -torch.min(per_token_loss1, per_token_loss2)
         
-        self.logger.info(f"per_token_loss.shape: {per_token_loss.shape}, input_mask.shape: {input_mask.shape}, advantages.shape: {advantages.shape}")
+        self.logger.info(f"per_token_loss.shape: {per_token_loss.shape}, attention_mask.shape: {attention_mask.shape}, advantages.shape: {advantages.shape}")
         # Compute the KL divergence between the model and the reference model
         if self.beta != 0.0:
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, input_mask, logits_to_keep
+                        self.ref_model, input_ids, attention_mask, logits_to_keep
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter(): # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, input_mask, logits_to_keep
+                            self.model, input_ids, attention_mask, logits_to_keep
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
             )
             per_token_loss = per_token_loss + self.beta * per_token_kl
-            mean_kl = (per_token_kl * input_mask).sum() / input_mask.sum()
+            mean_kl = (per_token_kl * attention_mask).sum() / attention_mask.sum()
             self._metrics[mode]["kl"].append(self.accelerator.gather_for_metrics(mean_kl).nanmean().item()) # type: ignore
         if self.loss_type == "grpo":
-            loss = ((per_token_loss * input_mask).sum(-1) / input_mask.sum(-1).clamp(min=1.0)).mean()
+            loss = ((per_token_loss * attention_mask).sum(-1) / attention_mask.sum(-1).clamp(min=1.0)).mean()
         elif self.loss_type == "bnpo":
-            loss = (per_token_loss * input_mask).sum() / input_mask.sum().clamp(min=1.0)
+            loss = (per_token_loss * attention_mask).sum() / attention_mask.sum().clamp(min=1.0)
         elif self.loss_type == "dr_grpo":
-            loss = (per_token_loss * input_mask).sum() / (per_token_loss.size(0) * self.max_completion_length) # type: ignore
+            loss = (per_token_loss * attention_mask).sum() / (per_token_loss.size(0) * self.max_completion_length) # type: ignore
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
 
@@ -1042,9 +1042,9 @@ class GRPOTrainer(Trainer):
         is_high_clipped = (coef_1 > 1 + self.epsilon_high) & (advantages.unsqueeze(1) > 0)
         is_region_clipped = is_low_clipped | is_high_clipped
 
-        low_clip = (is_low_clipped * input_mask).sum() / input_mask.sum()
-        high_clip = (is_high_clipped * input_mask).sum() / input_mask.sum()
-        clip_ratio = (is_region_clipped * input_mask).sum() / input_mask.sum()
+        low_clip = (is_low_clipped * attention_mask).sum() / attention_mask.sum()
+        high_clip = (is_high_clipped * attention_mask).sum() / attention_mask.sum()
+        clip_ratio = (is_region_clipped * attention_mask).sum() / attention_mask.sum()
 
         gathered_low_clip = self.accelerator.gather_for_metrics(low_clip)
         self._metrics[mode]["clip_ratio/low_mean"].append(gathered_low_clip.nanmean().item()) # type: ignore
