@@ -396,13 +396,14 @@ class GRPOTrainer(Trainer):
         port = args.vllm_server_port
         vllm_base_url = f"http://{host}:{port}/v1"
         import httpx
-        self.oai_client = openai.AsyncOpenAI(
-            base_url=vllm_base_url,
-            api_key="EMPTY",
-            http_client=httpx.AsyncClient(
-                limits=httpx.Limits(max_connections=args.max_concurrent),
-                timeout=args.async_generation_timeout)
-        )
+        self.client_config = {
+            'base_url': vllm_base_url,
+            'api_key': "EMPTY",
+            'http_client_args': {
+                'limits': {'max_connections': args.max_concurrent},
+                'timeout': args.async_generation_timeout
+            }
+        }
 
         # vLLM client for weight syncing only; only import if used
         from verifiers.inference.vllm_client import VLLMClient
@@ -445,7 +446,7 @@ class GRPOTrainer(Trainer):
         # num_batches_ahead=0 will behave synchronously (submit and wait immediately)
         self.async_generator = AsyncBatchGenerator(
             env=self.env,
-            client=self.oai_client,
+            client_config=self.client_config,
             model_name=self._get_model_name(),
             sampling_args=self._get_sampling_args(),
             num_batches_ahead=self.num_batches_ahead, 

@@ -48,7 +48,7 @@ class AsyncBatchGenerator:
     def __init__(
         self,
         env,
-        client,
+        client_config,
         model_name: str,
         sampling_args: Dict[str, Any],
         num_batches_ahead: int = 1,
@@ -56,7 +56,8 @@ class AsyncBatchGenerator:
         generation_timeout: float = 300.0,  # 5 minutes default
     ):
         self.env = env
-        self.client = client
+        self.client_config = client_config
+        self.client = None  # Will be created in worker thread
         self.model_name = model_name
         self.sampling_args = sampling_args
         self.num_batches_ahead = num_batches_ahead
@@ -202,6 +203,18 @@ class AsyncBatchGenerator:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # Create the AsyncOpenAI client within this event loop
+        import httpx
+        from openai import AsyncOpenAI
+        self.client = AsyncOpenAI(
+            base_url=self.client_config['base_url'],
+            api_key=self.client_config['api_key'],
+            http_client=httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=self.client_config['http_client_args']['limits']['max_connections']),
+                timeout=self.client_config['http_client_args']['timeout']
+            )
+        )
+        
         try:
             while not self.stop_event.is_set():
                 try:
@@ -220,6 +233,9 @@ class AsyncBatchGenerator:
                 except queue.Empty:
                     continue
         finally:
+            # Clean up the client
+            if self.client:
+                loop.run_until_complete(self.client.close())
             # Clean up the event loop
             loop.close()
             asyncio.set_event_loop(None)
