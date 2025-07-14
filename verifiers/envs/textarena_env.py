@@ -39,7 +39,7 @@ class TextArenaEnv(MultiTurnEnv):
     def __init__(self,
                  game: str = "Wordle-v0",
                  num_samples: int = 1000,
-                 num_eval_samples: int = 1000,
+                 num_eval_samples: int = 0,
                  system_prompt: str = GUESS_SYSTEM_PROMPT,
                  parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
                  seed: int = 0,
@@ -112,7 +112,7 @@ class TextArenaEnv(MultiTurnEnv):
         env_message: ChatMessage = {"role": "user", "content": str(feedback)}
         return env_message, state
 
-    def ta_to_hf(self) -> Tuple[Dataset, Dataset]:
+    def ta_to_hf(self) -> Tuple[Dataset, Dataset | None]:
         dataset_rows = []
         eval_dataset_rows = []
         ta_env = ta.make(env_id=self.game)
@@ -135,5 +135,8 @@ class TextArenaEnv(MultiTurnEnv):
                     "answer": answer
                 })
         dataset = Dataset.from_list(dataset_rows)
-        eval_dataset = Dataset.from_list(eval_dataset_rows)
+        if self.num_eval_samples > 0:
+            eval_dataset = Dataset.from_list(eval_dataset_rows)
+        else:
+            eval_dataset = None
         return dataset, eval_dataset

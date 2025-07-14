@@ -607,6 +607,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 f"Prompt ids: {len(prompt_ids)}, prompt mask: {len(prompt_mask)}"
             assert len(completion_ids) == len(completion_mask), \
                 f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
+            completion_logprobs = [0] * len(completion_ids)
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
@@ -620,7 +621,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                  client: AsyncOpenAI | OpenAI,
                  model: str,
                  sampling_args: SamplingArgs = {},
-                 num_samples: int = -1,
+                 num_examples: int = -1,
+                 rollouts_per_example: int = 1,
+                 score_rollouts: bool = True,
                  max_concurrent: int = -1,
                  **kwargs) -> GenerateOutputs:
         """
@@ -629,12 +632,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         if self.eval_dataset is None:
             self.logger.info('eval_dataset is not set, falling back to train dataset')
             assert self.dataset is not None
-            inputs = self.get_dataset(n=num_samples)
+            inputs = self.get_dataset(n=num_examples)
         else:
-            inputs = self.get_eval_dataset(n=num_samples)
+            inputs = self.get_eval_dataset(n=num_examples)
         assert inputs is not None, 'No dataset found'
+        if rollouts_per_example > 1:
+            inputs = inputs.repeat(rollouts_per_example)
         results = self.generate(
-            inputs, client, model, sampling_args, max_concurrent, **kwargs
+            inputs, client, model, sampling_args, score_rollouts, max_concurrent, **kwargs
         )
         return results
 

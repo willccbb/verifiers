@@ -6,15 +6,26 @@ from verifiers.envs.textarena_env import TextArenaEnv
 NOTHINK_WORDLE_SYSTEM_PROMPT = """You are a competitive game player. \
 Make sure you read the game instructions carefully, and always follow the required format.
 
-In each turn, give only your guess inside <guess>...</guess> tags. /no_think"""
+In each turn, give only your guess inside <guess>...</guess> tags."""
 
 vf_env = TextArenaEnv(
     game="Wordle-v0",
     num_samples=2000,
-    num_eval_samples=2000,
     system_prompt=NOTHINK_WORDLE_SYSTEM_PROMPT,
     parser=vf.XMLParser(fields=["guess"], answer_field="guess"),
 )
+
+parser = vf_env.parser
+
+def partial_credit_reward_func(completion, **kwargs) -> float:
+    """Reward function that gives partial credit for the correct guess."""
+    final_env_response = parser.get_user_messages(completion)[-1]['content'].strip()
+    guess, scoring = final_env_response.split("\n")[:2]
+    num_greens = scoring.count("G")
+    num_yellows = scoring.count("Y")
+    return 0.2 * num_greens + 0.1 * num_yellows
+
+vf_env.rubric.add_reward_func(partial_credit_reward_func)
 
 def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
@@ -23,10 +34,15 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         api_key = os.getenv("DEEPINFRA_API_KEY")
         model_name = "deepseek-ai/DeepSeek-V3-0324" # DeepSeek V3-0324
         client = OpenAI(base_url=base_url, api_key=api_key)
+    elif api == "deepinfra":
+        base_url = os.getenv("DEEPINFRA_API_URL")
+        api_key = os.getenv("DEEPINFRA_API_KEY")
+        model_name = "deepseek-ai/DeepSeek-V3-0324-Turbo"
+        client = OpenAI(base_url=base_url, api_key=api_key)
     elif api == "openai":
         # just for testing :) not for distillation :)
         api_key = os.getenv("OPENAI_API_KEY")
-        model_name = "gpt-4.1" 
+        model_name = "gpt-4.1-mini"
         client = OpenAI(api_key=api_key)
     else:
         raise ValueError(f"Invalid API: {api}")
@@ -47,6 +63,9 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
     print('Prompt: ', results['prompt'][0])
     print('Completion: ', results['completion'][0])
     print('Answer: ', results['answer'][0])
+    for k, v in results.items():
+        if "reward" in k:
+            print(k, ': ', v[0]) 
     print("--- Rewards ---")
     for k, v in results.items():
         if 'reward' in k:
@@ -56,7 +75,7 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         # filter to top half of rows by rewards
         dataset_dsv3 = dataset_dsv3.sort("reward", reverse=True).select(range(len(dataset_dsv3) // 2))
         # save to hub
-        dataset_dsv3.push_to_hub("V3-wordle-nothink-100")
+        dataset_dsv3.push_to_hub("mini-wordle-nothink-100")
 
 if __name__ == "__main__":
     import argparse

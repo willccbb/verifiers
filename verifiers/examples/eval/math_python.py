@@ -3,7 +3,7 @@ import os
 from openai import OpenAI
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils import load_example_dataset 
+from verifiers.utils.data_utils import load_example_dataset     
 
 """
 Evaluating multi-turn reasoning before/after training.
@@ -59,7 +59,7 @@ vf_env = vf.ToolEnv(
     max_steps=3
 )
 
-def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
+def main(api: str, num_examples: int, rollouts_per_example: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
@@ -81,7 +81,10 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
     # use deepseek-chat for multiturn rollouts (V3-0324)
     results = vf_env.evaluate(
         client=client, model=model_name, 
-        sampling_args=sampling_args, num_samples=num_samples)
+        sampling_args=sampling_args,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
+    )
     print("Rewards:")
     for k, v in results.items():
         if 'reward' in k:
@@ -97,7 +100,8 @@ if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
-    argparser.add_argument("--num-samples", "-n", type=int, default=10)
+    argparser.add_argument("--num-examples", "-n", type=int, default=10)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
     argparser.add_argument("--max-tokens", "-t", type=int, default=2048)
     argparser.add_argument("--save-dataset", "-s", action="store_true")
     args = argparser.parse_args()

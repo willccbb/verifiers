@@ -44,7 +44,7 @@ env2 = vf.SingleTurnEnv(
 
 vf_env = vf.EnvGroup([env1, env2], env_names=["gsm8k", "math"])
 
-def main(num_samples: int, max_tokens: int):
+def main(num_examples: int, rollouts_per_example: int, max_tokens: int):
     api_key = os.getenv("OPENAI_API_KEY")
     model_name = "gpt-4.1" 
     client = OpenAI(api_key=api_key)
@@ -54,7 +54,10 @@ def main(num_samples: int, max_tokens: int):
     }
     results = vf_env.evaluate(
         client=client, model=model_name, 
-        sampling_args=sampling_args, num_samples=num_samples)
+        sampling_args=sampling_args,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
+    )
     print("--- Example ---")
     print(f"Prompt: {results['prompt'][0]}")
     print(f"Completion: {results['completion'][0]}")
@@ -70,7 +73,8 @@ def main(num_samples: int, max_tokens: int):
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--num-samples", "-n", type=int, default=-1)
+    argparser.add_argument("--num-examples", "-n", type=int, default=-1)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
     argparser.add_argument("--max-tokens", "-t", type=int, default=2048)
     args = argparser.parse_args()
-    main(args.num_samples, args.max_tokens)
+    main(args.num_examples, args.rollouts_per_example, args.max_tokens)

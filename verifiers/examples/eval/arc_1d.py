@@ -11,7 +11,7 @@ vf_env = ReasoningGymEnv(
     max_concurrent=256,
 )
 
-def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
+def main(api: str, num_examples: int, rollouts_per_example: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
@@ -34,7 +34,8 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         client=client,
         model=model_name, 
         sampling_args=sampling_args,
-        num_samples=num_samples
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
     )
 
     print('--- Example ---')
@@ -56,7 +57,8 @@ if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
-    argparser.add_argument("--num-samples", "-n", type=int, default=20)
+    argparser.add_argument("--num-examples", "-n", type=int, default=20)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
     argparser.add_argument("--max-tokens", "-t", type=int, default=2048)
     argparser.add_argument("--save-dataset", "-s", action="store_true", default=False)
     args = argparser.parse_args()

@@ -82,7 +82,8 @@ if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
-    argparser.add_argument("--num-samples", "-n", type=int, default=10)
+    argparser.add_argument("--num-examples", "-n", type=int, default=10)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
     argparser.add_argument("--max-tokens", "-t", type=int, default=4096)
     argparser.add_argument("--save-dataset", "-s", type=bool, default=False)
     args = argparser.parse_args()

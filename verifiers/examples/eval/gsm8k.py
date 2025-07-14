@@ -28,7 +28,7 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric,
 )
 
-def main(num_samples: int, max_tokens: int):
+def main(num_examples: int, rollouts_per_example: int, max_tokens: int):
     api_key = os.getenv("OPENAI_API_KEY")
     model_name = "gpt-4.1-nano" 
     client = OpenAI(api_key=api_key)
@@ -40,7 +40,8 @@ def main(num_samples: int, max_tokens: int):
         client=client,
         model=model_name, 
         sampling_args=sampling_args,
-        num_samples=num_samples
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
     )
     
     print("--- Example ---")
@@ -57,7 +58,8 @@ def main(num_samples: int, max_tokens: int):
 if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--num-samples", "-n", type=int, default=-1)
+    argparser.add_argument("--num-examples", "-n", type=int, default=-1)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
     argparser.add_argument("--max-tokens", "-t", type=int, default=2048)
     args = argparser.parse_args()
-    main(args.num_samples, args.max_tokens)
+    main(args.num_examples, args.rollouts_per_example, args.max_tokens)
