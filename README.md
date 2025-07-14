@@ -66,6 +66,7 @@ uv add 'verifiers[all]' && uv pip install flash-attn==2.7.4.post1 --no-build-iso
 ```
 
 To use the latest `main` branch, do:
+
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
@@ -73,10 +74,18 @@ uv sync --extra all && uv pip install flash-attn --no-build-isolation
 ```
 
 For CPU development (API-only, no training), just do:
-```
+
+```bash
 uv add verifiers
 ```
+
 and install additional tool + environment dependencies (e.g. `textarena`, `reasoning-gym`, `vllm`) as needed.
+
+For development, install `pre-commit` hooks to ensure consistent formatting
+
+```bash
+uv run pre-commit install
+```
 
 **Troubleshooting:**
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 

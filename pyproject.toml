@@ -112,6 +112,7 @@ build-backend = "setuptools.build_meta"
 [dependency-groups]
 dev = [
     "build>=1.2.2.post1",
+    "pre-commit>=4.2.0",
     "ruff>=0.12.3",
     "twine>=6.1.0",
 ]
