@@ -327,6 +327,7 @@ class GRPOTrainer(Trainer):
         self.loss_type = args.loss_type
         self.scale_rewards = args.scale_rewards
         self.mask_truncated_completions = args.mask_truncated_completions
+        self.zero_truncated_completions = args.zero_truncated_completions
         self.delta = args.delta
 
         # Reference model parameters
@@ -977,6 +978,7 @@ class GRPOTrainer(Trainer):
                         mask_env_responses=self.mask_env_responses,
                         max_seq_len=self.max_seq_len or -1,
                         mask_truncated_completions=self.mask_truncated_completions,
+                        zero_truncated_completions=self.zero_truncated_completions,
                         max_concurrent=self.max_concurrent,
                         device=self.accelerator.device,
                         accelerator=self.accelerator,

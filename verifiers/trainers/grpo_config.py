@@ -272,18 +272,24 @@ class GRPOConfig(TrainingArguments):
         },
     )
     mask_env_responses: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether to mask the environment responses. If `True`, the environment responses are masked, "
             "preventing them from being incorrectly penalized and introducing noise during training."
         },
     )
     mask_truncated_completions: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "When enabled, truncated completions are excluded from the loss calculation, preventing them from "
             "being incorrectly penalized and introducing noise during training. According to the DAPO paper, this is "
             "a good practice for training stability."
+        },
+    )
+    zero_truncated_completions: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to give zero reward to truncated completions."
         },
     )
     sync_ref_model: bool = field(

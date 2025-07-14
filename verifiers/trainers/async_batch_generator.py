@@ -22,13 +22,8 @@ class BatchRequest:
     mask_env_responses: bool
     max_seq_len: int
     mask_truncated_completions: bool
+    zero_truncated_completions: bool
     max_concurrent: int
-    device: torch.device
-    accelerator: Any
-    process_index: int
-    num_processes: int
-    local_batch_size: int
-
 
 @dataclass
 class BatchResult:
@@ -298,7 +293,7 @@ class AsyncBatchGenerator:
             max_seq_len=request.max_seq_len,
             mask_env_responses=request.mask_env_responses,
             mask_truncated_completions=request.mask_truncated_completions,
-            zero_truncated_completions=False,
+            zero_truncated_completions=request.zero_truncated_completions,
         )
 
         return BatchResult(
