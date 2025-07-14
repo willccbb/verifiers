@@ -962,7 +962,6 @@ class GRPOTrainer(Trainer):
                         f"No prompts for batch {batch_id}, stopping batch generation"
                     )
                     break
-                local_batch_size = len(all_prompts) // self.accelerator.num_processes
 
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
@@ -980,11 +979,6 @@ class GRPOTrainer(Trainer):
                         mask_truncated_completions=self.mask_truncated_completions,
                         zero_truncated_completions=self.zero_truncated_completions,
                         max_concurrent=self.max_concurrent,
-                        device=self.accelerator.device,
-                        accelerator=self.accelerator,
-                        process_index=self.accelerator.process_index,
-                        num_processes=self.accelerator.num_processes,
-                        local_batch_size=local_batch_size,
                     )
                     self.async_generator.submit_batch(request)
                     batches_submitted += 1

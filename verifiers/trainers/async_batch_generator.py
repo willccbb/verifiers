@@ -7,8 +7,6 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import torch
-
 from verifiers import GenerateOutputs
 
 
@@ -24,6 +22,7 @@ class BatchRequest:
     mask_truncated_completions: bool
     zero_truncated_completions: bool
     max_concurrent: int
+
 
 @dataclass
 class BatchResult:
