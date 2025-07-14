@@ -99,6 +99,12 @@ vf-vllm = "verifiers.inference.vllm_server:main"
 [tool.setuptools]
 packages = ["verifiers"]
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I"]
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
