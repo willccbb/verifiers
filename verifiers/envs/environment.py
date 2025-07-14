@@ -519,9 +519,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         rewards: List[float],
         processing_class: "PreTrainedTokenizerBase",
         max_seq_len: int = -1,
+        mask_env_responses: bool = False,
         mask_truncated_completions: bool = False,
         zero_truncated_completions: bool = False,
-        mask_env_responses: bool = False,
     ) -> ProcessedOutputs:
         """
         Main tokenization pipeline that handles both chat and completion formats.
@@ -632,7 +632,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         prompt: List[ChatMessage],
         completion: List[ChatMessage],
         state: State,
-        reward: float,
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False,
     ) -> Tuple[List[int], List[int], List[int], List[int], List[float]]:
@@ -653,10 +652,11 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             conversation=prompt,  # type: ignore
             add_generation_prompt=True,
         )
+        messages_consumed = deepcopy(prompt)
         prompt_mask: list[int] = [0] * len(prompt_ids)
-        completion_ids: list[int] = []  # noqa: F841
-        completion_mask: list[int] = []  # noqa: F841
-        completion_logprobs: list[float] = []  # noqa: F841
+        completion_ids: list[int] = []
+        completion_mask: list[int] = []
+        completion_logprobs: list[float] = []
         for message, response in zipped:
             # assistant case -- use response
             if message["role"] == "assistant":
@@ -667,10 +667,22 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
+                messages_consumed.append(message)
             # user case -- use message
             else:
-                assert message["role"] == "user", "Message role should be user"
-                completion_turn_ids = processing_class.encode(message["content"])
+                assert message["role"] == "user" or message["role"] == "tool"
+                token_prefix: list[int] = processing_class.apply_chat_template(
+                    conversation=messages_consumed  # type: ignore
+                )
+                token_prefix_with_turn: list[int] = (
+                    processing_class.apply_chat_template(
+                        conversation=messages_consumed + [message],  # type: ignore
+                    )
+                )
+                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
+                    f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                )
+                completion_turn_ids = token_prefix_with_turn[len(token_prefix) :]
                 if mask_env_responses:
                     completion_turn_mask = [0] * len(completion_turn_ids)
                 else:
@@ -679,7 +691,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
-
+                messages_consumed.append(message)
         return (
             prompt_ids,
             prompt_mask,
@@ -696,9 +708,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         rewards: List[float],
         processing_class: "PreTrainedTokenizerBase",
         max_seq_len: int = -1,
+        mask_env_responses: bool = False,
         mask_truncated_completions: bool = False,
         zero_truncated_completions: bool = False,
-        mask_env_responses: bool = False,
     ) -> ProcessedOutputs:
         """
         Process results with vLLM tokens/logprobs.
@@ -714,6 +726,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         all_completion_ids = []
         all_completion_masks = []
         all_completion_logprobs = []
+        all_rewards = []
         for i, (prompt, completion, state, reward) in enumerate(
             zip(prompts, completions, states, rewards)
         ):
@@ -727,12 +740,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                     completion_mask,
                     completion_logprobs,
                 ) = self.process_chat_format_vllm(
-                    prompt,
-                    completion,
-                    state,
-                    reward,
-                    processing_class,
-                    mask_env_responses,
+                    prompt, completion, state, processing_class, mask_env_responses
                 )
             else:
                 assert isinstance(prompt, str) and isinstance(completion, str)
@@ -763,8 +771,18 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             all_completion_ids.append(completion_ids)
             all_completion_masks.append(completion_mask)
             all_completion_logprobs.append(completion_logprobs)
-
-        raise NotImplementedError("process_env_results_vllm is not implemented")
+            if zero_truncated_completions:
+                all_rewards.append(0)
+            else:
+                all_rewards.append(reward)
+        return {
+            "prompt_ids": all_prompt_ids,
+            "prompt_mask": all_prompt_masks,
+            "completion_ids": all_completion_ids,
+            "completion_mask": all_completion_masks,
+            "completion_logprobs": all_completion_logprobs,
+            "rewards": all_rewards,
+        }
 
     # Evaluation and dataset generation
     def evaluate(

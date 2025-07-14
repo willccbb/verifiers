@@ -803,10 +803,15 @@ class GRPOTrainer(Trainer):
             "n": 1,
             "presence_penalty": self.presence_penalty,
             "frequency_penalty": self.frequency_penalty,
+            "logprobs": True,
             "extra_body": {
                 "top_k": self.top_k,
                 "min_p": self.min_p,
                 "repetition_penalty": self.repetition_penalty,
+                "skip_special_tokens": False,
+                "spaces_between_special_tokens": False,
+                "include_stop_str_in_output": False,
+                "return_tokens_as_token_ids": True,
             },
         }
         return args
