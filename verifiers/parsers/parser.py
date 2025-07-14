@@ -1,10 +1,11 @@
 import logging
-from typing import Any, List, Dict, Callable
+from typing import Any, Callable, Dict, List
 
 from verifiers import (
     ChatMessage,
     Messages,
 )
+
 
 class Parser:
     """
@@ -22,24 +23,23 @@ class Parser:
 
     def parse(self, text: str) -> Any:
         return text
-    
+
     def get_assistant_messages(self, completion: List[ChatMessage]) -> List[ChatMessage]:
         """Helper function to extract assistant messages from a completion."""
-        return [msg for msg in completion if msg['role'] == 'assistant']
-    
+        return [msg for msg in completion if msg["role"] == "assistant"]
+
     def parse_answer(self, completion: Messages) -> str | None:
         if isinstance(completion, str):
             return self.parse(completion)
         else:
             return self.parse(completion[-1]["content"])
- 
+
     def get_format_reward_func(self) -> Callable:
         """
         Reward function that checks if the final answer is formatted correctly.
         """
+
         def format_reward_func(completion: List[Dict[str, str]], **kwargs) -> float:
             return 1.0
-        return format_reward_func
-    
 
-    
+        return format_reward_func

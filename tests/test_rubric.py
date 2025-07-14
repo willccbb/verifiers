@@ -1,8 +1,9 @@
 """Tests for the Rubric class."""
 
 import pytest
-from verifiers.rubrics import Rubric
+
 from verifiers.parsers import Parser
+from verifiers.rubrics import Rubric
 
 
 class TestRubric:
@@ -11,24 +12,25 @@ class TestRubric:
     def test_rubric_initialization_empty(self):
         """Test Rubric initialization with no parameters."""
         rubric = Rubric()
-        
+
         assert rubric.reward_funcs == []
         assert rubric.reward_weights == []
         assert isinstance(rubric.parser, Parser)
 
     def test_rubric_initialization_with_functions(self):
         """Test Rubric initialization with reward functions."""
+
         def reward_func1(completion, answer, **kwargs):
             return 1.0 if completion == answer else 0.0
-        
+
         def reward_func2(completion, **kwargs):
             return len(completion) * 0.1
-        
+
         funcs = [reward_func1, reward_func2]
         weights = [1.0, 0.5]
-        
+
         rubric = Rubric(funcs=funcs, weights=weights)
-        
+
         assert rubric.reward_funcs == funcs
         assert rubric.reward_weights == weights
         assert len(rubric.get_reward_func_names()) == 2
@@ -36,35 +38,36 @@ class TestRubric:
 
     def test_rubric_initialization_functions_without_weights(self):
         """Test Rubric initialization with functions but no explicit weights."""
+
         def reward_func1(completion, **kwargs):
             return 1.0
-        
+
         def reward_func2(completion, **kwargs):
             return 0.5
-        
+
         funcs = [reward_func1, reward_func2]
-        
+
         rubric = Rubric(funcs=funcs)
-        
+
         assert rubric.reward_funcs == funcs
         assert rubric.reward_weights == [1.0, 1.0]  # Default weights
 
     def test_rubric_initialization_with_kwargs(self):
         """Test Rubric initialization with additional kwargs."""
         rubric = Rubric(custom_param="test_value", another_param=42)
-        
+
         assert rubric.custom_param == "test_value"
         assert rubric.another_param == 42
 
     def test_add_reward_func(self):
         """Test adding reward functions."""
         rubric = Rubric(funcs=[], weights=[])
-        
+
         def test_func(completion, **kwargs):
             return 1.0
-        
+
         rubric.add_reward_func(test_func, weight=0.8)
-        
+
         assert len(rubric.reward_funcs) == 1
         assert rubric.reward_funcs[0] == test_func
         assert rubric.reward_weights == [0.8]
@@ -74,16 +77,16 @@ class TestRubric:
         """Test adding multiple reward functions."""
         # Create fresh rubric to avoid test isolation issues
         rubric = Rubric(funcs=[], weights=[])
-        
+
         def func1(completion, **kwargs):
             return 1.0
-        
+
         def func2(completion, **kwargs):
             return 0.5
-        
+
         rubric.add_reward_func(func1, weight=1.0)
         rubric.add_reward_func(func2, weight=0.3)
-        
+
         assert len(rubric.reward_funcs) == 2
         assert rubric.get_reward_func_names() == ["func1", "func2"]
         assert rubric.reward_weights == [1.0, 0.3]
@@ -91,24 +94,25 @@ class TestRubric:
     def test_add_reward_func_default_weight(self):
         """Test adding reward function with default weight."""
         rubric = Rubric(funcs=[], weights=[])
-        
+
         def test_func(completion, **kwargs):
             return 1.0
-        
+
         rubric.add_reward_func(test_func)
-        
+
         assert rubric.reward_weights == [1.0]
 
     def test_get_methods(self):
         """Test getter methods."""
+
         def func1(completion, **kwargs):
             return 1.0
-        
+
         def func2(completion, **kwargs):
             return 0.5
-        
+
         rubric = Rubric(funcs=[func1, func2], weights=[0.8, 0.2])
-        
+
         assert rubric.get_reward_funcs() == [func1, func2]
         assert rubric.get_reward_weights() == [0.8, 0.2]
         assert rubric.get_reward_func_names() == ["func1", "func2"]
@@ -116,11 +120,12 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_call_reward_func_with_all_args(self):
         """Test calling reward function with all possible arguments."""
+
         def comprehensive_func(prompt, completion, answer, state, task, info, **kwargs):
             return len(completion) + len(answer) + len(task)
-        
+
         rubric = Rubric(funcs=[], weights=[])
-        
+
         result = await rubric.call_reward_func(
             func=comprehensive_func,
             prompt="test prompt",
@@ -128,9 +133,9 @@ class TestRubric:
             answer="test answer",
             state={"key": "value"},
             task="test task",
-            info={"info_key": "info_value"}
+            info={"info_key": "info_value"},
         )
-        
+
         # len("test completion") + len("test answer") + len("test task")
         expected = len("test completion") + len("test answer") + len("test task")
         assert result == expected
@@ -138,11 +143,12 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_call_reward_func_with_subset_args(self):
         """Test calling reward function that only uses some arguments."""
+
         def simple_func(completion, answer, **kwargs):
             return 1.0 if completion == answer else 0.0
-        
+
         rubric = Rubric(funcs=[], weights=[])
-        
+
         result = await rubric.call_reward_func(
             func=simple_func,
             prompt="irrelevant",
@@ -150,72 +156,58 @@ class TestRubric:
             answer="same",
             state={},
             task="irrelevant",
-            info={}
+            info={},
         )
-        
+
         assert result == 1.0
 
     @pytest.mark.asyncio
     async def test_call_reward_func_with_var_kwargs(self):
         """Test calling reward function that accepts **kwargs."""
+
         def kwargs_func(completion, **kwargs):
             return len(kwargs)
-        
+
         rubric = Rubric(funcs=[], weights=[])
-        
+
         result = await rubric.call_reward_func(
-            func=kwargs_func,
-            prompt="test",
-            completion="test",
-            answer="test",
-            state={},
-            task="test",
-            info={}
+            func=kwargs_func, prompt="test", completion="test", answer="test", state={}, task="test", info={}
         )
-        
+
         # Should receive prompt, answer, state, task, info (completion used directly)
         assert result == 5
 
     @pytest.mark.asyncio
     async def test_call_reward_func_error_handling(self):
         """Test error handling in reward function calls."""
+
         def error_func(completion, **kwargs):
             raise ValueError("Test error")
-        
+
         rubric = Rubric(funcs=[], weights=[])
-        
+
         result = await rubric.call_reward_func(
-            func=error_func,
-            prompt="test",
-            completion="test",
-            answer="test",
-            state={},
-            task="test",
-            info={}
+            func=error_func, prompt="test", completion="test", answer="test", state={}, task="test", info={}
         )
-        
+
         assert result == 0.0  # Should return 0.0 on error
 
     @pytest.mark.asyncio
     async def test_score_rollout_single(self):
         """Test scoring a single rollout."""
+
         def func1(completion, answer, **kwargs):
             return 1.0 if completion == answer else 0.0
-        
+
         def func2(completion, **kwargs):
             return len(completion) * 0.1
-        
+
         rubric = Rubric(funcs=[func1, func2], weights=[1.0, 0.5])
-        
+
         result = await rubric.score_rollout(
-            prompt="test prompt",
-            completion="test",
-            answer="test",
-            state={},
-            task="test_task",
-            info={}
+            prompt="test prompt", completion="test", answer="test", state={}, task="test_task", info={}
         )
-        
+
         assert "func1" in result
         assert "func2" in result
         assert "reward" in result
@@ -226,55 +218,44 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_score_rollout_with_list_completion(self):
         """Test scoring rollout with list-type completion."""
+
         def list_func(completion, **kwargs):
             return len(completion) if isinstance(completion, list) else 0.0
-        
+
         rubric = Rubric(funcs=[list_func])
-        
-        completion = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"}
-        ]
-        
+
+        completion = [{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there!"}]
+
         result = await rubric.score_rollout(
-            prompt="test",
-            completion=completion,
-            answer="test",
-            state={},
-            task="test",
-            info={}
+            prompt="test", completion=completion, answer="test", state={}, task="test", info={}
         )
-        
+
         assert result["list_func"] == 2.0  # Length of completion list
         assert result["reward"] == 2.0
 
     @pytest.mark.asyncio
     async def test_score_rollouts_multiple(self):
         """Test scoring multiple rollouts."""
+
         def accuracy_func(completion, answer, **kwargs):
             return 1.0 if completion == answer else 0.0
-        
+
         def length_func(completion, **kwargs):
             return len(str(completion))
-        
+
         rubric = Rubric(funcs=[accuracy_func, length_func], weights=[1.0, 0.1])
-        
+
         prompts = ["prompt1", "prompt2", "prompt3"]
         completions = ["answer1", "answer2", "wrong"]
         answers = ["answer1", "answer2", "answer3"]
         states = [{}, {}, {}]
         tasks = ["task1", "task2", "task3"]
         infos = [{}, {}, {}]
-        
+
         results = await rubric.score_rollouts(
-            prompts=prompts,
-            completions=completions,
-            answers=answers,
-            states=states,
-            tasks=tasks,
-            infos=infos
+            prompts=prompts, completions=completions, answers=answers, states=states, tasks=tasks, infos=infos
         )
-        
+
         assert "accuracy_func" in results
         assert "length_func" in results
         assert "reward" in results
@@ -285,21 +266,15 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_score_rollouts_empty(self):
         """Test scoring empty list of rollouts."""
+
         def test_func(completion, **kwargs):
             return 1.0
-        
+
         rubric = Rubric(funcs=[test_func], weights=[1.0])
-        
+
         # Should handle empty rollouts gracefully
-        results = await rubric.score_rollouts(
-            prompts=[],
-            completions=[],
-            answers=[],
-            states=[],
-            tasks=[],
-            infos=[]
-        )
-        
+        results = await rubric.score_rollouts(prompts=[], completions=[], answers=[], states=[], tasks=[], infos=[])
+
         # Should return empty lists for each function
         assert "test_func" in results
         assert "reward" in results
@@ -309,20 +284,21 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_score_rollouts_with_default_infos(self):
         """Test scoring rollouts with default empty infos."""
+
         def simple_func(completion, **kwargs):
             return 1.0
-        
+
         rubric = Rubric(funcs=[simple_func], weights=[1.0])
-        
+
         results = await rubric.score_rollouts(
             prompts=["test"],
             completions=["test"],
             answers=["test"],
             states=[{}],
             tasks=["test"],
-            infos=[{}]  # Explicitly provide infos to match other lists
+            infos=[{}],  # Explicitly provide infos to match other lists
         )
-        
+
         assert "simple_func" in results
         assert results["simple_func"] == [1.0]
 
@@ -330,5 +306,5 @@ class TestRubric:
         """Test Rubric with custom parser."""
         custom_parser = Parser()
         rubric = Rubric(funcs=[], weights=[], parser=custom_parser)
-        
+
         assert rubric.parser is custom_parser

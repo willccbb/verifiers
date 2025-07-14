@@ -1,6 +1,7 @@
 """Tests for the XMLParser class."""
 
 import pytest
+
 from verifiers.parsers import XMLParser
 
 
@@ -47,7 +48,7 @@ class TestXMLParser:
         assert result.reasoning == "First, I need to understand the problem."
         assert result.code == "def solve(): return 42"
         # Both alternatives should be accessible
-        assert hasattr(result, 'answer')
+        assert hasattr(result, "answer")
         assert result.answer is None
 
     def test_parse_missing_fields(self, xml_parser):
@@ -79,16 +80,14 @@ class TestXMLParser:
         completion = [
             {"role": "user", "content": "Solve this problem"},
             {"role": "assistant", "content": "<reasoning>Let me think</reasoning><answer>42</answer>"},
-            {"role": "assistant", "content": "<reasoning>Actually, let me reconsider</reasoning><answer>43</answer>"}
+            {"role": "assistant", "content": "<reasoning>Actually, let me reconsider</reasoning><answer>43</answer>"},
         ]
         result = xml_parser.parse_answer(completion)
         assert result == "43"  # Should get the last answer
 
     def test_parse_answer_no_answer_field(self, xml_parser):
         """Test parse_answer when no answer field is found."""
-        completion = [
-            {"role": "assistant", "content": "<reasoning>Only reasoning here</reasoning>"}
-        ]
+        completion = [{"role": "assistant", "content": "<reasoning>Only reasoning here</reasoning>"}]
         result = xml_parser.parse_answer(completion)
         assert result is None
 
@@ -121,7 +120,7 @@ class TestXMLParser:
         # Using canonical name
         formatted1 = xml_parser_with_alternatives.format(reasoning="test", code="print('hello')")
         assert "<code>\nprint('hello')\n</code>" in formatted1
-        
+
         # Using alternative name
         formatted2 = xml_parser_with_alternatives.format(reasoning="test", answer="print('hello')")
         assert "<code>\nprint('hello')\n</code>" in formatted2  # Should use canonical tag
@@ -130,7 +129,7 @@ class TestXMLParser:
         """Test getting field names."""
         fields1 = xml_parser.get_fields()
         assert fields1 == ["reasoning", "answer"]
-        
+
         fields2 = xml_parser_with_alternatives.get_fields()
         assert fields2 == ["reasoning", "code"]
 
@@ -138,28 +137,24 @@ class TestXMLParser:
         """Test XMLParser initialization with invalid field types."""
         with pytest.raises(TypeError):
             XMLParser([123])  # Invalid field type
-        
+
         # Empty fields is actually allowed - it just creates a parser with no fields
         empty_parser = XMLParser([])  # This works
         assert empty_parser.get_fields() == []
-        
+
         with pytest.raises(ValueError):
             XMLParser(["field1", "field1"])  # Duplicate fields
 
     def test_format_reward_function(self, xml_parser):
         """Test the format reward function."""
         reward_func = xml_parser.get_format_reward_func()
-        
+
         # Well-formatted completion
-        good_completion = [
-            {"role": "assistant", "content": "<reasoning>Good reasoning</reasoning><answer>42</answer>"}
-        ]
+        good_completion = [{"role": "assistant", "content": "<reasoning>Good reasoning</reasoning><answer>42</answer>"}]
         good_reward = reward_func(good_completion)
         assert 0.0 <= good_reward <= 1.0
-        
+
         # Poorly formatted completion - gets partial credit for proper spacing
-        bad_completion = [
-            {"role": "assistant", "content": "Just plain text without XML"}
-        ]
+        bad_completion = [{"role": "assistant", "content": "Just plain text without XML"}]
         bad_reward = reward_func(bad_completion)
         assert bad_reward == 0.2  # Gets 0.2 for proper spacing (no XML tags to mess up)

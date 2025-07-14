@@ -1,6 +1,7 @@
-import verifiers as vf
 from datasets import load_dataset
-from trl import SFTTrainer, SFTConfig
+from trl import SFTConfig, SFTTrainer
+
+import verifiers as vf
 
 """
 accelerate launch --config-file configs/zero3.yaml --num-processes 8 verifiers/examples/sft/arc_1d.py
@@ -8,16 +9,13 @@ accelerate launch --config-file configs/zero3.yaml --num-processes 8 verifiers/e
 
 # convenience function for FA2 initialization
 model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-14B", use_liger=False)
-dataset = load_dataset('willcb/V3-arc_1d', split='train')
+dataset = load_dataset("willcb/V3-arc_1d", split="train")
 
 tok_counts = []
 for row in dataset:
     # count tokens in (prompt, completion)
-    messages = row['prompt'] + row['completion'] # type: ignore
-    toks = tokenizer.apply_chat_template( 
-        messages,
-        tokenize=True
-    )
+    messages = row["prompt"] + row["completion"]  # type: ignore
+    toks = tokenizer.apply_chat_template(messages, tokenize=True)
     tok_counts.append(len(toks))
 
 # tok count stats
@@ -53,7 +51,7 @@ args = SFTConfig(
 trainer = SFTTrainer(
     model=model,
     args=args,
-    train_dataset=dataset # type: ignore
+    train_dataset=dataset,  # type: ignore
 )
 trainer.train()
 trainer.save_model(f"outputs/{run_name}")

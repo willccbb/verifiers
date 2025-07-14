@@ -1,22 +1,19 @@
-from typing import Tuple, List
+from typing import List, Tuple
 
-from datasets import Dataset
 import reasoning_gym as rg
+from datasets import Dataset
 from reasoning_gym.composite import DatasetSpec
 from reasoning_gym.dataset import ProceduralDataset
 
+from verifiers.envs.singleturn_env import SingleTurnEnv
 from verifiers.parsers import XMLParser
 from verifiers.rubrics import Rubric
-from verifiers.envs.singleturn_env import SingleTurnEnv
 
 
 class ReasoningGymEnv(SingleTurnEnv):
-    def __init__(self,
-                 gym: str | List[str | dict],
-                 num_samples: int = 1000,
-                 num_eval_samples: int = 100,   
-                 seed: int = 0,
-                 **kwargs):
+    def __init__(
+        self, gym: str | List[str | dict], num_samples: int = 1000, num_eval_samples: int = 100, seed: int = 0, **kwargs
+    ):
         self.gym = gym
         self.num_samples = num_samples
         self.num_eval_samples = num_eval_samples
@@ -24,29 +21,33 @@ class ReasoningGymEnv(SingleTurnEnv):
         total_samples = num_samples + num_eval_samples
         self.rg_dataset = self.build_rg_dataset(gym, num_samples=total_samples, seed=seed)
         dataset, eval_dataset = self.rg_to_hf(self.rg_dataset)
-        parser = XMLParser(fields=['think', 'answer'])
-        rubric = Rubric(parser=parser) 
+        parser = XMLParser(fields=["think", "answer"])
+        rubric = Rubric(parser=parser)
+
         def check_answer_reward_func(completion, answer, **kwargs) -> float:
             entry = self.rg_dataset[answer]
             response = str(parser.parse_answer(completion)).strip()
             reward = self.rg_dataset.score_answer(answer=response, entry=entry)
             return reward
+
         rubric.add_reward_func(check_answer_reward_func)
         rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
-        system_prompt = rg.utils.SYSTEM_PROMPTS["DeepSeekZero"] # type: ignore
+        system_prompt = rg.utils.SYSTEM_PROMPTS["DeepSeekZero"]  # type: ignore
         super().__init__(
             dataset=dataset,
             eval_dataset=eval_dataset,
             system_prompt=system_prompt,
             parser=parser,
             rubric=rubric,
-            message_type='chat',
-            **kwargs
+            message_type="chat",
+            **kwargs,
         )
         self.parser = parser
         self.rubric = rubric
 
-    def build_rg_dataset(self, gym: str | List[str | dict], num_samples: int = 1000, seed: int = 0) -> ProceduralDataset:
+    def build_rg_dataset(
+        self, gym: str | List[str | dict], num_samples: int = 1000, seed: int = 0
+    ) -> ProceduralDataset:
         if isinstance(gym, str):
             return rg.create_dataset(gym, size=num_samples, seed=seed)
         dataset_specs = []
@@ -64,9 +65,9 @@ class ReasoningGymEnv(SingleTurnEnv):
         eval_rows = []
         for i, x in enumerate(rg_dataset):
             row = {
-                'question': x['question'],
-                'answer': i,
-                'task': x['metadata']['source_dataset'],
+                "question": x["question"],
+                "answer": i,
+                "task": x["metadata"]["source_dataset"],
             }
             if i < self.num_samples:
                 dataset_rows.append(row)

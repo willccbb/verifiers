@@ -1,14 +1,14 @@
-from typing import Callable, Optional, Literal, Union, Dict, Any, List, TypedDict
 import logging
 import sys
+from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict, Union
 
-from openai.types.completion import Completion
 from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.completion import Completion
 
 # typing aliases
-MessageType = Literal['chat', 'completion']
+MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
-ChatMessageField = Literal['role', 'content']
+ChatMessageField = Literal["role", "content"]
 ChatMessage = Dict[ChatMessageField, str]
 Message = Union[str, ChatMessage]
 Messages = Union[str, List[ChatMessage]]
@@ -17,8 +17,8 @@ State = Dict[str, Any]
 SamplingArgs = Dict[str, Any]
 RewardFunc = Callable[..., float]
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import Dict, List
+
 
 class GenerateInputs(TypedDict):
     prompt: List[Messages]
@@ -27,7 +27,9 @@ class GenerateInputs(TypedDict):
     task: Optional[List[str]]
     completion: Optional[List[Messages]]
 
+
 GenerateOutputs = Dict[str, Any]
+
 
 class ProcessedOutputs(TypedDict):
     prompt_ids: List[int]
@@ -36,46 +38,48 @@ class ProcessedOutputs(TypedDict):
     completion_mask: List[int]
     rewards: List[float]
 
+
 try:
-    import torch._dynamo # type: ignore
-    torch._dynamo.config.suppress_errors = True # type: ignore
+    import torch._dynamo  # type: ignore
+
+    torch._dynamo.config.suppress_errors = True  # type: ignore
 except ImportError:
     pass
 
 try:
-    from .utils.logging_utils import setup_logging
-    from .utils.logging_utils import print_prompt_completions_sample
+    from .utils.logging_utils import print_prompt_completions_sample, setup_logging  # noqa: F401
+
     _HAS_RICH = True
 except ImportError:
     _HAS_RICH = False
 
-from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
-
-from .parsers.parser import Parser
-from .parsers.think_parser import ThinkParser
-from .parsers.xml_parser import XMLParser
-
-from .rubrics.rubric import Rubric
-from .rubrics.judge_rubric import JudgeRubric
-from .rubrics.rubric_group import RubricGroup
-from .rubrics.tool_rubric import ToolRubric
-
+from .envs.env_group import EnvGroup
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
 from .envs.singleturn_env import SingleTurnEnv
 from .envs.tool_env import ToolEnv
-from .envs.env_group import EnvGroup
+from .parsers.parser import Parser
+from .parsers.think_parser import ThinkParser
+from .parsers.xml_parser import XMLParser
+from .rubrics.judge_rubric import JudgeRubric
+from .rubrics.rubric import Rubric
+from .rubrics.rubric_group import RubricGroup
+from .rubrics.tool_rubric import ToolRubric
+from .utils.data_utils import extract_boxed_answer, extract_hash_answer, load_example_dataset
 
 # Conditional import based on trl availability
 try:
-    import trl # type: ignore
-    from .utils.model_utils import get_model, get_tokenizer, get_model_and_tokenizer
-    from .trainers import GRPOTrainer, GRPOConfig, grpo_defaults, lora_defaults
+    import trl  # noqa: F401
+
+    from .trainers import GRPOConfig, GRPOTrainer, grpo_defaults, lora_defaults  # noqa: F401
+    from .utils.model_utils import get_model, get_model_and_tokenizer, get_tokenizer  # noqa: F401
+
     _HAS_TRL = True
 except ImportError:
     _HAS_TRL = False
 
 __version__ = "0.1.0"
+
 
 # Setup default logging configuration
 def setup_logging(
@@ -85,7 +89,7 @@ def setup_logging(
 ) -> None:
     """
     Setup basic logging configuration for the verifiers package.
-    
+
     Args:
         level: The logging level to use. Defaults to "INFO".
         log_format: Custom log format string. If None, uses default format.
@@ -106,7 +110,8 @@ def setup_logging(
     logger.addHandler(handler)
 
     # Prevent the logger from propagating messages to the root logger
-    logger.propagate = False 
+    logger.propagate = False
+
 
 setup_logging()
 
@@ -131,17 +136,21 @@ __all__ = [
 
 # Add trainer exports only if trl is available
 if _HAS_TRL:
-    __all__.extend([
-        "get_model",
-        "get_tokenizer",
-        "get_model_and_tokenizer",
-        "GRPOTrainer",
-        "GRPOConfig",
-        "grpo_defaults",
-        "lora_defaults",
-    ])
+    __all__.extend(
+        [
+            "get_model",
+            "get_tokenizer",
+            "get_model_and_tokenizer",
+            "GRPOTrainer",
+            "GRPOConfig",
+            "grpo_defaults",
+            "lora_defaults",
+        ]
+    )
 
 if _HAS_RICH:
-    __all__.extend([
-        "print_prompt_completions_sample",
-    ])
+    __all__.extend(
+        [
+            "print_prompt_completions_sample",
+        ]
+    )
