@@ -972,7 +972,7 @@ class GRPOTrainer(Trainer):
         return advantages
 
 
-    def compute_loss(self,
+    def compute_loss(self, # type: ignore
                      model: PreTrainedModel,
                      inputs: Dict[str, torch.Tensor],
                      return_outputs: bool = False,

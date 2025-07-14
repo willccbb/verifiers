@@ -284,7 +284,7 @@ class AsyncBatchGenerator:
             mask_truncated_completions=request.mask_truncated_completions
         )
 
-        
+
         return BatchResult(
             batch_id=request.batch_id,
             processed_results=processed_results,
