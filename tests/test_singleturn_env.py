@@ -1,8 +1,10 @@
 """Tests for the SingleTurnEnv class."""
 
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 from datasets import Dataset
+
 from verifiers.envs.singleturn_env import SingleTurnEnv
 from verifiers.parsers import Parser
 from verifiers.rubrics import Rubric
@@ -20,7 +22,7 @@ class TestSingleTurnEnv:
             message_type="chat",
             system_prompt="You are helpful.",
             parser=Parser(),
-            rubric=Rubric()
+            rubric=Rubric(),
         )
         assert env.message_type == "chat"
         assert env.client == mock_openai_client
@@ -28,18 +30,17 @@ class TestSingleTurnEnv:
 
     def test_singleturn_env_initialization_completion(self, mock_openai_client):
         """Test SingleTurnEnv initialization with completion format."""
-        completion_dataset = Dataset.from_dict({
-            "prompt": ["Calculate 2+2:", "What is the capital?"],
-            "answer": ["4", "It depends on the country"]
-        })
-        
+        completion_dataset = Dataset.from_dict(
+            {"prompt": ["Calculate 2+2:", "What is the capital?"], "answer": ["4", "It depends on the country"]}
+        )
+
         env = SingleTurnEnv(
             client=mock_openai_client,
             model="test-model",
             dataset=completion_dataset,
             message_type="completion",
             parser=Parser(),
-            rubric=Rubric()
+            rubric=Rubric(),
         )
         assert env.message_type == "completion"
 
@@ -48,21 +49,18 @@ class TestSingleTurnEnv:
         """Test rollout with chat format."""
         prompt = [{"role": "user", "content": "What is 2+2?"}]
         answer = "4"
-        
+
         completion, state = await mock_singleturn_env.rollout(
-            client=mock_singleturn_env.client,
-            model="test-model",
-            prompt=prompt,
-            answer=answer
+            client=mock_singleturn_env.client, model="test-model", prompt=prompt, answer=answer
         )
-        
+
         # Should return list format for chat
         assert isinstance(completion, list)
         assert len(completion) == 1
         assert completion[0]["role"] == "assistant"
         assert completion[0]["content"] == "This is a test response"
         assert state == {}
-        
+
         # Verify the client was called
         mock_singleturn_env.client.chat.completions.create.assert_called_once()
 
@@ -71,19 +69,16 @@ class TestSingleTurnEnv:
         """Test rollout with completion format."""
         prompt = "Calculate 2+2:"
         answer = "4"
-        
+
         completion, state = await mock_singleturn_env_completion.rollout(
-            client=mock_singleturn_env_completion.client,
-            model="test-model",
-            prompt=prompt,
-            answer=answer
+            client=mock_singleturn_env_completion.client, model="test-model", prompt=prompt, answer=answer
         )
-        
+
         # Should return string format for completion
         assert isinstance(completion, str)
         assert completion == "This is a test completion"
         assert state == {}
-        
+
         # Verify the client was called
         mock_singleturn_env_completion.client.completions.create.assert_called_once()
 
@@ -93,18 +88,18 @@ class TestSingleTurnEnv:
         prompt = [{"role": "user", "content": "Hello"}]
         answer = "Hi"
         sampling_args = {"temperature": 0.8, "max_tokens": 100}
-        
+
         completion, state = await mock_singleturn_env.rollout(
             client=mock_singleturn_env.client,
             model="test-model",
             prompt=prompt,
             answer=answer,
-            sampling_args=sampling_args
+            sampling_args=sampling_args,
         )
-        
+
         assert isinstance(completion, list)
         assert completion[0]["content"] == "This is a test response"
-        
+
         # Verify sampling args were passed
         call_args = mock_singleturn_env.client.chat.completions.create.call_args
         assert "temperature" in call_args.kwargs
@@ -117,57 +112,43 @@ class TestSingleTurnEnv:
         answer = "Test answer"
         task = "math"
         info = {"difficulty": "easy"}
-        
+
         completion, state = await mock_singleturn_env.rollout(
-            client=mock_singleturn_env.client,
-            model="test-model",
-            prompt=prompt,
-            answer=answer,
-            task=task,
-            info=info
+            client=mock_singleturn_env.client, model="test-model", prompt=prompt, answer=answer, task=task, info=info
         )
-        
+
         assert isinstance(completion, list)
         assert state == {}  # SingleTurnEnv returns empty state
 
-    @pytest.mark.asyncio 
+    @pytest.mark.asyncio
     async def test_rollout_error_handling(self, mock_singleturn_env):
         """Test rollout handles errors from get_model_response."""
         # Mock get_model_response to return an error
-        mock_singleturn_env.client.chat.completions.create = AsyncMock(
-            side_effect=Exception("API Error")
-        )
-        
+        mock_singleturn_env.client.chat.completions.create = AsyncMock(side_effect=Exception("API Error"))
+
         prompt = [{"role": "user", "content": "Hello"}]
         answer = "Hi"
-        
+
         with pytest.raises(Exception, match="API Error"):
             await mock_singleturn_env.rollout(
-                client=mock_singleturn_env.client,
-                model="test-model",
-                prompt=prompt,
-                answer=answer
+                client=mock_singleturn_env.client, model="test-model", prompt=prompt, answer=answer
             )
 
     @pytest.mark.asyncio
     async def test_a_generate_basic(self, mock_singleturn_env):
         """Test async generation with basic inputs."""
         inputs = {
-            "prompt": [
-                [{"role": "user", "content": "What is 2+2?"}],
-                [{"role": "user", "content": "What is 3+3?"}]
-            ],
-            "answer": ["4", "6"]
+            "prompt": [[{"role": "user", "content": "What is 2+2?"}], [{"role": "user", "content": "What is 3+3?"}]],
+            "answer": ["4", "6"],
         }
-        
+
         # Mock the rubric.score_rollouts method
-        mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0, 1.0],
-            "scores": [{"correctness": 1.0}, {"correctness": 1.0}]
-        })
-        
+        mock_singleturn_env.rubric.score_rollouts = AsyncMock(
+            return_value={"rewards": [1.0, 1.0], "scores": [{"correctness": 1.0}, {"correctness": 1.0}]}
+        )
+
         results = await mock_singleturn_env.a_generate(inputs)
-        
+
         assert "completion" in results
         assert "state" in results
         assert "rewards" in results
@@ -178,48 +159,39 @@ class TestSingleTurnEnv:
     async def test_a_generate_with_dataset(self, mock_singleturn_env, sample_chat_dataset):
         """Test async generation with Dataset input."""
         # Mock the rubric.score_rollouts method
-        mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0, 1.0],
-            "scores": [{"correctness": 1.0}, {"correctness": 1.0}]
-        })
-        
+        mock_singleturn_env.rubric.score_rollouts = AsyncMock(
+            return_value={"rewards": [1.0, 1.0], "scores": [{"correctness": 1.0}, {"correctness": 1.0}]}
+        )
+
         results = await mock_singleturn_env.a_generate(sample_chat_dataset)
-        
+
         assert "completion" in results
-        assert "state" in results  
+        assert "state" in results
         assert "rewards" in results
         assert len(results["completion"]) == 2
 
     @pytest.mark.asyncio
     async def test_a_generate_no_scoring(self, mock_singleturn_env):
         """Test async generation without scoring rollouts."""
-        inputs = {
-            "prompt": [[{"role": "user", "content": "Hello"}]],
-            "answer": ["Hi"]
-        }
-        
+        inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
+
         results = await mock_singleturn_env.a_generate(inputs, score_rollouts=False)
-        
+
         assert "completion" in results
         assert "state" in results
         assert "rewards" not in results  # Should not score when score_rollouts=False
 
     def test_generate_sync_wrapper(self, mock_singleturn_env):
         """Test the synchronous generate wrapper."""
-        inputs = {
-            "prompt": [[{"role": "user", "content": "Hello"}]],
-            "answer": ["Hi"],
-            "info": [{}]
-        }
-        
+        inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"], "info": [{}]}
+
         # Mock the rubric.score_rollouts method
-        mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0],
-            "scores": [{"correctness": 1.0}]
-        })
-        
+        mock_singleturn_env.rubric.score_rollouts = AsyncMock(
+            return_value={"rewards": [1.0], "scores": [{"correctness": 1.0}]}
+        )
+
         results = mock_singleturn_env.generate(inputs)
-        
+
         assert "completion" in results
         assert "state" in results
         assert "rewards" in results
@@ -229,38 +201,23 @@ class TestSingleTurnEnv:
         """Test that environment respects its message_type setting."""
         # Chat environment
         chat_env = SingleTurnEnv(
-            client=mock_openai_client,
-            model="test-model",
-            dataset=sample_dataset,
-            message_type="chat"
+            client=mock_openai_client, model="test-model", dataset=sample_dataset, message_type="chat"
         )
-        
-        # Completion environment 
-        completion_dataset = Dataset.from_dict({
-            "prompt": ["Test prompt"],
-            "answer": ["Test answer"]
-        })
+
+        # Completion environment
+        completion_dataset = Dataset.from_dict({"prompt": ["Test prompt"], "answer": ["Test answer"]})
         completion_env = SingleTurnEnv(
-            client=mock_openai_client,
-            model="test-model", 
-            dataset=completion_dataset,
-            message_type="completion"
+            client=mock_openai_client, model="test-model", dataset=completion_dataset, message_type="completion"
         )
-        
+
         # Test chat rollout
         chat_completion, _ = await chat_env.rollout(
-            client=mock_openai_client,
-            model="test-model",
-            prompt=[{"role": "user", "content": "Hello"}],
-            answer="Hi"
+            client=mock_openai_client, model="test-model", prompt=[{"role": "user", "content": "Hello"}], answer="Hi"
         )
         assert isinstance(chat_completion, list)
-        
+
         # Test completion rollout
         completion_result, _ = await completion_env.rollout(
-            client=mock_openai_client,
-            model="test-model", 
-            prompt="Complete this:",
-            answer="Done"
+            client=mock_openai_client, model="test-model", prompt="Complete this:", answer="Done"
         )
         assert isinstance(completion_result, str)

@@ -17,82 +17,62 @@ from verifiers import (
     State,
 )
 
+
 class MultiTurnEnv(Environment):
-    def __init__(self,
-                 message_type: MessageType = 'chat',
-                 max_turns: int = 10,
-                 **kwargs):
+    def __init__(self, message_type: MessageType = "chat", max_turns: int = 10, **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
         self.message_type = message_type
 
     @abstractmethod
-    def is_completed(self,
-                     messages: Messages,
-                     state: State,
-                     **kwargs) -> bool:
+    def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
         pass
 
     @abstractmethod
-    def env_response(self,
-                     messages: Messages,
-                     state: State,
-                     **kwargs) -> Tuple[Message, State]:
+    def env_response(self, messages: Messages, state: State, **kwargs) -> Tuple[Message, State]:
         """
         Generate a response from the environment (message, state).
         """
         pass
 
-    async def rollout(self,
-                      client: AsyncOpenAI,
-                      model: str,
-                      prompt: Messages,
-                      answer: str = "",
-                      task: str = "default",
-                      info: Info = {},
-                      sampling_args: SamplingArgs = {},
-                      **kwargs) -> Tuple[Messages, State]:
+    async def rollout(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        prompt: Messages,
+        answer: str = "",
+        task: str = "default",
+        info: Info = {},
+        sampling_args: SamplingArgs = {},
+        **kwargs,
+    ) -> Tuple[Messages, State]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
         is_completed = False
-        state = {
-            'prompt': prompt,
-            'completion': [],
-            'answer': answer,
-            'task': task,
-            'info': info,
-            'responses': []
-        }
-        if self.message_type == 'chat':
+        state = {"prompt": prompt, "completion": [], "answer": answer, "task": task, "info": info, "responses": []}
+        if self.message_type == "chat":
             assert isinstance(prompt, list)
             completion = []
         else:
             assert isinstance(prompt, str)
             completion = ""
-        rollout = deepcopy(prompt) 
+        rollout = deepcopy(prompt)
         turn = 0
         while not is_completed:
             if self.is_completed(rollout, state, **kwargs):
                 is_completed = True
                 break
             response = await self.get_model_response(
-                prompt=rollout,
-                client=client,
-                model=model,
-                sampling_args=sampling_args,
-                message_type=self.message_type
+                prompt=rollout, client=client, model=model, sampling_args=sampling_args, message_type=self.message_type
             )
-            state['responses'].append(response)
-            if self.message_type == 'chat':
+            state["responses"].append(response)
+            if self.message_type == "chat":
                 assert isinstance(rollout, list)
                 assert isinstance(completion, list)
                 assert isinstance(response, ChatCompletion)
                 response_text: str = response.choices[0].message.content or ""
-                response_message: ChatMessage = {
-                    "role": "assistant",
-                    "content": response_text
-                }
+                response_message: ChatMessage = {"role": "assistant", "content": response_text}
                 rollout.append(response_message)
                 completion.append(response_message)
             else:
@@ -107,7 +87,7 @@ class MultiTurnEnv(Environment):
                 is_completed = True
             else:
                 env_msg, state = self.env_response(rollout, state, **kwargs)
-                if self.message_type == 'chat':
+                if self.message_type == "chat":
                     assert isinstance(env_msg, dict)
                     assert isinstance(rollout, list)
                     assert isinstance(completion, list)

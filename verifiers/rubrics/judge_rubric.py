@@ -1,4 +1,3 @@
-import os
 from openai import OpenAI
 
 from verifiers import Parser, Rubric
@@ -23,13 +22,16 @@ Response:
 
 Respond either "yes" or "no" only."""
 
+
 class JudgeRubric(Rubric):
-    def __init__(self,
-                 judge_client: OpenAI | None = None,
-                 judge_model: str = "gpt-4.1-nano",
-                 judge_prompt: str = DEFAULT_JUDGE_PROMPT,
-                 parser: Parser = Parser(),
-                 **kwargs):
+    def __init__(
+        self,
+        judge_client: OpenAI | None = None,
+        judge_model: str = "gpt-4.1-nano",
+        judge_prompt: str = DEFAULT_JUDGE_PROMPT,
+        parser: Parser = Parser(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.judge_client = judge_client if judge_client is not None else OpenAI()
         self.judge_model = judge_model
@@ -42,30 +44,24 @@ class JudgeRubric(Rubric):
         # check which fields are present in judge prompt template
         # get question from answer:
         if isinstance(prompt, list):
-            question = prompt[-1]['content']
+            question = prompt[-1]["content"]
         else:
             question = prompt
         if isinstance(completion, list):
-            response = completion[-1]['content']
+            response = completion[-1]["content"]
         else:
             response = completion
         prompt = self.judge_prompt.format(question=question, answer=answer, response=response)
         judge_response = self.judge_client.chat.completions.create(
             model=self.judge_model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
         )
         judge_response = str(judge_response.choices[0].message.content)
-        if 'yes' in judge_response.lower():
+        if "yes" in judge_response.lower():
             return 1.0
-        elif 'no' in judge_response.lower():
+        elif "no" in judge_response.lower():
             return 0.0
         else:
             # extract float from judge_response
             return float(judge_response)
-    
-
-
-    

@@ -1,28 +1,29 @@
 import os
+
 from openai import OpenAI
 
-import verifiers as vf
 from verifiers.envs.textarena_env import TextArenaEnv
 
 client = OpenAI()
 vf_env = TextArenaEnv(
     game="Wordle-v0",
-    num_samples=2000, 
+    num_samples=2000,
     num_eval_samples=2000,
     max_concurrent=20,
 )
+
 
 def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
         api_key = os.getenv("DEEPSEEK_API_KEY")
-        model_name = "deepseek-chat" # DeepSeek V3-0324
+        model_name = "deepseek-chat"  # DeepSeek V3-0324
         client = OpenAI(base_url=base_url, api_key=api_key)
     elif api == "openai":
         # just for testing :) not for distillation :)
         api_key = os.getenv("OPENAI_API_KEY")
-        model_name = "gpt-4.1" 
+        model_name = "gpt-4.1"
         client = OpenAI(api_key=api_key)
     else:
         raise ValueError(f"Invalid API: {api}")
@@ -31,21 +32,16 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
     }
     # columns = ['prompt', 'completion', 'answer', 'reward', ...]
     # use deepseek-chat for multiturn rollouts (V3-0324)
-    results = vf_env.evaluate(
-        client=client,
-        model=model_name, 
-        sampling_args=sampling_args,
-        num_samples=num_samples
-    )
+    results = vf_env.evaluate(client=client, model=model_name, sampling_args=sampling_args, num_samples=num_samples)
 
-    print('--- Example ---')
-    print('Prompt: ', results['prompt'][0])
-    print('Completion: ', results['completion'][0])
-    print('Answer: ', results['answer'][0])
+    print("--- Example ---")
+    print("Prompt: ", results["prompt"][0])
+    print("Completion: ", results["completion"][0])
+    print("Answer: ", results["answer"][0])
     print("--- Rewards ---")
     for k, v in results.items():
-        if 'reward' in k:
-            print(k, '-', sum(v) / len(v)) 
+        if "reward" in k:
+            print(k, "-", sum(v) / len(v))
     if save_dataset:
         dataset_dsv3 = vf_env.make_dataset(results)
         # filter to top half of rows by rewards
@@ -53,8 +49,10 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         # save to hub
         dataset_dsv3.push_to_hub("V3-wordle")
 
+
 if __name__ == "__main__":
     import argparse
+
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
     argparser.add_argument("--num-samples", "-n", type=int, default=20)

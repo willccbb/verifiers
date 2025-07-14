@@ -5,14 +5,13 @@ import logging
 import time
 
 import requests
+import torch
+from openai import AsyncOpenAI
 from requests import ConnectionError
 from requests.adapters import HTTPAdapter
-from openai import AsyncOpenAI
-import torch
 from trl.import_utils import is_requests_available, is_vllm_available
-
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator # type: ignore
-from vllm.distributed.utils import StatelessProcessGroup # type: ignore
+from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator  # type: ignore
+from vllm.distributed.utils import StatelessProcessGroup  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +60,7 @@ class VLLMClient(AsyncOpenAI):
     """
 
     def __init__(
-        self,
-        host: str = "0.0.0.0",
-        port: int = 8000,
-        group_port: int = 51216, connection_timeout: float = 0.0
+        self, host: str = "0.0.0.0", port: int = 8000, group_port: int = 51216, connection_timeout: float = 0.0
     ):
         if not is_requests_available():
             raise ImportError("requests is not installed. Please install it with `pip install requests`.")
@@ -74,17 +70,12 @@ class VLLMClient(AsyncOpenAI):
         super().__init__(base_url=f"http://{host}:{port}/v1", api_key="local")
         self.session = requests.Session()
         # Configure connection pooling to handle rapid requests better
-        adapter = HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=10,
-            max_retries=3,
-            pool_block=False
-        )
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
-        
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=3, pool_block=False)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
         self.host = host
-        self.server_port = port # Renamed from server_port to port to match super init
+        self.server_port = port  # Renamed from server_port to port to match super init
         self.server_url = f"http://{self.host}:{self.server_port}"
 
         self.group_port = group_port
@@ -105,13 +96,13 @@ class VLLMClient(AsyncOpenAI):
         start_time = time.time()  # Record the start time
 
         while True:
-            try: 
-                response = requests.get(url) # type: ignore
-            except requests.exceptions.RequestException as exc: # type: ignore
+            try:
+                response = requests.get(url)  # type: ignore
+            except requests.exceptions.RequestException as exc:  # type: ignore
                 # Check if the total timeout duration has passed
                 elapsed_time = time.time() - start_time
                 if elapsed_time >= total_timeout:
-                    raise ConnectionError( # type: ignore
+                    raise ConnectionError(  # type: ignore
                         f"The vLLM server can't be reached at {self.host}:{self.server_port} after {total_timeout} "
                         "seconds. Make sure the server is running by running `trl vllm-serve`."
                     ) from exc
@@ -128,7 +119,7 @@ class VLLMClient(AsyncOpenAI):
         """
         Initializes the weight update group in a distributed setup for model synchronization.
         """
-        
+
         # Get the world size from the server
         url = f"{self.server_url}/get_world_size"
         try:
@@ -136,7 +127,7 @@ class VLLMClient(AsyncOpenAI):
         except Exception as e:
             logger.error(f"Failed to get world size: {e}")
             raise
-            
+
         if response.status_code == 200:
             vllm_world_size = response.json()["world_size"]
             logger.info(f"vLLM world size: {vllm_world_size}")
@@ -151,11 +142,13 @@ class VLLMClient(AsyncOpenAI):
         url = f"{self.server_url}/init_communicator"
         # Send the actual host address for the StatelessProcessGroup connection
         try:
-            response = self.session.post(url, json={"host": self.host, "port": self.group_port, "world_size": world_size})
+            response = self.session.post(
+                url, json={"host": self.host, "port": self.group_port, "world_size": world_size}
+            )
         except Exception as e:
             logger.error(f"Failed to init communicator: {e}")
             raise
-            
+
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
@@ -186,7 +179,7 @@ class VLLMClient(AsyncOpenAI):
         """
         dtype, shape = str(weights.dtype), tuple(weights.shape)
         url = f"{self.server_url}/update_named_param"
-        
+
         # Add timeout to prevent hanging on HTTP request
         try:
             response = self.session.post(url, json={"name": name, "dtype": dtype, "shape": shape}, timeout=300.0)
@@ -196,7 +189,7 @@ class VLLMClient(AsyncOpenAI):
         except Exception as e:
             logger.error(f"Error sending request for {name}: {e}")
             raise
-            
+
         if response.status_code != 200:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 

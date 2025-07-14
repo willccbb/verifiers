@@ -1,6 +1,8 @@
+from peft import LoraConfig
+
 from .grpo_config import GRPOConfig
 from .grpo_trainer import GRPOTrainer
-from peft import LoraConfig
+
 
 def grpo_defaults(run_name: str) -> GRPOConfig:
     return GRPOConfig(
@@ -28,12 +30,14 @@ def grpo_defaults(run_name: str) -> GRPOConfig:
         report_to="wandb",
     )
 
-def lora_defaults(r = 8, alpha = 16) -> LoraConfig:
+
+def lora_defaults(r=8, alpha=16) -> LoraConfig:
     return LoraConfig(
         r=r,
         lora_alpha=alpha,
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
         task_type="CAUSAL_LM",
     )
+
 
 __all__ = ["GRPOConfig", "GRPOTrainer", "grpo_defaults", "lora_defaults"]

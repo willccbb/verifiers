@@ -1,59 +1,65 @@
 import os
 
-from openai import OpenAI
 from datasets import load_dataset
+from openai import OpenAI
 
 import verifiers as vf
 
-dataset = load_dataset('agentlans/wikipedia-paragraphs', split='train')
-dataset = dataset.map(lambda x: {'question': x['text'], 'answer': x['text']})
+dataset = load_dataset("agentlans/wikipedia-paragraphs", split="train")
+dataset = dataset.map(lambda x: {"question": x["text"], "answer": x["text"]})
 
-parser = vf.XMLParser(['think', 'answer'], answer_field="answer")
+parser = vf.XMLParser(["think", "answer"], answer_field="answer")
 system_prompt = f"""Respond in the following format:
 {parser.get_format_str()}
 
 Summarize the given text in 3 sentences."""
 
+
 def sentence_reward_func(completion, **kwargs) -> float:
     """
     Count the number of sentences in the completion.
     """
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if len(response.split('.')) == 3 else 0.0
+    response = parser.parse_answer(completion) or ""
+    return 1.0 if len(response.split(".")) == 3 else 0.0
+
 
 def lcs_reward_func(completion, answer, **kwargs) -> float:
     """
-    LCS ratio of the prompt and the parsed completion.    
+    LCS ratio of the prompt and the parsed completion.
     """
+
     def lcs_ratio(x: str, y: str) -> float:
         """
         Return the longest common subsequence ratio of x and y.
         """
         from difflib import SequenceMatcher
+
         return SequenceMatcher(None, x, y).ratio()
-    response = parser.parse_answer(completion) or ''
+
+    response = parser.parse_answer(completion) or ""
     return lcs_ratio(response, answer)
 
-rubric = vf.Rubric(funcs=[
-    sentence_reward_func,
-    lcs_reward_func,
-    parser.get_format_reward_func(),
-], weights=[1.0, 0.2, 0.2])
 
-vf_env = vf.SingleTurnEnv(
-    eval_dataset=dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-    max_concurrent=10
+rubric = vf.Rubric(
+    funcs=[
+        sentence_reward_func,
+        lcs_reward_func,
+        parser.get_format_reward_func(),
+    ],
+    weights=[1.0, 0.2, 0.2],
 )
 
-def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool):    
+vf_env = vf.SingleTurnEnv(
+    eval_dataset=dataset, system_prompt=system_prompt, parser=parser, rubric=rubric, max_concurrent=10
+)
+
+
+def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
         api_key = os.getenv("DEEPSEEK_API_KEY")
-        model_name = "deepseek-chat" # DeepSeek V3-0324
+        model_name = "deepseek-chat"  # DeepSeek V3-0324
         client = OpenAI(base_url=base_url, api_key=api_key)
     elif api == "openai":
         # just for testing :) not for distillation :)
@@ -68,18 +74,15 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool):
     }
 
     # columns = ['prompt', 'completion', 'answer', 'reward']
-    results = vf_env.evaluate(
-        client=client,
-        model=model_name,
-        sampling_args=sampling_args,
-        num_samples=num_samples
-    ) 
+    results = vf_env.evaluate(client=client, model=model_name, sampling_args=sampling_args, num_samples=num_samples)
     if save_dataset:
         dataset = vf_env.make_dataset(results)
         dataset.push_to_hub("V3-reverse-wiki-paragraphs-test")
-    
+
+
 if __name__ == "__main__":
     import argparse
+
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
     argparser.add_argument("--num-samples", "-n", type=int, default=10)

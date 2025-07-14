@@ -1,14 +1,17 @@
 import json
-from typing import List, Any
+from typing import Any, List
 
 from verifiers.parsers.smola_parser import SmolaParser
 from verifiers.rubrics.tool_rubric import ToolRubric
 
+
 class SmolaToolRubric(ToolRubric):
-    def __init__(self,
-                 parser: SmolaParser = SmolaParser(fields=["reasoning", ("tool", "answer")]),
-                 env_parser: SmolaParser = SmolaParser(fields=["result"]),
-                 tools: List[Any] = []):
+    def __init__(
+        self,
+        parser: SmolaParser = SmolaParser(fields=["reasoning", ("tool", "answer")]),
+        env_parser: SmolaParser = SmolaParser(fields=["result"]),
+        tools: List[Any] = [],
+    ):
         super().__init__(parser, env_parser, tools)
         self.parser = parser
         self.env_parser = env_parser
@@ -26,22 +29,22 @@ class SmolaToolRubric(ToolRubric):
 
     def evaluate_code(self, code_str, answer, **kwargs) -> float:
         import io
-        import sys
         import signal
+        import sys
         from contextlib import redirect_stdout
-        
+
         try:
-            test_cases = json.loads(answer)['test_cases']
+            test_cases = json.loads(answer)["test_cases"]
         except Exception as e:
             print(f"Error parsing test cases: {e}")
             return 0.0
         # strip ```python and ``` if present at the beginning and end of the code
         code_str = code_str.strip()
-        if code_str.startswith('```python'):
+        if code_str.startswith("```python"):
             code_str = code_str[9:]
-        elif code_str.startswith('```'):
+        elif code_str.startswith("```"):
             code_str = code_str[3:]
-        if code_str.endswith('```'):
+        if code_str.endswith("```"):
             code_str = code_str[:-3]
         code_str = code_str.strip()
 
@@ -50,14 +53,14 @@ class SmolaToolRubric(ToolRubric):
 
         def normalize_output(output):
             # Normalize line endings and whitespace
-            return '\n'.join(line.strip() for line in output.splitlines())
-        
+            return "\n".join(line.strip() for line in output.splitlines())
+
         total_cases = 0
         passed = 0
-        
+
         for test in test_cases:
             output = io.StringIO()
-            sys.stdin = io.StringIO(test['input'])
+            sys.stdin = io.StringIO(test["input"])
             try:
                 signal.signal(signal.SIGALRM, timeout_handler)
                 signal.alarm(10)
@@ -65,7 +68,7 @@ class SmolaToolRubric(ToolRubric):
                     exec(code_str)
                 signal.alarm(0)
                 actual = normalize_output(output.getvalue())
-                expected = normalize_output(test['output'])
+                expected = normalize_output(test["output"])
 
                 # Compare each line individually
                 actual_lines = actual.splitlines()
@@ -74,10 +77,10 @@ class SmolaToolRubric(ToolRubric):
                 for a, e in zip(actual_lines, expected_lines):
                     if a == e:
                         passed += 1
-                    
+
             except Exception as e:
                 sys.stdin = sys.__stdin__
                 return 0.0
             sys.stdin = sys.__stdin__
-        
-        return passed / total_cases if total_cases else 0.0 
+
+        return passed / total_cases if total_cases else 0.0
