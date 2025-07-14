@@ -15,8 +15,8 @@ model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
 vf_env = TextArenaEnv(
     game="Wordle-v0",
-    num_samples=2000, 
-    num_eval_samples=20
+    num_train_examples=2000, 
+    num_eval_examples=20,
 )
 
 run_name = f"wordle-grpo-{size}"

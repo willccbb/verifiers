@@ -38,15 +38,15 @@ class TextArenaEnv(MultiTurnEnv):
     """
     def __init__(self,
                  game: str = "Wordle-v0",
-                 num_samples: int = 1000,
-                 num_eval_samples: int = 0,
+                 num_train_examples: int = 1000,
+                 num_eval_examples: int = 0,
                  system_prompt: str = GUESS_SYSTEM_PROMPT,
                  parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
                  seed: int = 0,
                  **kwargs):
         self.game = game
-        self.num_samples = num_samples
-        self.num_eval_samples = num_eval_samples
+        self.num_train_examples = num_train_examples
+        self.num_eval_examples = num_eval_examples
         self.seed = seed
 
         nltk.download('words', quiet=True)
@@ -121,10 +121,10 @@ class TextArenaEnv(MultiTurnEnv):
         words = ta_env.word_list
         # set seed 
         random.seed(self.seed)
-        for i in range(self.num_samples + self.num_eval_samples):
+        for i in range(self.num_train_examples + self.num_eval_examples):
             question = user_prompt
             answer = random.choice(words)
-            if i < self.num_samples:
+            if i < self.num_train_examples:
                 dataset_rows.append({
                     "question": question,
                     "answer": answer
@@ -135,7 +135,7 @@ class TextArenaEnv(MultiTurnEnv):
                     "answer": answer
                 })
         dataset = Dataset.from_list(dataset_rows)
-        if self.num_eval_samples > 0:
+        if self.num_eval_examples > 0:
             eval_dataset = Dataset.from_list(eval_dataset_rows)
         else:
             eval_dataset = None

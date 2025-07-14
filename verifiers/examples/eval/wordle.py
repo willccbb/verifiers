@@ -7,8 +7,8 @@ from verifiers.envs.textarena_env import TextArenaEnv
 client = OpenAI()
 vf_env = TextArenaEnv(
     game="Wordle-v0",
-    num_samples=2000, 
-    num_eval_samples=2000,
+    num_train_examples=2000, 
+    num_eval_examples=2000,
     max_concurrent=20,
 )
 

@@ -20,7 +20,8 @@ In each turn, give only your guess inside <guess>...</guess> tags."""
 
 vf_env = TextArenaEnv(
     game="Wordle-v0",
-    num_samples=2000, 
+    num_train_examples=2000, 
+    num_eval_examples=20,
     system_prompt=NOTHINK_WORDLE_SYSTEM_PROMPT,
     parser=vf.XMLParser(fields=["guess"], answer_field="guess"),
 )
