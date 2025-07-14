@@ -39,7 +39,7 @@ class TextArenaEnv(MultiTurnEnv):
     def __init__(self,
                  game: str = "Wordle-v0",
                  num_samples: int = 1000,
-                 num_eval_samples: int = 100,
+                 num_eval_samples: int = 1000,
                  system_prompt: str = GUESS_SYSTEM_PROMPT,
                  parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
                  seed: int = 0,

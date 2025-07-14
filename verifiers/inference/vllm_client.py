@@ -1,5 +1,3 @@
-# adapted from trl/extras/vllm_client.py (huggingface/trl)
-
 import atexit
 import logging
 import time
@@ -75,8 +73,8 @@ class VLLMClient(AsyncOpenAI):
         self.session = requests.Session()
         # Configure connection pooling to handle rapid requests better
         adapter = HTTPAdapter(
-            pool_connections=10,
-            pool_maxsize=10,
+            pool_connections=1024,
+            pool_maxsize=1024,
             max_retries=3,
             pool_block=False
         )

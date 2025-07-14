@@ -10,6 +10,7 @@ from openai import OpenAI, AsyncOpenAI
 
 from verifiers import (
     ChatMessage,
+    ChatCompletion,
     GenerateInputs,
     GenerateOutputs,
     Info,
@@ -207,6 +208,22 @@ class Environment(ABC):
         """
         pass
 
+    async def run_rollout_with_semaphore(self,
+                                         semaphore: asyncio.Semaphore,
+                                         client: AsyncOpenAI,
+                                         model: str,
+                                         prompt: Messages,
+                                         answer: str = "",
+                                         task: str = "default",
+                                         info: Info = {},
+                                         sampling_args: SamplingArgs = {},
+                                         **kwargs) -> Tuple[Messages, State]:
+        """
+        Run a rollout with a semaphore.
+        """
+        async with semaphore:
+            return await self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
+
     async def run_rollouts(self,
                            client: AsyncOpenAI,
                            model: str,
@@ -215,15 +232,23 @@ class Environment(ABC):
                            tasks: List[str] = [],
                            infos: List[Info] = [],
                            sampling_args: SamplingArgs = {},
+                           max_concurrent: int = -1,
                            **kwargs) -> List[Tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
         from tqdm.asyncio import tqdm_asyncio
-        rollout_tasks = [
-            self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
-            for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-        ]
+        if max_concurrent > 0:
+            semaphore = asyncio.Semaphore(max_concurrent)
+            rollout_tasks = [
+                self.run_rollout_with_semaphore(semaphore, client, model, prompt, answer, task, info, sampling_args, **kwargs)
+                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
+            ]
+        else:
+            rollout_tasks = [
+                self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
+                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
+            ]
         return await tqdm_asyncio.gather(
             *rollout_tasks,
             total=len(prompts),
@@ -236,6 +261,7 @@ class Environment(ABC):
                          model: str | None = None,
                          sampling_args: SamplingArgs = {},
                          score_rollouts: bool = True,
+                         max_concurrent: int = -1,
                          **kwargs) -> GenerateOutputs:
         """
         Generate completions and rewards for a given set of inputs.
@@ -275,6 +301,7 @@ class Environment(ABC):
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
+            max_concurrent=max_concurrent,
             **kwargs
         )
         results['completion'] = [rollout[0] for rollout in rollouts]
@@ -299,10 +326,11 @@ class Environment(ABC):
                  model: str | None = None,
                  sampling_args: SamplingArgs = {},
                  score_rollouts: bool = True,
+                 max_concurrent: int = -1,
                  **kwargs) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
-        coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, **kwargs)
+        coro = self.a_generate(inputs, client, model, sampling_args, score_rollouts, max_concurrent, **kwargs)
         
         executor = ThreadPoolExecutor(max_workers=self.max_workers)
         
@@ -492,12 +520,108 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             "rewards": rewards,
         }
 
+    def parse_completion_logprobs(self, chat_completion: ChatCompletion) -> List[float]:
+        """Parses the completion logprobs from a vLLM chat completion"""
+        assert len(chat_completion.choices) == 1, "Response should always have one choice"
+        assert chat_completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        assert chat_completion.choices[0].logprobs.content is not None, (
+            "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        logprobs = [logprob.logprob for logprob in chat_completion.choices[0].logprobs.content]
+        return logprobs
+
+    def parse_completion_tokens(self, chat_completion: ChatCompletion) -> List[int]:
+        """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
+        assert len(chat_completion.choices) == 1, "Response should always have one choice"
+        assert chat_completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        assert chat_completion.choices[0].logprobs.content is not None, (
+            "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        tokens = [int(token.token.split(":")[-1]) for token in chat_completion.choices[0].logprobs.content]
+        return tokens
+
+    def process_chat_format_vllm(
+        self,
+        prompt: List[ChatMessage],
+        completion: List[ChatMessage],
+        state: State,
+        reward: float,
+        mask_env_responses: bool = False,
+    ) -> Tuple[List[int], List[int], List[int], List[int], List[float]]:
+        """
+        Process chat format conversations using incremental prefixes.
+        """
+
+        raise NotImplementedError('process_chat_format_vllm is not implemented')
+
+    def process_env_results_vllm(
+        self,
+        prompts: List[Messages],
+        completions: List[Messages],
+        states: List[State],
+        rewards: List[float],
+        processing_class: "PreTrainedTokenizerBase",
+        max_seq_len: int = -1,
+        mask_truncated_completions: bool = False,
+        mask_env_responses: bool = False,
+    ) -> ProcessedOutputs:
+        """
+        Process results with vLLM tokens/logprobs.
+        """
+        # Determine format from first prompt
+        is_chat_format = isinstance(prompts[0], list)
+ 
+        all_prompt_ids = []
+        all_prompt_masks = []
+        all_completion_ids = []
+        all_completion_masks = []
+        all_completion_logprobs = []
+        for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
+            # Format-specific processing
+            if is_chat_format:
+                assert isinstance(prompt, list) and isinstance(completion, list)
+                prompt_ids, prompt_mask, completion_ids, completion_mask, completion_logprobs = self.process_chat_format_vllm(
+                    prompt, completion, state, reward, mask_env_responses
+                )
+            else:
+                assert isinstance(prompt, str) and isinstance(completion, str)
+                prompt_ids, prompt_mask, completion_ids, completion_mask = self.process_completion_format(
+                    prompt, completion, processing_class
+                )
+            is_truncated = False
+            if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
+                if len(prompt_ids) > max_seq_len:
+                    prompt_ids = prompt_ids[:max_seq_len]
+                completion_ids = completion_ids[:max_seq_len - len(prompt_ids)]
+                completion_mask = completion_mask[:max_seq_len - len(prompt_ids)]
+                is_truncated = True
+                assert len(prompt_ids) + len(completion_ids) <= max_seq_len, \
+                    f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_len: {max_seq_len}"
+            if is_truncated and mask_truncated_completions:
+                completion_mask = [0] * len(completion_ids)
+            assert len(prompt_ids) == len(prompt_mask), \
+                f"Prompt ids: {len(prompt_ids)}, prompt mask: {len(prompt_mask)}"
+            assert len(completion_ids) == len(completion_mask), \
+                f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
+            all_prompt_ids.append(prompt_ids)
+            all_prompt_masks.append(prompt_mask)
+            all_completion_ids.append(completion_ids)
+            all_completion_masks.append(completion_mask)
+            all_completion_logprobs.append(completion_logprobs)
+
+        raise NotImplementedError('process_env_results_vllm is not implemented')
+
     # Evaluation and dataset generation
     def evaluate(self,
                  client: AsyncOpenAI | OpenAI,
                  model: str,
                  sampling_args: SamplingArgs = {},
                  num_samples: int = -1,
+                 max_concurrent: int = -1,
                  **kwargs) -> GenerateOutputs:
         """
         Evaluate model on the Environment evaluation dataset.
@@ -510,7 +634,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             inputs = self.get_eval_dataset(n=num_samples)
         assert inputs is not None, 'No dataset found'
         results = self.generate(
-            inputs, client, model, sampling_args, **kwargs
+            inputs, client, model, sampling_args, max_concurrent, **kwargs
         )
         return results
 

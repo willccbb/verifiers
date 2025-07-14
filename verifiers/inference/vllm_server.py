@@ -1,5 +1,4 @@
 import asyncio
-import time
 import os
 import signal
 from argparse import Namespace

@@ -3,7 +3,7 @@ import verifiers as vf
 
 """
 inference:
-CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT
+CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT --enforce-eager
 
 training:
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/reverse_text.py
@@ -54,7 +54,7 @@ args.num_generations = 12
 args.gradient_accumulation_steps = 8
 args.max_steps = 100
 args.eval_strategy = 'steps'
-args.eval_steps = 10
+args.eval_steps = 2
 
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 trainer = vf.GRPOTrainer(
