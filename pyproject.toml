@@ -28,6 +28,8 @@ dependencies = [
 
 [project.optional-dependencies]
 all = [
+    "ruff",
+    "pre-commit",
     "setuptools",
     "requests",
     "torch>=2.7.0",
@@ -43,7 +45,7 @@ all = [
     "nest-asyncio>=1.6.0",
     "ipykernel",
     "ipywidgets",
-    "math-verify==0.8.0",
+    "math-verify>=0.8.0",
     "duckduckgo-search",
     "brave-search",
     "reasoning-gym",
@@ -82,17 +84,17 @@ envs = [
     "nltk"
 ]
 
-docs = [
-    "sphinx",
-    "myst-parser",
-    "sphinx-rtd-theme"
-]
-
-tests = [
+dev = [
+    "ruff",
+    "pre-commit",
+    "setuptools",
     "requests",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "sphinx",
+    "myst-parser",
+    "sphinx-rtd-theme"
 ]
 
 [project.scripts]
