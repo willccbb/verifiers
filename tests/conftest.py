@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datasets import Dataset
-from verifiers.parsers import Parser, XMLParser, ThinkParser
-from verifiers.envs import Environment, SingleTurnEnv, MultiTurnEnv
-from verifiers.rubrics import Rubric
+from verifiers import Parser, XMLParser, ThinkParser
+from verifiers import Environment, SingleTurnEnv, MultiTurnEnv
+from verifiers import Rubric
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ class MockAsyncOpenAI:
         
         # Set up async methods
         self.chat.completions.create = AsyncMock(side_effect=self._handle_chat_completion)
-        self.completions.create = MagicMock(side_effect=self._handle_text_completion)
+        self.completions.create = AsyncMock(side_effect=self._handle_text_completion)
     
     def add_chat_response(self, messages, response, finish_reason="stop"):
         """Add a mapped response for specific messages."""
@@ -106,14 +106,31 @@ class MockAsyncOpenAI:
                 "finish_reason": "stop"
             }
         
-        # Create mock response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = response_data["content"]
-        mock_response.choices[0].finish_reason = response_data["finish_reason"]
+        # Create mock response that mimics ChatCompletion
+        from openai.types.chat.chat_completion import ChatCompletion
+        from openai.types.chat.chat_completion_message import ChatCompletionMessage
+        from openai.types.chat.chat_completion import Choice
+        
+        # Create a proper mock that will pass isinstance checks
+        mock_response = MagicMock(spec=ChatCompletion)
+        mock_choice = MagicMock(spec=Choice)
+        mock_message = MagicMock(spec=ChatCompletionMessage)
+        
+        # Set the attributes
+        mock_message.content = response_data["content"]
+        mock_message.role = "assistant"
+        mock_choice.message = mock_message
+        mock_choice.finish_reason = response_data["finish_reason"]
+        mock_choice.index = 0
+        
+        mock_response.choices = [mock_choice]
+        mock_response.id = "test-id"
+        mock_response.model = "test-model"
+        mock_response.object = "chat.completion"
+        
         return mock_response
     
-    def _handle_text_completion(self, prompt, **kwargs):
+    async def _handle_text_completion(self, prompt, **kwargs):
         """Handle text completion requests."""
         if prompt in self.text_completions:
             response_data = self.text_completions[prompt]
@@ -123,11 +140,24 @@ class MockAsyncOpenAI:
                 "finish_reason": "stop"
             }
         
-        # Create mock response
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].text = response_data["text"]
-        mock_response.choices[0].finish_reason = response_data["finish_reason"]
+        # Create mock response that mimics Completion
+        from openai.types.completion import Completion
+        from openai.types.completion_choice import CompletionChoice
+        
+        # Create a proper mock that will pass isinstance checks
+        mock_response = MagicMock(spec=Completion)
+        mock_choice = MagicMock(spec=CompletionChoice)
+        
+        # Set the attributes
+        mock_choice.text = response_data["text"]
+        mock_choice.finish_reason = response_data["finish_reason"]
+        mock_choice.index = 0
+        
+        mock_response.choices = [mock_choice]
+        mock_response.id = "test-id"
+        mock_response.model = "test-model"
+        mock_response.object = "text_completion"
+        
         return mock_response
     
     def _messages_to_key(self, messages):

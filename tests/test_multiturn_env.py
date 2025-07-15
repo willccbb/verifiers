@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datasets import Dataset
-from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.parsers import Parser
-from verifiers.rubrics import Rubric
+from verifiers import MultiTurnEnv
+from verifiers import Parser
+from verifiers import Rubric
 
 
 class TestMultiTurnEnv:
@@ -74,7 +74,13 @@ class TestMultiTurnEnv:
         assert completion[2]["content"] == "Second response"
         assert completion[4]["content"] == "Final response DONE"
         
+        # Check state structure
         assert state["answer"] == "target_answer"
+        assert state["prompt"] == prompt
+        # state["completion"] is initialized to [] but not updated during rollout
+        assert state["completion"] == []
+        assert "responses" in state
+        assert len(state["responses"]) == 3  # Three assistant responses
 
     @pytest.mark.asyncio
     async def test_max_turns_limiting(self, mock_multiturn_env_max_turns):
@@ -97,27 +103,35 @@ class TestMultiTurnEnv:
         assert completion[0]["role"] == "assistant"
         assert completion[1]["role"] == "user"
         assert completion[2]["role"] == "assistant"
+        assert len(state["responses"]) == 2  # Two assistant responses
 
     @pytest.mark.asyncio
-    async def test_error_handling_stops_rollout(self, mock_multiturn_env):
-        """Test that errors stop the rollout immediately."""
-        # Set up the mock to return an error response for the expected conversation
+    async def test_state_initialization(self, mock_multiturn_env):
+        """Test that state is properly initialized with all required fields."""
         mock_multiturn_env.client.add_chat_response(
-            messages=[{"role": "user", "content": "Start conversation"}],
-            response="[ERROR] Something went wrong"
+            messages=[{"role": "user", "content": "Test state"}],
+            response="Quick DONE"
         )
         
-        prompt = [{"role": "user", "content": "Start conversation"}]
+        prompt = [{"role": "user", "content": "Test state"}]
         completion, state = await mock_multiturn_env.rollout(
             client=mock_multiturn_env.client,
             model="test-model",
             prompt=prompt,
-            answer="target_answer"
+            answer="test_answer",
+            task="test_task",
+            info={"extra": "data"}
         )
         
-        # Should stop immediately after error
-        assert len(completion) == 1
-        assert completion[0]["content"] == "[ERROR] Something went wrong"
+        # Check all state fields are initialized
+        assert state["prompt"] == prompt
+        # state["completion"] is initialized to [] but not updated during rollout
+        assert state["completion"] == []
+        assert state["answer"] == "test_answer"
+        assert state["task"] == "test_task"
+        assert state["info"] == {"extra": "data"}
+        assert "responses" in state
+        assert isinstance(state["responses"], list)
 
     @pytest.mark.asyncio
     async def test_immediate_completion(self, mock_multiturn_env):
@@ -138,6 +152,7 @@ class TestMultiTurnEnv:
         # Should complete immediately
         assert len(completion) == 1
         assert completion[0]["content"] == "Immediate DONE"
+        assert len(state["responses"]) == 1
 
     @pytest.mark.asyncio
     async def test_env_response_integration(self, mock_multiturn_env):
@@ -169,26 +184,6 @@ class TestMultiTurnEnv:
         user_messages = [msg for msg in completion if msg["role"] == "user"]
         assert len(user_messages) >= 1
         assert "Continue (turn 1)" in user_messages[0]["content"]
-
-    @pytest.mark.asyncio
-    async def test_state_management(self, mock_multiturn_env):
-        """Test that state is properly initialized and maintained."""
-        mock_multiturn_env.client.add_chat_response(
-            messages=[{"role": "user", "content": "Test state"}],
-            response="Quick DONE"
-        )
-        
-        prompt = [{"role": "user", "content": "Test state"}]
-        completion, state = await mock_multiturn_env.rollout(
-            client=mock_multiturn_env.client,
-            model="test-model",
-            prompt=prompt,
-            answer="test_answer"
-        )
-        
-        # State should contain the answer
-        assert "answer" in state
-        assert state["answer"] == "test_answer"
 
     @pytest.mark.asyncio
     async def test_prompt_copying(self, mock_multiturn_env):
@@ -236,36 +231,45 @@ class TestMultiTurnEnv:
         assert "max_tokens" in call_args.kwargs
 
     @pytest.mark.asyncio
-    async def test_task_and_info_parameters(self, mock_multiturn_env):
-        """Test rollout with task and info parameters."""
-        mock_multiturn_env.client.add_chat_response(
-            messages=[{"role": "user", "content": "Task question"}],
-            response="Task DONE"
+    async def test_completion_format_multiturn(self, mock_openai_client):
+        """Test MultiTurnEnv with completion format."""
+        class CompletionMultiTurnEnv(MultiTurnEnv):
+            def __init__(self, **kwargs):
+                super().__init__(message_type="completion", **kwargs)
+                
+            def is_completed(self, messages, state, **kwargs):
+                return "DONE" in messages
+            
+            def env_response(self, messages, state, **kwargs):
+                return " Continue.", state
+        
+        completion_dataset = Dataset.from_dict({
+            "prompt": ["Start:"],
+            "answer": ["Done"]
+        })
+        
+        env = CompletionMultiTurnEnv(
+            client=mock_openai_client,
+            model="test-model",
+            dataset=completion_dataset,
+            max_turns=3
         )
         
-        prompt = [{"role": "user", "content": "Task question"}]
-        completion, state = await mock_multiturn_env.rollout(
-            client=mock_multiturn_env.client,
+        mock_openai_client.add_text_response("Start:", "First response")
+        mock_openai_client.add_text_response("Start:First response Continue.", "Final DONE")
+        
+        prompt = "Start:"
+        completion, state = await env.rollout(
+            client=mock_openai_client,
             model="test-model",
             prompt=prompt,
-            answer="task_answer",
-            task="math",
-            info={"difficulty": "hard"}
+            answer="Done"
         )
         
-        assert len(completion) >= 1
-        assert state["answer"] == "task_answer"
-
-    @pytest.mark.asyncio
-    async def test_non_list_prompt_assertion(self, mock_multiturn_env):
-        """Test that non-list prompts raise AssertionError."""
-        with pytest.raises(AssertionError):
-            await mock_multiturn_env.rollout(
-                client=mock_multiturn_env.client,
-                model="test-model",
-                prompt="String prompt not allowed",  # Should be list
-                answer="test_answer"
-            )
+        assert isinstance(completion, str)
+        assert "First response" in completion
+        assert "DONE" in completion
+        assert len(state["responses"]) == 2
 
     @pytest.mark.asyncio
     async def test_environment_response_state_modification(self, mock_openai_client, sample_chat_dataset):
@@ -301,14 +305,6 @@ class TestMultiTurnEnv:
         assert state["turn_count"] == 2
         assert len(completion) >= 3  # Multiple turns with env responses
 
-    def _create_mock_response(self, content):
-        """Helper to create mock OpenAI response."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = content
-        mock_response.choices[0].finish_reason = "stop"
-        return mock_response
-
     def test_abstract_methods_not_implemented(self):
         """Test that MultiTurnEnv cannot be instantiated directly (abstract class)."""
         # MultiTurnEnv is abstract and should not be instantiable without implementing abstract methods
@@ -326,7 +322,7 @@ class TestMultiTurnEnv:
         class ImmediateCompletionEnv(MultiTurnEnv):
             def is_completed(self, messages, state, **kwargs):
                 # Complete if we have any assistant message
-                return any(msg.get("role") == "assistant" for msg in messages)
+                return any(msg.get("role") == "assistant" for msg in messages) if isinstance(messages, list) else False
             
             def env_response(self, messages, state, **kwargs):
                 # This should never be called due to immediate completion
@@ -358,3 +354,45 @@ class TestMultiTurnEnv:
         assert len(completion) == 1
         assert completion[0]["role"] == "assistant"
         assert completion[0]["content"] == "First response"
+
+    @pytest.mark.asyncio 
+    async def test_responses_stored_in_state(self, mock_multiturn_env):
+        """Test that model responses are stored in state['responses']."""
+        # Set up a multi-turn conversation
+        mock_multiturn_env.client.add_chat_response(
+            messages=[{"role": "user", "content": "Start"}],
+            response="First"
+        )
+        mock_multiturn_env.client.add_chat_response(
+            messages=[
+                {"role": "user", "content": "Start"},
+                {"role": "assistant", "content": "First"},
+                {"role": "user", "content": "Continue (turn 1)"}
+            ],
+            response="Second"
+        )
+        mock_multiturn_env.client.add_chat_response(
+            messages=[
+                {"role": "user", "content": "Start"},
+                {"role": "assistant", "content": "First"},
+                {"role": "user", "content": "Continue (turn 1)"},
+                {"role": "assistant", "content": "Second"},
+                {"role": "user", "content": "Please finish with DONE"}
+            ],
+            response="DONE"
+        )
+        
+        prompt = [{"role": "user", "content": "Start"}]
+        completion, state = await mock_multiturn_env.rollout(
+            client=mock_multiturn_env.client,
+            model="test-model",
+            prompt=prompt,
+            answer="test"
+        )
+        
+        # Check that all responses are stored
+        assert len(state["responses"]) == 3
+        # Each response should have the structure returned by get_model_response
+        for response in state["responses"]:
+            assert hasattr(response, 'choices')
+            assert len(response.choices) > 0

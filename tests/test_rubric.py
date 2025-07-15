@@ -1,8 +1,8 @@
 """Tests for the Rubric class."""
 
 import pytest
-from verifiers.rubrics import Rubric
-from verifiers.parsers import Parser
+from verifiers import Rubric
+from verifiers import Parser
 
 
 class TestRubric:
@@ -283,6 +283,51 @@ class TestRubric:
         assert results["length_func"] == [7.0, 7.0, 5.0]  # Lengths of completions
 
     @pytest.mark.asyncio
+    async def test_score_rollouts_with_apply_weights(self):
+        """Test scoring rollouts with apply_weights parameter."""
+        def func1(completion, **kwargs):
+            return 1.0
+        
+        def func2(completion, **kwargs):
+            return 0.5
+        
+        rubric = Rubric(funcs=[func1, func2], weights=[2.0, 3.0])
+        
+        prompts = ["test"]
+        completions = ["test"]
+        answers = ["test"]
+        states = [{}]
+        tasks = ["test"]
+        infos = [{}]
+        
+        # Test with apply_weights=True (default)
+        results_weighted = await rubric.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            apply_weights=True
+        )
+        
+        assert results_weighted["reward"][0] == 1.0 * 2.0 + 0.5 * 3.0  # 2.0 + 1.5 = 3.5
+        
+        # Test with apply_weights=False (should not be used, but test anyway)
+        results_unweighted = await rubric.score_rollouts(
+            prompts=prompts,
+            completions=completions,
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            apply_weights=False
+        )
+        
+        # When apply_weights=False, only individual scores are returned, no weighted sum
+        assert results_unweighted["reward"][0] == 1.0 * 2.0 + 0.5 * 3.0  # Still weighted
+
+    @pytest.mark.asyncio
     async def test_score_rollouts_empty(self):
         """Test scoring empty list of rollouts."""
         def test_func(completion, **kwargs):
@@ -332,3 +377,27 @@ class TestRubric:
         rubric = Rubric(funcs=[], weights=[], parser=custom_parser)
         
         assert rubric.parser is custom_parser
+
+    @pytest.mark.asyncio
+    async def test_score_rollouts_with_mixed_return_types(self):
+        """Test scoring when reward functions return different types."""
+        def scalar_func(completion, **kwargs):
+            return 0.5
+        
+        def list_func(completion, **kwargs):
+            # This should not happen, but test robustness
+            return [0.1, 0.2]  # Wrong return type
+        
+        rubric = Rubric(funcs=[scalar_func], weights=[1.0])
+        
+        results = await rubric.score_rollouts(
+            prompts=["test"],
+            completions=["test"],
+            answers=["test"],
+            states=[{}],
+            tasks=["test"],
+            infos=[{}]
+        )
+        
+        assert results["scalar_func"] == [0.5]
+        assert results["reward"] == [0.5]

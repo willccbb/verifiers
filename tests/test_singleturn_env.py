@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from datasets import Dataset
-from verifiers.envs.singleturn_env import SingleTurnEnv
-from verifiers.parsers import Parser
-from verifiers.rubrics import Rubric
+from verifiers import SingleTurnEnv
+from verifiers import Parser
+from verifiers import Rubric
 
 
 class TestSingleTurnEnv:
@@ -43,6 +43,29 @@ class TestSingleTurnEnv:
         )
         assert env.message_type == "completion"
 
+    def test_is_completed_method(self, mock_singleturn_env):
+        """Test the is_completed method logic."""
+        # No responses yet
+        messages = [{"role": "user", "content": "Hello"}]
+        state = {"responses": []}
+        assert not mock_singleturn_env.is_completed(messages, state)
+        
+        # With responses
+        state = {"responses": [MagicMock()]}
+        assert mock_singleturn_env.is_completed(messages, state)
+
+    def test_env_response_method(self, mock_singleturn_env):
+        """Test the env_response method (which should never be called in practice)."""
+        messages = [{"role": "user", "content": "Hello"}]
+        state = {}
+        
+        response, new_state = mock_singleturn_env.env_response(messages, state)
+        
+        # Should return minimal response
+        assert response["role"] == "user"
+        assert response["content"] == ""
+        assert new_state == state
+
     @pytest.mark.asyncio
     async def test_rollout_chat_format(self, mock_singleturn_env):
         """Test rollout with chat format."""
@@ -61,7 +84,11 @@ class TestSingleTurnEnv:
         assert len(completion) == 1
         assert completion[0]["role"] == "assistant"
         assert completion[0]["content"] == "This is a test response"
-        assert state == {}
+        
+        # Check state structure
+        assert "responses" in state
+        assert len(state["responses"]) == 1
+        assert state["answer"] == answer
         
         # Verify the client was called
         mock_singleturn_env.client.chat.completions.create.assert_called_once()
@@ -82,7 +109,10 @@ class TestSingleTurnEnv:
         # Should return string format for completion
         assert isinstance(completion, str)
         assert completion == "This is a test completion"
-        assert state == {}
+        
+        # Check state structure
+        assert "responses" in state
+        assert len(state["responses"]) == 1
         
         # Verify the client was called
         mock_singleturn_env_completion.client.completions.create.assert_called_once()
@@ -128,7 +158,10 @@ class TestSingleTurnEnv:
         )
         
         assert isinstance(completion, list)
-        assert state == {}  # SingleTurnEnv returns empty state
+        # Check state contains all the information
+        assert state["answer"] == answer
+        assert state["task"] == task
+        assert state["info"] == info
 
     @pytest.mark.asyncio 
     async def test_rollout_error_handling(self, mock_singleturn_env):
@@ -150,6 +183,34 @@ class TestSingleTurnEnv:
             )
 
     @pytest.mark.asyncio
+    async def test_rollout_state_structure(self, mock_singleturn_env):
+        """Test that rollout creates proper state structure."""
+        prompt = [{"role": "user", "content": "Hello"}]
+        answer = "Hi"
+        task = "greeting"
+        info = {"context": "test"}
+        
+        completion, state = await mock_singleturn_env.rollout(
+            client=mock_singleturn_env.client,
+            model="test-model",
+            prompt=prompt,
+            answer=answer,
+            task=task,
+            info=info
+        )
+        
+        # Check all expected state fields
+        assert state["prompt"] == prompt
+        # state["completion"] is initialized to [] but not updated during rollout
+        assert state["completion"] == []
+        assert state["answer"] == answer
+        assert state["task"] == task
+        assert state["info"] == info
+        assert "responses" in state
+        assert isinstance(state["responses"], list)
+        assert len(state["responses"]) == 1
+
+    @pytest.mark.asyncio
     async def test_a_generate_basic(self, mock_singleturn_env):
         """Test async generation with basic inputs."""
         inputs = {
@@ -162,32 +223,31 @@ class TestSingleTurnEnv:
         
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0, 1.0],
-            "scores": [{"correctness": 1.0}, {"correctness": 1.0}]
+            "reward": [1.0, 1.0]
         })
         
         results = await mock_singleturn_env.a_generate(inputs)
         
         assert "completion" in results
         assert "state" in results
-        assert "rewards" in results
+        assert "reward" in results
         assert len(results["completion"]) == 2
         assert len(results["state"]) == 2
+        assert results["reward"] == [1.0, 1.0]
 
     @pytest.mark.asyncio
     async def test_a_generate_with_dataset(self, mock_singleturn_env, sample_chat_dataset):
         """Test async generation with Dataset input."""
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0, 1.0],
-            "scores": [{"correctness": 1.0}, {"correctness": 1.0}]
+            "reward": [1.0, 1.0]
         })
         
         results = await mock_singleturn_env.a_generate(sample_chat_dataset)
         
         assert "completion" in results
         assert "state" in results  
-        assert "rewards" in results
+        assert "reward" in results
         assert len(results["completion"]) == 2
 
     @pytest.mark.asyncio
@@ -202,7 +262,7 @@ class TestSingleTurnEnv:
         
         assert "completion" in results
         assert "state" in results
-        assert "rewards" not in results  # Should not score when score_rollouts=False
+        assert "reward" not in results  # Should not score when score_rollouts=False
 
     def test_generate_sync_wrapper(self, mock_singleturn_env):
         """Test the synchronous generate wrapper."""
@@ -214,15 +274,14 @@ class TestSingleTurnEnv:
         
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(return_value={
-            "rewards": [1.0],
-            "scores": [{"correctness": 1.0}]
+            "reward": [1.0]
         })
         
-        results = mock_singleturn_env.generate(inputs)
+        results = mock_singleturn_env.generate(inputs, client=mock_singleturn_env.client)
         
         assert "completion" in results
         assert "state" in results
-        assert "rewards" in results
+        assert "reward" in results
 
     @pytest.mark.asyncio
     async def test_different_message_types_in_same_env(self, mock_openai_client, sample_dataset):
@@ -248,7 +307,7 @@ class TestSingleTurnEnv:
         )
         
         # Test chat rollout
-        chat_completion, _ = await chat_env.rollout(
+        chat_completion, chat_state = await chat_env.rollout(
             client=mock_openai_client,
             model="test-model",
             prompt=[{"role": "user", "content": "Hello"}],
@@ -257,10 +316,32 @@ class TestSingleTurnEnv:
         assert isinstance(chat_completion, list)
         
         # Test completion rollout
-        completion_result, _ = await completion_env.rollout(
+        completion_result, comp_state = await completion_env.rollout(
             client=mock_openai_client,
             model="test-model", 
             prompt="Complete this:",
             answer="Done"
         )
         assert isinstance(completion_result, str)
+
+    @pytest.mark.asyncio
+    async def test_singleturn_stops_after_one_response(self, mock_openai_client, sample_dataset):
+        """Test that SingleTurnEnv truly stops after one response."""
+        # We'll verify this by checking the is_completed logic
+        env = SingleTurnEnv(
+            client=mock_openai_client,
+            model="test-model",
+            dataset=sample_dataset
+        )
+        
+        # Before any responses
+        state = {"responses": []}
+        assert not env.is_completed([], state)
+        
+        # After one response
+        state = {"responses": [MagicMock()]}
+        assert env.is_completed([], state)
+        
+        # Even with multiple responses (shouldn't happen), it's still completed
+        state = {"responses": [MagicMock(), MagicMock()]}
+        assert env.is_completed([], state)

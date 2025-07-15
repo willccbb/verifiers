@@ -1,7 +1,7 @@
 """Tests for the base Parser class."""
 
 import pytest
-from verifiers.parsers import Parser
+from verifiers import Parser
 
 
 class TestParser:
