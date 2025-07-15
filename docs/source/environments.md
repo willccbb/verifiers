@@ -21,16 +21,19 @@ Environment (base class)
 
 ```python
 import verifiers as vf
+from typing import List, Dict, Any, Union
+from datasets import Dataset
 
 # Load a dataset
-dataset = vf.load_example_dataset("gsm8k", split="train")
+dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
 
 # Create a simple environment
 vf_env = vf.SingleTurnEnv(
     dataset=dataset,
     system_prompt="Solve the problem step by step.",
-    parser=vf.ThinkParser(),
-    rubric=vf.Rubric(funcs=[correct_answer_func])
+    parser=parser,
+    rubric=rubric,
+    message_type="chat"  # Recommended: use "chat" for most cases
 )
 
 # Evaluate the environment
@@ -53,14 +56,16 @@ results = vf_env.evaluate(
 
 ```python
 import verifiers as vf
+from typing import List, Dict, Any, Union
 
 class MyMultiTurnEnv(vf.MultiTurnEnv):
-    def is_completed(self, messages, state, **kwargs):
+    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> bool:
         """Define when the conversation should end."""
         # End after 5 exchanges
+        # state["responses"] contains full LLM response objects with token_ids, logprobs, etc.
         return len(state['responses']) >= 5
     
-    def env_response(self, messages, state, **kwargs):
+    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> tuple[Dict[str, str], Dict[str, Any]]:
         """Define how the environment responds to the model."""
         # Simple echo response
         last_message = messages[-1]['content']
@@ -71,7 +76,8 @@ vf_env = MyMultiTurnEnv(
     dataset=dataset,
     system_prompt="Have a conversation with the user.",
     parser=parser,
-    rubric=rubric
+    rubric=rubric,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -85,18 +91,65 @@ vf_env = MyMultiTurnEnv(
 
 ### Dataset Management
 
-Every environment handles datasets uniformly:
+Every environment handles datasets uniformly. Datasets should have either `answer` (str) or `info` (dict) columns:
 
 ```python
 import verifiers as vf
+from datasets import Dataset
+from typing import List, Dict, Any
 
 # Built-in datasets
-dataset = vf.load_example_dataset("gsm8k", split="train")
-dataset = vf.load_example_dataset("math", "train", n=6000)
+dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
+dataset: Dataset = vf.load_example_dataset("math", "train", n=6000)
 
-# Custom datasets should have 'question' and 'answer' columns
+# Custom datasets - Option 1: Simple format with answer column
+dataset = Dataset.from_list([
+    {"question": "What is 2+2?", "answer": "4"},
+    {"question": "What is 3*5?", "answer": "15"},
+])
+
+# Custom datasets - Option 2: Complex format with info dict
+dataset = Dataset.from_list([
+    {
+        "question": "Solve this math problem: 2+2", 
+        "info": {
+            "answer": "4",
+            "difficulty": "easy",
+            "category": "arithmetic"
+        }
+    },
+    {
+        "question": "What is the capital of France?",
+        "info": {
+            "answer": "Paris",
+            "difficulty": "easy", 
+            "category": "geography"
+        }
+    }
+])
+
 # Environments automatically format prompts based on dataset structure
 ```
+
+### Message Types: Chat vs Completion
+
+The framework supports two message formats:
+
+```python
+# Chat format (recommended for most cases)
+message_type = "chat"
+# Input: List[Dict[str, str]] with "role" and "content" keys
+# Example: [{"role": "user", "content": "What is 2+2?"}]
+# Supports: system prompts, few-shot examples, multi-turn conversations
+
+# Completion format (for legacy models)
+message_type = "completion"  
+# Input: str (raw text)
+# Example: "What is 2+2?"
+# Limited: no system prompts, no few-shot examples
+```
+
+**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts and few-shot examples.
 
 ### Automatic Setup
 
@@ -111,7 +164,8 @@ vf_env = vf.SingleTurnEnv(
     dataset=dataset,
     system_prompt="Custom instructions...",
     parser=vf.ThinkParser(),
-    rubric=custom_rubric
+    rubric=custom_rubric,
+    message_type="chat"  # Explicitly set recommended format
 )
 ```
 
@@ -121,8 +175,9 @@ Perfect for tasks with a single question-answer exchange:
 
 ```python
 import verifiers as vf
+from typing import Union, List, Dict
 
-dataset = vf.load_example_dataset("gsm8k", split="train")
+dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
 
 system_prompt = """
 Think step-by-step inside <think>...</think> tags.
@@ -131,7 +186,7 @@ Then give your final answer.
 
 parser = vf.ThinkParser()
 
-def correct_answer_reward_func(completion, answer, **kwargs):
+def correct_answer_reward_func(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
     response = parser.parse_answer(completion) or ''
     return 1.0 if response.strip() == answer.strip() else 0.0
 
@@ -145,6 +200,7 @@ vf_env = vf.SingleTurnEnv(
     system_prompt=system_prompt,
     parser=parser,
     rubric=rubric,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -160,6 +216,7 @@ Enable models to use external tools for complex reasoning:
 ```python
 import verifiers as vf
 from verifiers.tools import python
+from typing import List, Callable
 
 TOOL_PROMPT = """
 Think step-by-step inside <think>...</think> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
@@ -170,13 +227,14 @@ You have access to tools to help solve problems. Tools can be called with JSON:
 </tool>
 """
 
-dataset = vf.load_example_dataset("math", split="train")
+dataset: Dataset = vf.load_example_dataset("math", split="train")
 
 vf_env = vf.ToolEnv(
     dataset=dataset,
     system_prompt=TOOL_PROMPT,
-    tools=[python],
-    max_steps=3
+    tools=[python],  # List[Callable]
+    max_steps=3,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -192,6 +250,7 @@ Advanced tool integration using SmolaAgents:
 ```python
 import verifiers as vf
 from verifiers.envs.smola_tool_env import SmolaToolEnv
+from typing import List, Callable
 
 try:    
     from smolagents.default_tools import PythonInterpreterTool
@@ -199,19 +258,20 @@ try:
 except ImportError:
     raise ImportError("Please install smolagents")
 
-dataset = vf.load_example_dataset("math", "train", n=6000)
+dataset: Dataset = vf.load_example_dataset("math", "train", n=6000)
 
-python_tool = PythonInterpreterTool(
+python_tool: PythonInterpreterTool = PythonInterpreterTool(
     authorized_imports=["math", "sympy", "numpy"]
 )
-calculator_tool = CalculatorTool()
+calculator_tool: CalculatorTool = CalculatorTool()
 
 vf_env = SmolaToolEnv(
     dataset=dataset,
     system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
     few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
-    tools=[python_tool, calculator_tool],
-    max_steps=5
+    tools=[python_tool, calculator_tool],  # List[Callable]
+    max_steps=5,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -232,12 +292,13 @@ SIMPLE_PROMPT = """
 You are a helpful assistant. Think step-by-step inside <think>...</think> tags, then give your final answer inside <answer>...</answer> tags.
 """
 
-dataset = vf.load_example_dataset("math", "train", n=1000)
+dataset: Dataset = vf.load_example_dataset("math", "train", n=1000)
 
 vf_env = DoubleCheckEnv(
     dataset=dataset,
     system_prompt=SIMPLE_PROMPT,
-    few_shot=[]
+    few_shot=[],
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -256,8 +317,9 @@ from verifiers.envs.textarena_env import TextArenaEnv
 
 vf_env = TextArenaEnv(
     game="Wordle-v0",
-    num_samples=2000, 
-    num_eval_samples=20
+    num_train_examples=2000, 
+    num_eval_examples=20,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -271,18 +333,20 @@ For nontrivial tasks, you'll want to write your own environment by extending `Mu
 
 ```python
 import verifiers as vf
+from typing import List, Dict, Any, Union
 
 class MyCustomEnv(vf.MultiTurnEnv):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Add custom initialization
     
-    def is_completed(self, messages, state, **kwargs):
+    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> bool:
         """Define completion criteria."""
         # Your logic here
+        # state["responses"] contains full LLM response objects
         return some_condition
     
-    def env_response(self, messages, state, **kwargs):
+    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> tuple[Dict[str, str], Dict[str, Any]]:
         """Define environment responses."""
         # Your logic here
         return response_message, updated_state
@@ -291,7 +355,8 @@ class MyCustomEnv(vf.MultiTurnEnv):
 vf_env = MyCustomEnv(
     dataset=dataset,
     parser=parser,
-    rubric=rubric
+    rubric=rubric,
+    message_type="chat"  # Recommended format
 )
 ```
 
@@ -300,8 +365,10 @@ vf_env = MyCustomEnv(
 Environments are powerful evaluation tools, not just for training:
 
 ```python
+from typing import Dict, Any
+
 # Evaluate a model on the environment
-results = vf_env.evaluate(
+results: Dict[str, Any] = vf_env.evaluate(
     client=openai_client,
     model="gpt-4",
     num_examples=100,
@@ -309,7 +376,7 @@ results = vf_env.evaluate(
 )
 
 # Generate training data
-results = vf_env.generate(
+results: Dict[str, Any] = vf_env.generate(
     client=openai_client,
     model="gpt-4",
     n_samples=1000
@@ -325,6 +392,68 @@ processed = vf_env.process_env_results(
 )
 ```
 
+## State Object Details
+
+The `state` object contains rollout information and accumulates LLM responses:
+
+```python
+from typing import Dict, Any, List
+
+# State structure
+state: Dict[str, Any] = {
+    "prompt": List[Dict[str, str]],  # Original prompt
+    "completion": List[Dict[str, str]],  # Model's response
+    "answer": str,  # Ground truth answer
+    "task": str,  # Task identifier
+    "info": Dict[str, Any],  # Additional metadata
+    "responses": List[Any],  # Full LLM response objects with token_ids, logprobs, etc.
+}
+```
+
+The `state["responses"]` list accumulates the complete LLM response objects, which can include:
+- `token_ids`: List of token IDs
+- `logprobs`: Token-level log probabilities  
+- `finish_reason`: Why generation stopped
+- `usage`: Token usage statistics
+
+This allows access to fine-grained information in environment and reward functions.
+
+## Sampling Arguments
+
+Pass vLLM-specific arguments through the `sampling_args` dict:
+
+```python
+from typing import Dict, Any
+
+# vLLM-specific sampling arguments
+sampling_args: Dict[str, Any] = {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2048,
+    "extra_body": {
+        "skip_special_tokens": False,  # vLLM flag
+        "spaces_between_special_tokens": False,  # vLLM flag
+        "logprobs": True,  # Get token-level logprobs
+        "top_logprobs": 5,  # Top-k logprobs per token
+    }
+}
+
+# Use in environment
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    sampling_args=sampling_args
+)
+
+# Or pass during evaluation
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    sampling_args=sampling_args
+)
+```
+
+This allows access to fine-grained information like token IDs and logprobs in environment and reward functions.
+
 ## Key Gotchas
 
 1. **Parser Integration**: Always include format rewards from your parser in the rubric
@@ -332,3 +461,5 @@ processed = vf_env.process_env_results(
 3. **Completion Criteria**: Define clear completion criteria in `is_completed()` to avoid infinite loops
 4. **Error Handling**: Environments should gracefully handle parsing failures and API errors
 5. **Dataset Format**: Ensure your dataset has the expected columns (`question`, `answer`) or pre-format with `prompt` column
+6. **Message Type**: Use "chat" format in the vast majority of cases for better flexibility
+7. **Type Hints**: Use proper type hints for better code clarity and IDE support
