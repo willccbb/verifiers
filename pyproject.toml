@@ -122,7 +122,9 @@ Issues = "https://github.com/willccbb/verifiers/issues"
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
-pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--tb=short",
@@ -132,7 +134,8 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests", 
+    "unit: marks tests as unit tests",
+    "asyncio: marks tests as async tests",
     "parsers: marks tests for parser components",
     "rubrics: marks tests for rubric components",
     "environments: marks tests for environment components",
@@ -143,6 +146,7 @@ filterwarnings = [
     "ignore::UserWarning:transformers.*",
 ]
 asyncio_mode = "auto"
+norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "__pycache__"]
 
 [tool.coverage.run]
 source = ["verifiers"]
