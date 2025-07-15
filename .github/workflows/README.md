@@ -4,20 +4,19 @@ This directory contains automated workflows for the verifiers project.
 
 ## Workflows
 
-### 1. CI (`ci.yml`)
-**Purpose**: Basic continuous integration that runs on every pull request and push to main branches.
+### 1. Style (`style.yaml`)
+**Purpose**: Code style checking using ruff.
 
 **Triggers**:
-- Pull requests to `main` or `master` branches
-- Direct pushes to `main` or `master` branches
+- Pull requests (opened, synchronized, reopened)
+- Pushes to `main` branch
 
 **What it does**:
-- Tests the code on Python 3.11 and 3.12
-- Runs all tests in the `tests/` directory
-- Provides a summary of test results
+- Runs ruff for linting and formatting checks
+- Uses configuration from `pyproject.toml`
 
 ### 2. Test (`test.yml`)
-**Purpose**: Comprehensive testing with coverage reports and linting.
+**Purpose**: Comprehensive testing with coverage reports.
 
 **Triggers**:
 - Pull requests affecting Python files, dependencies, or workflow files
@@ -29,7 +28,6 @@ This directory contains automated workflows for the verifiers project.
 - Uploads coverage to Codecov (requires `CODECOV_TOKEN` secret)
 - Uploads HTML coverage reports as artifacts
 - Comments on PRs with test results
-- Runs linting tools (ruff, black, isort)
 
 ## Setting Up
 
