@@ -1,37 +1,80 @@
 # Parsers
 
-Parsers extract structured information from model outputs. While the framework supports custom parsers, **we strongly recommend using XMLParser** for its reliability, built-in validation, and format rewards.
+Parsers extract structured information from model outputs. The framework provides convenience parsers for common use cases, but **for nontrivial environments, users will want to write their own parsers** to handle specific output formats and requirements.
 
 ## Parser Hierarchy
 
 ```
 Parser (base class)
-├── XMLParser      # Recommended: XML-tagged field extraction
+├── XMLParser      # Convenience: XML-tagged field extraction
+├── ThinkParser    # Convenience: Extract content after </think> tags
 └── SmolaParser    # Specialized for Smolagents tool format
 ```
 
-## Why XMLParser?
+## When to Use Built-in Parsers
 
-XMLParser provides several advantages over plain text parsing:
+The built-in parsers (`XMLParser`, `ThinkParser`) are designed for common use cases:
 
-1. **Unambiguous Structure**: Clear field boundaries with XML tags
-2. **Format Validation**: Built-in reward functions for compliance
-3. **Flexible Fields**: Support for optional and alternative field names
-4. **Error Recovery**: Graceful handling of malformed outputs
-5. **Multi-format Support**: Works with both strings and message lists
+- **XMLParser**: When you need structured output with multiple fields
+- **ThinkParser**: When you want step-by-step reasoning with a final answer
+- **Base Parser**: When you just need raw text extraction
 
-## Basic XMLParser Usage
+For more complex requirements, extend the base `Parser` class.
 
-### Simple Fields
+## Base Parser
+
+The base `Parser` class provides the foundation for all parsers:
+
+```python
+from verifiers.parsers import Parser
+from typing import Any, List, Dict, Callable, Union
+
+class Parser:
+    """Base parser class for extracting structured information from model outputs."""
+    
+    def parse(self, text: str) -> Any:
+        """Parse text and return structured data. Default: return text as-is."""
+        return text
+    
+    def parse_answer(self, completion: Union[str, List[Dict[str, str]]]) -> str | None:
+        """Extract the final answer from a completion.
+        
+        Args:
+            completion: Either a string (completion format) or list of messages (chat format)
+            
+        Returns:
+            Extracted answer string or None if not found
+        """
+        if isinstance(completion, str):
+            return self.parse(completion)
+        else:
+            # For chat format, parse the last message's content
+            return self.parse(completion[-1]["content"])
+    
+    def get_format_reward_func(self) -> Callable:
+        """Return a reward function that checks format compliance."""
+        def format_reward_func(completion: List[Dict[str, str]], **kwargs) -> float:
+            return 1.0  # Default: always return 1.0
+        return format_reward_func
+    
+    def get_assistant_messages(self, completion: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Helper function to extract assistant messages from a completion."""
+        return [msg for msg in completion if msg['role'] == 'assistant']
+```
+
+## XMLParser: Structured Field Extraction
+
+`XMLParser` is a convenience parser for extracting structured fields from XML-tagged output:
 
 ```python
 from verifiers.parsers import XMLParser
+from typing import List, Union, Tuple
 
 # Define expected fields
 parser = XMLParser(fields=["reasoning", "answer"])
 
 # Parse model output
-output = """
+output: str = """
 <reasoning>
 To solve 2+2, I need to add two and two together.
 Two plus two equals four.
@@ -51,12 +94,14 @@ print(parsed.answer)     # "4"
 Support multiple names for the same field:
 
 ```python
+from typing import Union, Tuple
+
 # Accept either "reasoning" or "thinking" tags
 parser = XMLParser(fields=[("reasoning", "thinking"), "answer"])
 
 # Both formats work
-output1 = "<thinking>...</thinking><answer>42</answer>"
-output2 = "<reasoning>...</reasoning><answer>42</answer>"
+output1: str = "<thinking>...</thinking><answer>42</answer>"
+output2: str = "<reasoning>...</reasoning><answer>42</answer>"
 
 parsed1 = parser.parse(output1)
 parsed2 = parser.parse(output2)
@@ -66,27 +111,7 @@ print(parsed1.reasoning)  # Works
 print(parsed2.reasoning)  # Also works
 ```
 
-### Optional Fields
-
-Handle fields that may not always be present:
-
-```python
-parser = XMLParser(fields=["reasoning", "answer", "confidence"])
-
-output = """
-<reasoning>Simple addition</reasoning>
-<answer>4</answer>
-"""
-
-parsed = parser.parse(output)
-print(parsed.reasoning)    # "Simple addition"
-print(parsed.answer)       # "4"
-print(parsed.confidence)   # "" (empty string for missing fields)
-```
-
-## Format Enforcement
-
-### Built-in Format Rewards
+### Format Enforcement
 
 XMLParser provides a format reward function to encourage proper formatting:
 
@@ -94,361 +119,240 @@ XMLParser provides a format reward function to encourage proper formatting:
 parser = XMLParser(fields=["reasoning", "answer"])
 
 # Get the format reward function
-format_func = parser.get_format_reward_func()
+format_func: Callable = parser.get_format_reward_func()
 
 # Well-formatted output gets high reward
-good_output = "<reasoning>Step by step...</reasoning><answer>42</answer>"
-reward = format_func(good_output)  # 1.0
+good_output: str = "<reasoning>Step by step...</reasoning><answer>42</answer>"
+reward: float = format_func(good_output)  # 1.0
 
 # Missing fields get lower reward
-bad_output = "The answer is 42"
-reward = format_func(bad_output)  # 0.0
-
-# Partial format gets partial reward
-partial_output = "<answer>42</answer>"
-reward = format_func(partial_output)  # 0.5 (has answer but missing reasoning)
+bad_output: str = "The answer is 42"
+reward: float = format_func(bad_output)  # 0.0
 ```
 
-### Integrating Format Rewards
+## ThinkParser: Step-by-Step Reasoning
 
-Always include format rewards in your rubric:
+`ThinkParser` is a convenience parser for extracting content after `</think>` tags:
+
+```python
+from verifiers.parsers import ThinkParser
+from typing import Callable
+
+parser = ThinkParser()
+
+# Model output: "<think>Let me calculate...</think>The answer is 4"
+# parser.parse_answer(output) returns: "The answer is 4"
+
+# With custom extraction function
+def extract_boxed_answer(text: str) -> str:
+    import re
+    match = re.search(r'\\boxed\{([^}]+)\}', text)
+    return match.group(1) if match else text
+
+parser = ThinkParser(extract_fn=extract_boxed_answer)
+# Now extracts boxed answers: "The answer is 4" -> "4"
+```
+
+### Format Rewards
+
+ThinkParser provides format rewards for proper `<think>` tag usage:
+
+```python
+parser = ThinkParser()
+format_func: Callable = parser.get_format_reward_func()
+
+# Proper format
+good_output: str = "<think>Reasoning here</think>Final answer"
+reward: float = format_func(good_output)  # 1.0
+
+# Missing think tags
+bad_output: str = "Just the answer"
+reward: float = format_func(bad_output)  # 0.0
+```
+
+## Custom Parser Implementation
+
+For nontrivial environments, you'll want to write your own parser by extending the base `Parser` class:
+
+```python
+from verifiers.parsers import Parser
+from typing import Any, Dict, List, Union
+import json
+import re
+
+class JSONParser(Parser):
+    """Parse JSON-formatted responses."""
+    
+    def __init__(self, required_fields: List[str] | None = None):
+        super().__init__()
+        self.required_fields = required_fields or []
+    
+    def parse(self, text: str) -> Dict[str, Any]:
+        """Extract JSON from text and validate required fields."""
+        # Find JSON in the text
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not json_match:
+            return {}
+        
+        try:
+            parsed: Dict[str, Any] = json.loads(json_match.group())
+            
+            # Validate required fields
+            for field in self.required_fields:
+                if field not in parsed:
+                    parsed[field] = None
+                    
+            return parsed
+        except json.JSONDecodeError:
+            return {}
+    
+    def get_format_reward_func(self) -> Callable:
+        """Reward function for proper JSON formatting."""
+        def format_reward_func(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+            try:
+                # Check if completion contains valid JSON
+                if isinstance(completion, str):
+                    json_match = re.search(r'\{.*\}', completion, re.DOTALL)
+                    if json_match:
+                        json.loads(json_match.group())
+                        return 1.0
+                return 0.0
+            except:
+                return 0.0
+        return format_reward_func
+
+class CodeParser(Parser):
+    """Parse code blocks from markdown."""
+    
+    def parse(self, text: str) -> str:
+        """Extract code from markdown code blocks."""
+        code_match = re.search(r'```(?:\w+)?\n(.*?)\n```', text, re.DOTALL)
+        return code_match.group(1) if code_match else text
+    
+    def get_format_reward_func(self) -> Callable:
+        """Reward function for proper code block formatting."""
+        def format_reward_func(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+            if isinstance(completion, str):
+                return 1.0 if '```' in completion else 0.0
+            return 0.0
+        return format_reward_func
+```
+
+## Message Format Handling
+
+Parsers handle both chat and completion formats:
+
+```python
+from typing import Union, List, Dict
+
+# Completion format (string)
+completion_str: str = "<answer>42</answer>"
+parsed = parser.parse(completion_str)
+
+# Chat format (list of messages)
+completion_messages: List[Dict[str, str]] = [
+    {"role": "assistant", "content": "<answer>42</answer>"}
+]
+parsed = parser.parse_answer(completion_messages)  # Uses last message's content
+```
+
+## Parser Integration with Rubrics
+
+Always include format rewards from your parser in the rubric:
 
 ```python
 from verifiers.rubrics import Rubric
+from typing import Union, List, Dict
 
 parser = XMLParser(fields=["reasoning", "answer"])
 
+def correct_answer(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
+    parsed = parser.parse(completion)
+    return 1.0 if parsed.answer == answer else 0.0
+
 rubric = Rubric(
     funcs=[
-        correct_answer_func,           # Weight: 0.8
-        parser.get_format_reward_func()  # Weight: 0.2
+        correct_answer,                    # Task-specific correctness
+        parser.get_format_reward_func()    # Format compliance
     ],
     weights=[0.8, 0.2],  # Format is important but not primary
     parser=parser
 )
 ```
 
-## Advanced Parsing Features
+## Advanced Parsing Patterns
 
-### Parsing from Message Lists
+### Accessing Token Information
 
-XMLParser handles both strings and OpenAI message formats:
-
-```python
-# String input
-string_output = "<reasoning>...</reasoning><answer>42</answer>"
-parsed = parser.parse(string_output)
-
-# Message list input (from chat models)
-messages = [
-    {"role": "assistant", "content": "<reasoning>...</reasoning>"},
-    {"role": "assistant", "content": "<answer>42</answer>"}
-]
-parsed = parser.parse(messages)  # Automatically concatenates
-```
-
-### Answer Extraction
-
-Special method for common answer-only parsing:
+When using vLLM with `logprobs=True`, you can access token-level information:
 
 ```python
-parser = XMLParser(fields=["answer"])
+from typing import Dict, Any, List
 
-# Works with various formats
-outputs = [
-    "<answer>42</answer>",
-    "The answer is <answer>42</answer>.",
-    "<reasoning>...</reasoning>\n<answer>42</answer>",
-    [{"role": "assistant", "content": "<answer>42</answer>"}]
-]
-
-for output in outputs:
-    answer = parser.parse_answer(output)
-    print(answer)  # Always "42"
-```
-
-### Raw String Access
-
-Access unparsed content when needed:
-
-```python
-output = "<reasoning>Complex\nMulti-line\nReasoning</reasoning>"
-parsed = parser.parse(output)
-
-# Parsed attribute (cleaned up)
-print(parsed.reasoning)  # "Complex Multi-line Reasoning"
-
-# Raw extraction
-raw = parser._extract_tag_content(output, "reasoning")
-print(raw)  # "Complex\nMulti-line\nReasoning"
-```
-
-## Custom Parser Implementation
-
-If you need custom parsing logic, extend the base Parser:
-
-```python
-from verifiers.parsers import Parser
-import json
-
-class JSONParser(Parser):
-    """Parse JSON-formatted responses."""
+class TokenAwareParser(Parser):
+    """Parser that can access token-level information from state."""
     
-    def __init__(self, schema=None):
-        super().__init__()
-        self.schema = schema
-    
-    def parse(self, output):
-        """Extract JSON from model output."""
-        # Handle message lists
-        if isinstance(output, list):
-            output = " ".join(msg["content"] for msg in output)
+    def parse_with_tokens(self, text: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse text and include token information if available."""
+        parsed = self.parse(text)
         
-        # Find JSON block
-        try:
-            # Handle markdown code blocks
-            if "```json" in output:
-                start = output.find("```json") + 7
-                end = output.find("```", start)
-                json_str = output[start:end].strip()
-            else:
-                # Try to parse the whole output
-                json_str = output
-            
-            # Parse JSON
-            data = json.loads(json_str)
-            
-            # Validate against schema if provided
-            if self.schema:
-                self.validate_schema(data)
-            
-            # Return as object with attribute access
-            return type('ParsedJSON', (), data)()
-            
-        except Exception as e:
-            # Return empty object on failure
-            return type('ParsedJSON', (), {})()
-    
-    def get_format_reward_func(self):
-        """Reward valid JSON format."""
-        def json_format_reward(completion, **kwargs):
-            try:
-                parsed = self.parse(completion)
-                # Check if parsing succeeded
-                return 1.0 if hasattr(parsed, '__dict__') else 0.0
-            except:
-                return 0.0
-        
-        return json_format_reward
-```
-
-## Parser Design Patterns
-
-### 1. Hierarchical Parsing
-
-For complex nested structures:
-
-```python
-# Main parser for outer structure
-main_parser = XMLParser(fields=["analysis", "solution"])
-
-# Sub-parser for inner structure  
-step_parser = XMLParser(fields=["description", "calculation", "result"])
-
-def parse_solution(output):
-    # First level parsing
-    parsed = main_parser.parse(output)
-    
-    # Parse steps within solution
-    steps = []
-    for step_match in re.finditer(r'<step>.*?</step>', parsed.solution, re.DOTALL):
-        step_parsed = step_parser.parse(step_match.group())
-        steps.append(step_parsed)
-    
-    return parsed, steps
-```
-
-### 2. Fallback Parsing
-
-Handle multiple possible formats:
-
-```python
-class FlexibleParser(Parser):
-    def __init__(self):
-        self.xml_parser = XMLParser(["answer"])
-        self.json_parser = JSONParser()
-    
-    def parse(self, output):
-        # Try XML first
-        xml_result = self.xml_parser.parse(output)
-        if xml_result.answer:
-            return xml_result
-        
-        # Fallback to JSON
-        json_result = self.json_parser.parse(output)
-        if hasattr(json_result, 'answer'):
-            return json_result
-        
-        # Last resort: regex
-        match = re.search(r'answer[:\s]+(\S+)', output, re.I)
-        if match:
-            result = type('Parsed', (), {'answer': match.group(1)})()
-            return result
-        
-        # Return empty
-        return type('Parsed', (), {'answer': ''})()
-```
-
-### 3. Validation Parsing
-
-Add validation to parsing:
-
-```python
-class ValidatedXMLParser(XMLParser):
-    def __init__(self, fields, validators=None):
-        super().__init__(fields)
-        self.validators = validators or {}
-    
-    def parse(self, output):
-        parsed = super().parse(output)
-        
-        # Run validators
-        for field, validator in self.validators.items():
-            if hasattr(parsed, field):
-                value = getattr(parsed, field)
-                if not validator(value):
-                    # Replace with empty on validation failure
-                    setattr(parsed, field, "")
+        # Access token information from state
+        if state.get("responses"):
+            last_response = state["responses"][-1]
+            if hasattr(last_response, 'choices') and last_response.choices:
+                choice = last_response.choices[0]
+                if hasattr(choice, 'logprobs'):
+                    parsed["token_logprobs"] = choice.logprobs.content
+                    parsed["token_ids"] = choice.logprobs.token_ids
         
         return parsed
-
-# Usage
-parser = ValidatedXMLParser(
-    fields=["reasoning", "answer"],
-    validators={
-        "answer": lambda x: x.isdigit(),  # Answer must be numeric
-        "reasoning": lambda x: len(x) > 10  # Reasoning must be substantial
-    }
-)
 ```
 
-## System Prompt Integration
-
-Always communicate format expectations clearly:
+### Handling Different Input Types
 
 ```python
-SYSTEM_PROMPT = """You are a helpful assistant. Format ALL responses as:
+from typing import Union, List, Dict, Any
 
-<reasoning>
-Explain your step-by-step thought process here.
-Show your work and justify your approach.
-</reasoning>
-
-<answer>
-Your final answer here
-</answer>
-
-This exact format is required. Do not include any text outside these tags."""
-
-env = SingleTurnEnv(
-    parser=XMLParser(["reasoning", "answer"]),
-    system_prompt=SYSTEM_PROMPT
-)
+class FlexibleParser(Parser):
+    """Parser that handles various input formats."""
+    
+    def parse(self, input_data: Union[str, List[Dict[str, str]]]) -> Any:
+        """Parse different input types."""
+        if isinstance(input_data, str):
+            return self.parse_string(input_data)
+        elif isinstance(input_data, list):
+            return self.parse_messages(input_data)
+        else:
+            raise ValueError(f"Unsupported input type: {type(input_data)}")
+    
+    def parse_string(self, text: str) -> Any:
+        """Parse string input."""
+        # String parsing logic
+        return parsed_result
+    
+    def parse_messages(self, messages: List[Dict[str, str]]) -> Any:
+        """Parse message list input."""
+        # Extract content from messages
+        content = " ".join(msg["content"] for msg in messages if msg["role"] == "assistant")
+        return self.parse_string(content)
 ```
 
-## Common Pitfalls and Solutions
+## Key Gotchas
 
-### 1. Whitespace Handling
-
-XMLParser strips whitespace by default:
-
-```python
-output = """
-<answer>
-    42
-</answer>
-"""
-parsed = parser.parse(output)
-print(repr(parsed.answer))  # "42" not "    42    "
-```
-
-### 2. Special Characters
-
-XML special characters are handled automatically:
-
-```python
-output = '<answer>x < 5 && y > 3</answer>'
-parsed = parser.parse(output)
-print(parsed.answer)  # "x < 5 && y > 3"
-```
-
-### 3. Multiple Tag Instances
-
-Parser returns first occurrence by default:
-
-```python
-output = """
-<answer>Wrong: 41</answer>
-Actually, let me recalculate...
-<answer>Correct: 42</answer>
-"""
-parsed = parser.parse(output)
-print(parsed.answer)  # "Wrong: 41" (first occurrence)
-```
+1. **Format Rewards**: Always include `parser.get_format_reward_func()` in your rubric
+2. **Error Handling**: Parsers should gracefully handle malformed input
+3. **Answer Extraction**: Use `parse_answer()` for final answer extraction, `parse()` for full parsing
+4. **Message Lists**: Parsers handle both strings and OpenAI message formats
+5. **Custom Parsers**: For complex requirements, extend the base `Parser` class rather than trying to force built-in parsers
+6. **Type Hints**: Use proper type hints for better code clarity and IDE support
+7. **Input Validation**: Always validate input types before parsing
 
 ## Best Practices
 
-### 1. Field Naming
-- Use clear, descriptive field names
-- Provide alternatives for common variations
-- Keep field names consistent across your project
-
-### 2. Format Rewards
-- Always include format rewards (10-20% weight typically)
-- Use higher weights during initial training
-- Reduce weight once models learn the format
-
-### 3. Error Handling
-- Always provide fallback values
-- Log parsing failures for debugging
-- Consider partial credit for partial formatting
-
-### 4. Documentation
-- Document expected format in system prompts
-- Provide examples in few-shot prompts
-- Keep format simple and consistent
-
-## Performance Considerations
-
-### Efficient Parsing
-
-```python
-# Compile regex patterns once
-parser = XMLParser(fields=["reasoning", "answer"])
-
-# Reuse parser instance across multiple parses
-for output in outputs:
-    parsed = parser.parse(output)  # Reuses compiled patterns
-```
-
-### Batch Processing
-
-```python
-# Parse multiple outputs efficiently
-outputs = ["<answer>1</answer>", "<answer>2</answer>", ...]
-parsed_results = [parser.parse(output) for output in outputs]
-
-# Extract specific fields in bulk
-answers = [parser.parse_answer(output) for output in outputs]
-```
-
-## Integration with Training
-
-Parsers play a crucial role in the training pipeline:
-
-1. **During Generation**: Parse outputs to extract answers
-2. **In Reward Calculation**: Validate format compliance
-3. **For Data Filtering**: Remove malformed examples
-4. **In Evaluation**: Ensure consistent answer extraction
-
-The XMLParser's reliability and built-in validation make it the ideal choice for production reinforcement learning pipelines.
+1. **Start Simple**: Use built-in parsers for common cases
+2. **Write Custom**: Create custom parsers for specific output formats
+3. **Include Format Rewards**: Always include format compliance in evaluation
+4. **Test Thoroughly**: Test parsers with various input formats
+5. **Document Format**: Clearly document expected output format in system prompts
+6. **Handle Errors**: Gracefully handle parsing failures and malformed input
+7. **Use Type Hints**: Include proper type hints for better code clarity

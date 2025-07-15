@@ -1,630 +1,724 @@
 # API Reference
 
-Complete API documentation for the verifiers framework.
+This document provides detailed API documentation for the core verifiers components.
 
 ## Environments
 
-### Base Environment
+### SingleTurnEnv
+
+**Most users should start with `SingleTurnEnv`** for one-shot question-answer tasks.
 
 ```python
-class Environment:
-    """Base class for all environments."""
+class SingleTurnEnv(MultiTurnEnv):
+    """Single-turn environment for Q&A tasks."""
     
     def __init__(
         self,
-        dataset: List[Dict[str, Any]],
-        system_prompt: str = "",
-        parser: Parser = None,
-        rubric: Rubric = None,
-        client: Any = None,
-        message_type: str = "chat",
+        dataset: Dataset,
+        system_prompt: str | None = None,
+        few_shot: List[Dict[str, str]] | None = None,
+        parser: Parser | None = None,
+        rubric: Rubric | None = None,
+        message_type: str = "chat",  # "chat" or "completion"
+        sampling_args: Dict[str, Any] | None = None,
         **kwargs
     ):
         """
         Args:
-            dataset: List of task dictionaries with 'prompt', 'answer', etc.
-            system_prompt: System message for the model
+            dataset: Dataset with 'question' and 'answer' columns or 'info' dict
+            system_prompt: System prompt for the model
+            few_shot: Few-shot examples as message lists
             parser: Parser for extracting structured output
             rubric: Rubric for evaluation
-            client: OpenAI-compatible client
-            message_type: "chat" or "completion"
-            **kwargs: Additional attributes stored on the environment
+            message_type: "chat" (recommended) or "completion" format
+            sampling_args: vLLM-specific arguments for fine-grained control
         """
-    
-    def rollout(
-        self,
-        client: Any,
-        model: str,
-        prompt: str,
-        answer: str,
-        temperature: float = 0.0,
-        max_tokens: int = 2048,
-        **kwargs
-    ) -> Tuple[Union[str, List[Dict]], Dict]:
-        """Execute a single rollout.
-        
-        Returns:
-            completion: Model's response
-            state: Rollout state dictionary
-        """
-    
-    def generate(
-        self,
-        model: str,
-        n_samples: int = 100,
-        temperature: float = 0.7,
-        system_prompt: str = None,
-        **kwargs
-    ) -> Tuple[List[str], List[Union[str, List]], List[Dict]]:
-        """Generate multiple rollouts with rewards.
-        
-        Returns:
-            prompts: List of prompts
-            completions: List of completions
-            rewards: List of reward dictionaries
-        """
-    
-    async def generate_async(
-        self,
-        model: str,
-        n_samples: int = 100,
-        batch_size: int = 10,
-        **kwargs
-    ) -> Tuple[List[str], List[Union[str, List]], List[Dict]]:
-        """Async batch generation for efficiency."""
 ```
 
-### SingleTurnEnv
+**Dataset Format**: Datasets should have either `answer` (str) or `info` (dict) columns:
 
 ```python
-class SingleTurnEnv(Environment):
-    """Environment for single-turn interactions."""
-    
-    def format_prompt(
-        self,
-        prompt: str,
-        task: str = None,
-        **kwargs
-    ) -> str:
-        """Format prompt based on task type.
-        
-        Override this method for custom formatting.
-        """
-    
-    def rollout(
-        self,
-        client: Any,
-        model: str, 
-        prompt: str,
-        answer: str,
-        max_retries: int = 3,
-        **kwargs
-    ) -> Tuple[Union[str, List[Dict]], Dict]:
-        """Execute rollout with retry logic for parsing failures."""
+from datasets import Dataset
+from typing import List, Dict, Any
+
+# Option 1: Simple format with answer column
+dataset: Dataset = Dataset.from_list([
+    {"question": "What is 2+2?", "answer": "4"},
+    {"question": "What is 3*5?", "answer": "15"},
+])
+
+# Option 2: Complex format with info dict
+dataset: Dataset = Dataset.from_list([
+    {
+        "question": "Solve this math problem: 2+2", 
+        "info": {
+            "answer": "4",
+            "difficulty": "easy",
+            "category": "arithmetic"
+        }
+    }
+])
+```
+
+**Message Types**: The framework supports two formats:
+
+```python
+# Chat format (recommended for most cases)
+message_type = "chat"
+# Input: List[Dict[str, str]] with "role" and "content" keys
+# Example: [{"role": "user", "content": "What is 2+2?"}]
+# Supports: system prompts, multi-turn conversations
+
+# Completion format (for legacy models)
+message_type = "completion"  
+# Input: str (raw text)
+# Example: "What is 2+2?"
+# Limited: no system prompts
+```
+
+**Sampling Arguments**: Pass vLLM-specific arguments for fine-grained control:
+
+```python
+from typing import Dict, Any
+
+sampling_args: Dict[str, Any] = {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2048,
+    "extra_body": {
+        "skip_special_tokens": False,  # vLLM flag
+        "spaces_between_special_tokens": False,  # vLLM flag
+        "logprobs": True,  # Get token-level logprobs
+        "top_logprobs": 5,  # Top-k logprobs per token
+    }
+}
 ```
 
 ### MultiTurnEnv
 
+Base class for interactive environments:
+
 ```python
 class MultiTurnEnv(Environment):
-    """Environment for multi-turn interactions."""
+    """Base class for multi-turn interactive environments."""
     
     def __init__(
         self,
-        dataset: List[Dict[str, Any]],
-        max_turns: int = 10,
+        dataset: Dataset,
+        system_prompt: str | None = None,
+        few_shot: List[Dict[str, str]] | None = None,
+        parser: Parser | None = None,
+        rubric: Rubric | None = None,
+        message_type: str = "chat",  # "chat" or "completion"
+        sampling_args: Dict[str, Any] | None = None,
         **kwargs
     ):
         """
-        Additional Args:
-            max_turns: Maximum conversation turns
-        """
-    
-    def env_response(
-        self,
-        messages: List[Dict[str, str]],
-        state: Dict[str, Any]
-    ) -> Tuple[str, Dict[str, Any]]:
-        """Generate environment's response.
-        
         Args:
-            messages: Conversation history
-            state: Current environment state
-            
-        Returns:
-            response: Environment's response
-            state: Updated state
-            
-        Must be overridden by subclasses.
+            dataset: Dataset with 'question' and 'answer' columns or 'info' dict
+            system_prompt: System prompt for the model
+            few_shot: Optional few-shot examples (not recommended)
+            parser: Parser for extracting structured output
+            rubric: Rubric for evaluation
+            message_type: "chat" (recommended) or "completion" format
+            sampling_args: vLLM-specific arguments for fine-grained control
         """
     
     def is_completed(
-        self,
-        messages: List[Dict[str, str]],
-        state: Dict[str, Any]
+        self, 
+        messages: List[Dict[str, str]], 
+        state: Dict[str, Any], 
+        **kwargs
     ) -> bool:
-        """Check if interaction should end.
-        
-        Must be overridden by subclasses.
         """
+        Define when the conversation should end.
+        
+        Args:
+            messages: List of conversation messages
+            state: Environment state dictionary
+            **kwargs: Additional arguments
+            
+        Returns:
+            True if conversation should end, False otherwise
+        """
+        raise NotImplementedError
     
-    def score_rollout(
-        self,
-        messages: List[Dict[str, str]],
-        answer: str,
-        state: Dict[str, Any]
-    ) -> Dict[str, float]:
-        """Score a completed conversation.
-        
-        Override for custom scoring logic.
+    def env_response(
+        self, 
+        messages: List[Dict[str, str]], 
+        state: Dict[str, Any], 
+        **kwargs
+    ) -> tuple[Dict[str, str], Dict[str, Any]]:
         """
+        Define how the environment responds to the model.
+        
+        Args:
+            messages: List of conversation messages
+            state: Environment state dictionary
+            **kwargs: Additional arguments
+            
+        Returns:
+            Tuple of (response_message, updated_state)
+        """
+        raise NotImplementedError
 ```
+
+**State Object**: The `state` object contains rollout information and accumulates LLM responses:
+
+```python
+from typing import Dict, Any, List
+
+# State structure
+state: Dict[str, Any] = {
+    "prompt": List[Dict[str, str]],  # Original prompt
+    "completion": List[Dict[str, str]],  # Model's response
+    "answer": str,  # Ground truth answer
+    "task": str,  # Task identifier
+    "info": Dict[str, Any],  # Additional metadata
+    "responses": List[Any],  # Full LLM response objects with token_ids, logprobs, etc.
+}
+```
+
+The `state["responses"]` list accumulates the complete LLM response objects, which can include:
+- `token_ids`: List of token IDs
+- `logprobs`: Token-level log probabilities  
+- `finish_reason`: Why generation stopped
+- `usage`: Token usage statistics
 
 ### ToolEnv
 
+Environment for tool-augmented reasoning:
+
 ```python
-class ToolEnv(SingleTurnEnv):
-    """Environment with tool support."""
+class ToolEnv(MultiTurnEnv):
+    """Environment for tool-augmented reasoning tasks."""
     
     def __init__(
         self,
-        dataset: List[Dict[str, Any]],
-        tools: List[Callable],
-        tool_format: str = "xml",  # or "json"
+        dataset: Dataset,
+        system_prompt: str | None = None,
+        few_shot: List[Dict[str, str]] | None = None,
+        tools: List[Callable] | None = None,
+        max_steps: int = 3,
+        message_type: str = "chat",  # "chat" or "completion"
+        sampling_args: Dict[str, Any] | None = None,
         **kwargs
     ):
         """
-        Additional Args:
-            tools: List of tool functions
-            tool_format: Format for tool calls
-        """
-    
-    def execute_tool(
-        self,
-        tool_name: str,
-        arguments: Dict[str, Any]
-    ) -> str:
-        """Execute a tool with given arguments.
-        
-        Returns:
-            Tool execution result as string
+        Args:
+            dataset: Dataset with 'question' and 'answer' columns or 'info' dict
+            system_prompt: System prompt for the model
+            few_shot: Optional few-shot examples (not recommended)
+            tools: List of available tools (callable functions)
+            max_steps: Maximum number of tool use steps
+            message_type: "chat" (recommended) or "completion" format
+            sampling_args: vLLM-specific arguments for fine-grained control
         """
 ```
 
 ## Parsers
 
-### Base Parser
+### Parser
+
+Base parser class:
 
 ```python
 class Parser:
-    """Base parser class."""
+    """Base parser class for extracting structured information from model outputs."""
     
-    def parse(
-        self,
-        output: Union[str, List[Dict[str, str]]]
-    ) -> Any:
-        """Parse model output.
+    def parse(self, text: str) -> Any:
+        """
+        Parse text and return structured data.
         
         Args:
-            output: String or message list
+            text: Raw text to parse
             
         Returns:
-            Parsed result (implementation-specific)
+            Parsed structured data (default: returns text as-is)
         """
+        return text
     
     def parse_answer(
-        self,
-        output: Union[str, List[Dict[str, str]]]
-    ) -> str:
-        """Extract answer from output.
-        
-        Default: returns full output as string
+        self, 
+        completion: Union[str, List[Dict[str, str]]]
+    ) -> str | None:
         """
+        Extract the final answer from a completion.
+        
+        Args:
+            completion: Either a string (completion format) or list of messages (chat format)
+            
+        Returns:
+            Extracted answer string or None if not found
+        """
+        if isinstance(completion, str):
+            return self.parse(completion)
+        else:
+            # For chat format, parse the last message's content
+            return self.parse(completion[-1]["content"])
+    
+    def get_format_reward_func(self) -> Callable:
+        """
+        Return a reward function that checks format compliance.
+        
+        Returns:
+            Function that returns float reward for format compliance
+        """
+        def format_reward_func(completion: List[Dict[str, str]], **kwargs) -> float:
+            return 1.0  # Default: always return 1.0
+        return format_reward_func
+    
+    def get_assistant_messages(self, completion: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Helper function to extract assistant messages from a completion.
+        
+        Args:
+            completion: List of conversation messages
+            
+        Returns:
+            List of assistant messages only
+        """
+        return [msg for msg in completion if msg['role'] == 'assistant']
 ```
 
 ### XMLParser
 
+Convenience parser for XML-tagged field extraction:
+
 ```python
 class XMLParser(Parser):
-    """Parse XML-tagged fields from output."""
+    """Parser for extracting structured fields from XML-tagged output."""
     
     def __init__(
-        self,
-        fields: List[Union[str, Tuple[str, ...]]],
-        strip: bool = True
+        self, 
+        fields: List[str | Tuple[str, ...]] | None = None
     ):
         """
         Args:
-            fields: List of field names or tuples of alternatives
-                   e.g., ["reasoning", ("code", "answer")]
-            strip: Whether to strip whitespace from extracted content
+            fields: List of field names or tuples of alternative names
+                   Example: ["reasoning", "answer"] or [("reasoning", "thinking"), "answer"]
         """
     
-    def parse(
-        self,
-        output: Union[str, List[Dict[str, str]]]
-    ) -> ParsedOutput:
-        """Parse XML fields into object with attributes.
-        
-        Returns:
-            Object with field names as attributes
+    def parse(self, text: str) -> Any:
         """
-    
-    def get_format_reward_func(
-        self,
-        per_field_weight: float = None
-    ) -> Callable:
-        """Get reward function for format compliance.
+        Parse XML-tagged text and extract fields.
         
         Args:
-            per_field_weight: Weight per field (default: 1/n_fields)
+            text: XML-tagged text
             
         Returns:
-            Reward function returning [0, 1]
+            Object with extracted fields as attributes
+        """
+```
+
+### ThinkParser
+
+Convenience parser for step-by-step reasoning:
+
+```python
+class ThinkParser(Parser):
+    """Parser for extracting content after </think> tags."""
+    
+    def __init__(self, extract_fn: Callable[[str], str] | None = None):
+        """
+        Args:
+            extract_fn: Optional function to extract final answer from text
+                       Example: extract boxed answers with r'\\boxed\{([^}]+)\}'
+        """
+    
+    def parse(self, text: str) -> str:
+        """
+        Extract content after </think> tags.
+        
+        Args:
+            text: Text containing <think>...</think> tags
+            
+        Returns:
+            Content after </think> tags
         """
 ```
 
 ## Rubrics
 
-### Base Rubric
+### Rubric
+
+Base rubric class for combining multiple reward functions:
 
 ```python
 class Rubric:
-    """Base rubric for evaluation."""
+    """Base rubric class for combining multiple reward functions."""
     
     def __init__(
         self,
-        funcs: List[Callable] = None,
-        weights: List[float] = None,
-        parser: Parser = None,
-        **kwargs
+        funcs: List[Callable] | None = None,
+        weights: List[float] | None = None,
+        parser: Parser | None = None
     ):
         """
         Args:
             funcs: List of reward functions
-            weights: Weights for each function (default: all 1.0)
-            parser: Parser for structured output
-            **kwargs: Additional attributes
+            weights: List of weights for each function (should sum to reasonable value)
+            parser: Parser for extracting structured output
         """
-    
-    def add_reward_func(
-        self,
-        func: Callable,
-        weight: float = 1.0
-    ):
-        """Add a reward function to the rubric."""
     
     def score_rollout_sync(
         self,
-        prompt: str,
-        completion: Union[str, List[Dict]],
+        prompt: Union[str, List[Dict[str, str]]],
+        completion: Union[str, List[Dict[str, str]]],
         answer: str,
-        state: Dict[str, Any],
-        task: str = None
+        state: Dict[str, Any] | None = None,
+        task: str | None = None,
+        **kwargs
     ) -> Dict[str, float]:
-        """Score a single rollout synchronously.
-        
-        Returns:
-            Dictionary with individual scores and 'reward' key
         """
-    
-    async def score_rollout(
-        self,
-        prompt: str,
-        completion: Union[str, List[Dict]],
-        answer: str,
-        state: Dict[str, Any],
-        task: str = None
-    ) -> Dict[str, float]:
-        """Score a single rollout asynchronously."""
+        Score a single rollout synchronously.
+        
+        Args:
+            prompt: Input prompt (string or messages)
+            completion: Model response (string or messages)
+            answer: Ground truth answer
+            state: Environment state dictionary
+            task: Task type identifier
+            **kwargs: Additional arguments
+            
+        Returns:
+            Dictionary with individual scores and weighted reward
+        """
     
     def score_rollouts(
         self,
-        prompts: List[str],
-        completions: List[Union[str, List[Dict]]],
+        prompts: List[Union[str, List[Dict[str, str]]]],
+        completions: List[Union[str, List[Dict[str, str]]]],
         answers: List[str],
-        states: List[Dict[str, Any]],
-        tasks: List[str] = None
+        states: List[Dict[str, Any]] | None = None,
+        tasks: List[str] | None = None,
+        **kwargs
     ) -> Dict[str, List[float]]:
-        """Score multiple rollouts in batch."""
+        """
+        Score multiple rollouts efficiently.
+        
+        Args:
+            prompts: List of input prompts
+            completions: List of model responses
+            answers: List of ground truth answers
+            states: List of environment state dictionaries
+            tasks: List of task type identifiers
+            **kwargs: Additional arguments
+            
+        Returns:
+            Dictionary with lists of individual scores and weighted rewards
+        """
 ```
 
 ### ToolRubric
 
+Rubric for evaluating tool usage:
+
 ```python
 class ToolRubric(Rubric):
-    """Rubric for evaluating tool usage."""
+    """Rubric for evaluating tool-augmented reasoning."""
     
     def __init__(
         self,
-        tools: List[Callable] = None,
-        weights: List[float] = None,
+        tools: List[Callable],
+        weights: List[float] | None = None,
+        parser: Parser | None = None
+    ):
+        """
+        Args:
+            tools: List of available tools
+            weights: Weights for [correct_answer, tool_execution, format]
+            parser: Parser for extracting structured output
+        """
+```
+
+**Tool-specific rewards**:
+- `{tool}_reward`: 1.0 if tool used successfully, 0.0 otherwise
+- `{tool}_count`: Number of successful tool uses
+- `{tool}_attempt`: Number of tool use attempts
+
+### JudgeRubric
+
+LLM-based evaluation rubric:
+
+```python
+class JudgeRubric(Rubric):
+    """Rubric using another LLM to evaluate responses."""
+    
+    def __init__(
+        self,
+        judge_models: List[str],
+        client: Any,
+        template: str,
+        parser: Parser | None = None,
         **kwargs
     ):
         """
         Args:
-            tools: List of tool functions
-            weights: Custom weights (default: auto-generated)
-        
-        Automatically includes:
-        - correct_answer_reward_func
-        - tool_execution_reward_func
-        - format_reward_func
-        - Per-tool reward functions
-        """
-    
-    def evaluate_code(
-        self,
-        code: str,
-        test_cases: str
-    ) -> float:
-        """Evaluate code against test cases.
-        
-        Args:
-            code: Python code to evaluate
-            test_cases: JSON string with test cases
-            
-        Returns:
-            Proportion of tests passed [0, 1]
+            judge_models: List of model names to use as judges
+            client: OpenAI-compatible client
+            template: Prompt template for evaluation
+            parser: Parser for extracting judge scores
         """
 ```
 
 ### RubricGroup
 
+Combines multiple rubrics:
+
 ```python
-class RubricGroup(Rubric):
-    """Combine multiple rubrics."""
+class RubricGroup:
+    """Combines multiple rubrics for comprehensive evaluation."""
     
-    def __init__(
-        self,
-        rubrics: List[Rubric]
-    ):
+    def __init__(self, rubrics: List[Rubric]):
         """
         Args:
             rubrics: List of rubrics to combine
-            
-        Note: Functions with same name are summed
         """
-```
-
-## Reward Functions
-
-### Common Signatures
-
-```python
-# Minimal signature
-def reward_func(completion: Union[str, List[Dict]]) -> float:
-    """Reward based only on completion."""
     
-# Common signature
-def reward_func(
-    completion: Union[str, List[Dict]],
-    answer: str,
-    **kwargs
-) -> float:
-    """Reward based on completion and answer."""
-    
-# Full signature
-def reward_func(
-    prompt: str,
-    completion: Union[str, List[Dict]],
-    answer: str,
-    state: Dict[str, Any],
-    task: str,
-    **kwargs
-) -> float:
-    """Reward with full context."""
-```
-
-### Built-in Reward Functions
-
-```python
-# From XMLParser
-format_reward = parser.get_format_reward_func()
-
-# From ToolRubric
-correct_answer_reward = rubric.correct_answer_reward_func
-tool_execution_reward = rubric.tool_execution_reward_func
-
-# Per-tool rewards (automatically generated)
-calculator_reward = rubric.calculator_reward_func
-calculator_count = rubric.calculator_count_reward_func
-calculator_attempt = rubric.calculator_attempt_reward_func
-```
-
-## Training
-
-### GRPOConfig
-
-```python
-@dataclass
-class GRPOConfig:
-    """Configuration for GRPO training."""
-    
-    # Training parameters
-    learning_rate: float = 1e-5
-    batch_size: int = 32
-    group_size: int = 4
-    num_epochs: int = 3
-    gradient_accumulation_steps: int = 1
-    
-    # Generation parameters
-    temperature: float = 0.7
-    max_new_tokens: int = 512
-    top_p: float = 0.9
-    
-    # GRPO specific
-    kl_coef: float = 0.1
-    gamma: float = 1.0
-    gae_lambda: float = 0.95
-    
-    # Optimization
-    warmup_ratio: float = 0.1
-    weight_decay: float = 0.01
-    adam_epsilon: float = 1e-8
-    
-    # Efficiency
-    fp16: bool = False
-    gradient_checkpointing: bool = False
-    
-    # Logging
-    logging_steps: int = 10
-    eval_steps: int = 100
-    save_steps: int = 500
-    output_dir: str = "./output"
-```
-
-### GRPOTrainer
-
-```python
-class GRPOTrainer:
-    """Trainer for Group Relative Policy Optimization."""
-    
-    def __init__(
+    def score_rollouts(
         self,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizer,
-        env: Environment,
-        config: GRPOConfig,
-        dataset: Dict[str, List] = None,
-        eval_dataset: Dict[str, List] = None
-    ):
+        prompts: List[Union[str, List[Dict[str, str]]]],
+        completions: List[Union[str, List[Dict[str, str]]]],
+        answers: List[str],
+        states: List[Dict[str, Any]] | None = None,
+        tasks: List[str] | None = None,
+        **kwargs
+    ) -> Dict[str, List[float]]:
         """
-        Args:
-            model: HuggingFace model
-            tokenizer: HuggingFace tokenizer
-            env: Environment for generation/evaluation
-            config: Training configuration
-            dataset: Pre-generated training data (optional)
-            eval_dataset: Evaluation data (optional)
+        Score using all rubrics and aggregate results.
+        
+        Returns:
+            Dictionary with aggregated scores from all rubrics
         """
-    
-    def train(self):
-        """Run training loop."""
-    
-    def evaluate(self) -> Dict[str, float]:
-        """Evaluate on validation set."""
-    
-    def save_model(self, output_dir: str):
-        """Save trained model."""
 ```
 
-## Tools
+## Environment Methods
 
-### Tool Function Format
+### evaluate()
+
+Evaluate a model on the environment:
 
 ```python
-def tool_name(arg1: type1, arg2: type2 = default) -> str:
-    """One-line description of the tool.
-    
-    Detailed description of what the tool does.
+def evaluate(
+    self,
+    client: Any,
+    model: str,
+    num_examples: int | None = None,
+    rollouts_per_example: int = 1,
+    sampling_args: Dict[str, Any] | None = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Evaluate a model on the environment.
     
     Args:
-        arg1: Description of arg1
-        arg2: Description of arg2 (optional)
+        client: OpenAI-compatible client
+        model: Model name to evaluate
+        num_examples: Number of examples to evaluate (None = all)
+        rollouts_per_example: Number of rollouts per example
+        sampling_args: vLLM-specific arguments for fine-grained control
+        **kwargs: Additional arguments
         
     Returns:
-        String result of tool execution
-        
-    Examples:
-        tool_name("input1") -> "output1"
-        tool_name("input2", arg2=value) -> "output2"
-        
-    Notes:
-        - Additional usage notes
-        - Error handling behavior
+        Dictionary with evaluation results including:
+        - prompts: List of prompts used
+        - completions: List of model responses
+        - states: List of environment states
+        - rewards: List of reward scores
+        - metrics: Aggregated performance metrics
     """
-    try:
-        # Tool implementation
-        result = process(arg1, arg2)
-        return str(result)
-    except Exception as e:
-        return f"Error: {str(e)}"
 ```
 
-### Built-in Tools
+### generate()
+
+Generate training data with rewards:
 
 ```python
-# Calculator
-from verifiers.tools import calculator
-result = calculator("2 + 2 * 3")  # "8"
-
-# Python executor
-from verifiers.tools import python
-result = python("print('Hello'); x = 5; print(x * 2)")  # "Hello\n10"
-
-# Search (example interface)
-from verifiers.tools import search
-results = search("quantum computing", max_results=3)
-```
-
-## Utilities
-
-### Async Helpers
-
-```python
-from verifiers.utils import run_async_with_retry
-
-result = await run_async_with_retry(
-    async_func,
-    max_retries=3,
-    retry_delay=1.0,
-    *args,
+def generate(
+    self,
+    client: Any,
+    model: str,
+    n_samples: int,
+    sampling_args: Dict[str, Any] | None = None,
     **kwargs
-)
-```
-
-### Dataset Loading
-
-```python
-from verifiers.utils import load_dataset_from_hub
-
-dataset = load_dataset_from_hub(
-    "username/dataset-name",
-    split="train",
-    streaming=False
-)
-```
-
-### Tokenization
-
-```python
-from verifiers.utils import get_token_length
-
-# Get token count for pricing estimates
-n_tokens = get_token_length(
-    text="Your text here",
-    model="gpt-4"
-)
-```
-
-## Type Definitions
-
-```python
-from typing import TypedDict, Union, List, Dict, Any, Callable, Optional
-
-# Dataset entry
-class DatasetEntry(TypedDict):
-    prompt: str
-    answer: str
-    task: Optional[str]
+) -> Dict[str, Any]:
+    """
+    Generate training data with rewards.
     
-# Message format
-class Message(TypedDict):
-    role: str  # "system", "user", "assistant"
-    content: str
-    
-# Rollout state
-State = Dict[str, Any]
-
-# Completion format
-Completion = Union[str, List[Message]]
-
-# Reward function
-RewardFunc = Callable[..., float]
-
-# Tool function
-ToolFunc = Callable[..., str]
+    Args:
+        client: OpenAI-compatible client
+        model: Model name to generate with
+        n_samples: Number of samples to generate
+        sampling_args: vLLM-specific arguments for fine-grained control
+        **kwargs: Additional arguments
+        
+    Returns:
+        Dictionary with generated data including:
+        - prompts: List of prompts
+        - completions: List of model responses
+        - states: List of environment states
+        - rewards: List of reward scores
+    """
 ```
 
-This API reference provides comprehensive documentation for all major components of the verifiers framework. For detailed examples and usage patterns, refer to the other documentation sections.
+### process_env_results()
+
+Process results for training:
+
+```python
+def process_env_results(
+    self,
+    prompts: List[Union[str, List[Dict[str, str]]]],
+    completions: List[Union[str, List[Dict[str, str]]]],
+    states: List[Dict[str, Any]],
+    rewards: List[float],
+    processing_class: Any | None = None,
+    **kwargs
+) -> Any:
+    """
+    Process environment results for training.
+    
+    Args:
+        prompts: List of prompts
+        completions: List of model responses
+        states: List of environment states
+        rewards: List of reward scores
+        processing_class: Tokenizer or processing class
+        **kwargs: Additional arguments
+        
+    Returns:
+        Processed data ready for training
+    """
+```
+
+## Key Type Definitions
+
+```python
+from typing import Union, List, Dict, Any, Callable
+
+# Message formats
+Messages = List[Dict[str, str]]  # Chat format
+Completion = Union[str, Messages]  # Either format
+
+# Dataset formats
+DatasetRow = Dict[str, Union[str, Dict[str, Any]]]  # question + answer/info
+
+# State object
+State = Dict[str, Any]  # Environment state dictionary
+
+# Reward function signature
+RewardFunc = Callable[..., float]  # Returns float reward
+
+# Parser signature
+ParserFunc = Callable[[str], Any]  # Parses text to structured data
+
+# Sampling arguments
+SamplingArgs = Dict[str, Any]  # vLLM-specific arguments
+```
+
+## Message Format Examples
+
+### Chat Format (Recommended)
+
+```python
+from typing import List, Dict
+
+# Single message
+messages: List[Dict[str, str]] = [
+    {"role": "user", "content": "What is 2+2?"}
+]
+
+# Multi-turn conversation
+messages: List[Dict[str, str]] = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is 2+2?"},
+    {"role": "assistant", "content": "Let me think about this..."},
+    {"role": "user", "content": "Can you be more specific?"}
+]
+
+
+```
+
+### Completion Format (Legacy)
+
+```python
+# Simple text completion
+completion: str = "The answer is 4."
+
+# With structured output
+completion: str = """
+<reasoning>
+To solve 2+2, I need to add two and two together.
+Two plus two equals four.
+</reasoning>
+<answer>
+4
+</answer>
+"""
+```
+
+## State Object Details
+
+The state object accumulates information throughout the rollout:
+
+```python
+from typing import Dict, Any, List
+
+# Initial state
+state: Dict[str, Any] = {
+    "prompt": [],  # Will be populated with original prompt
+    "completion": [],  # Will be populated with model response
+    "answer": "",  # Ground truth answer
+    "task": "",  # Task identifier
+    "info": {},  # Additional metadata from dataset
+    "responses": [],  # Will accumulate LLM response objects
+}
+
+# After first turn
+state: Dict[str, Any] = {
+    "prompt": [{"role": "user", "content": "What is 2+2?"}],
+    "completion": [{"role": "assistant", "content": "Let me think..."}],
+    "answer": "4",
+    "task": "math",
+    "info": {"difficulty": "easy"},
+    "responses": [response_object],  # Full LLM response with token_ids, logprobs, etc.
+}
+```
+
+## Sampling Arguments Reference
+
+Common vLLM-specific arguments:
+
+```python
+from typing import Dict, Any
+
+# Basic sampling
+sampling_args: Dict[str, Any] = {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "max_tokens": 2048,
+    "stop": ["</answer>", "\n\n"],
+}
+
+# With token-level information
+sampling_args: Dict[str, Any] = {
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "extra_body": {
+        "logprobs": True,  # Get token-level logprobs
+        "top_logprobs": 5,  # Top-k logprobs per token
+        "skip_special_tokens": False,  # vLLM flag
+        "spaces_between_special_tokens": False,  # vLLM flag
+    }
+}
+
+# Advanced vLLM features
+sampling_args: Dict[str, Any] = {
+    "extra_body": {
+        "use_beam_search": True,  # Use beam search
+        "best_of": 5,  # Number of candidates
+        "ignore_eos": True,  # Don't stop at EOS token
+    }
+}
+```

@@ -20,12 +20,14 @@ Rubric (base class)
 A reward function evaluates one aspect of model output:
 
 ```python
-def correctness_reward(completion, answer, **kwargs):
+from typing import Union, List, Dict, Any, Optional
+
+def correctness_reward(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
     """Check if the answer matches expected."""
     parsed = parser.parse(completion)
     return 1.0 if parsed.answer == answer else 0.0
 
-def reasoning_quality(completion, **kwargs):
+def reasoning_quality(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
     """Evaluate reasoning clarity and depth."""
     parsed = parser.parse(completion)
     steps = parsed.reasoning.count('\n') + 1
@@ -35,22 +37,30 @@ def reasoning_quality(completion, **kwargs):
 ### Function Signatures
 
 Reward functions can accept any subset of these parameters:
-- `prompt`: The input prompt
-- `completion`: Model's response (string or messages)
-- `answer`: Ground truth answer
-- `state`: Environment state dictionary
-- `task`: Task type identifier
+- `prompt`: Union[str, List[Dict[str, str]]] - The input prompt
+- `completion`: Union[str, List[Dict[str, str]]] - Model's response (string or messages)
+- `answer`: str - Ground truth answer
+- `state`: Dict[str, Any] - Environment state dictionary
+- `task`: str - Task type identifier
 - `**kwargs`: Additional parameters
 
 The framework inspects function signatures and passes only requested parameters:
 
 ```python
+from typing import Union, List, Dict, Any
+
 # Minimal signature
-def simple_check(completion):
+def simple_check(completion: Union[str, List[Dict[str, str]]]) -> float:
     return 1.0 if "sorry" not in completion.lower() else 0.0
 
 # Full signature  
-def complex_check(prompt, completion, answer, state, task):
+def complex_check(
+    prompt: Union[str, List[Dict[str, str]]], 
+    completion: Union[str, List[Dict[str, str]]], 
+    answer: str, 
+    state: Dict[str, Any], 
+    task: str
+) -> float:
     # Access all available information
     return evaluate_with_context(prompt, completion, answer, state, task)
 ```
@@ -60,9 +70,11 @@ def complex_check(prompt, completion, answer, state, task):
 Rubrics combine multiple rewards with weights:
 
 ```python
+from typing import List, Callable
+
 rubric = Rubric(
-    funcs=[correctness, reasoning_quality, format_check],
-    weights=[0.7, 0.2, 0.1]  # Correctness is most important
+    funcs=[correctness, reasoning_quality, format_check],  # List[Callable]
+    weights=[0.7, 0.2, 0.1]  # List[float] - Correctness is most important
 )
 
 # Final reward = 0.7 * correctness + 0.2 * reasoning + 0.1 * format
@@ -75,14 +87,15 @@ rubric = Rubric(
 ```python
 from verifiers.rubrics import Rubric
 from verifiers.parsers import XMLParser
+from typing import Union, List, Dict
 
 parser = XMLParser(["reasoning", "answer"])
 
-def correct_answer(completion, answer, **kwargs):
+def correct_answer(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
     parsed = parser.parse(completion)
     return 1.0 if parsed.answer.strip() == answer.strip() else 0.0
 
-def has_reasoning(completion, **kwargs):
+def has_reasoning(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
     parsed = parser.parse(completion)
     return 1.0 if len(parsed.reasoning) > 20 else 0.0
 
@@ -96,8 +109,10 @@ rubric = Rubric(
 ### Scoring Single Outputs
 
 ```python
+from typing import Dict
+
 # Synchronous scoring
-score_dict = rubric.score_rollout_sync(
+score_dict: Dict[str, float] = rubric.score_rollout_sync(
     prompt="What is 2+2?",
     completion="<reasoning>2+2=4</reasoning><answer>4</answer>",
     answer="4",
@@ -111,15 +126,110 @@ print(score_dict)
 ### Batch Scoring
 
 ```python
-# Score multiple outputs efficiently
-prompts = ["What is 2+2?", "What is 3+3?"]
-completions = ["<answer>4</answer>", "<answer>6</answer>"]
-answers = ["4", "6"]
-states = [{}, {}]
+from typing import List, Dict
 
-scores = rubric.score_rollouts(prompts, completions, answers, states)
+# Score multiple outputs efficiently
+prompts: List[str] = ["What is 2+2?", "What is 3+3?"]
+completions: List[str] = ["<answer>4</answer>", "<answer>6</answer>"]
+answers: List[str] = ["4", "6"]
+states: List[Dict[str, Any]] = [{}, {}]
+
+scores: Dict[str, List[float]] = rubric.score_rollouts(prompts, completions, answers, states)
 print(scores)
 # {'correct_answer': [1.0, 1.0], 'has_reasoning': [0.0, 0.0], 'reward': [0.8, 0.8]}
+```
+
+## Custom Rubric Implementation
+
+**For nontrivial environments, users will want to write their own rubrics** to define task-specific evaluation criteria:
+
+```python
+from verifiers.rubrics import Rubric
+from typing import Union, List, Dict, Any
+import re
+
+class MathRubric(Rubric):
+    """Custom rubric for mathematical reasoning tasks."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+    def correctness_reward(self, completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
+        """Check if the final answer is correct."""
+        parsed = self.parser.parse(completion)
+        return 1.0 if parsed.answer.strip() == answer.strip() else 0.0
+    
+    def reasoning_steps_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Reward for showing step-by-step reasoning."""
+        parsed = self.parser.parse(completion)
+        steps = parsed.reasoning.count('\n') + 1
+        return min(steps / 5.0, 1.0)  # Up to 5 steps = full score
+    
+    def mathematical_accuracy_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Check for mathematical errors in reasoning."""
+        parsed = self.parser.parse(completion)
+        reasoning = parsed.reasoning.lower()
+        
+        # Check for common math errors
+        errors = 0
+        if '2+2=5' in reasoning:
+            errors += 1
+        if 'divide by zero' in reasoning:
+            errors += 1
+            
+        return max(0.0, 1.0 - errors * 0.5)  # -0.5 per error
+    
+    def format_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Reward for proper formatting."""
+        return self.parser.get_format_reward_func()(completion)
+
+# Use the custom rubric
+math_rubric = MathRubric(
+    funcs=[
+        MathRubric.correctness_reward,
+        MathRubric.reasoning_steps_reward,
+        MathRubric.mathematical_accuracy_reward,
+        MathRubric.format_reward
+    ],
+    weights=[0.5, 0.2, 0.2, 0.1],
+    parser=XMLParser(["reasoning", "answer"])
+)
+```
+
+## Accessing State Information
+
+Reward functions can access detailed state information, including token-level data:
+
+```python
+from typing import Dict, Any, List, Union
+
+def token_aware_reward(
+    completion: Union[str, List[Dict[str, str]]], 
+    state: Dict[str, Any], 
+    **kwargs
+) -> float:
+    """Reward function that uses token-level information."""
+    
+    # Access token information from state
+    if state.get("responses"):
+        last_response = state["responses"][-1]
+        
+        # Check if we have token-level data
+        if hasattr(last_response, 'choices') and last_response.choices:
+            choice = last_response.choices[0]
+            
+            # Access logprobs if available
+            if hasattr(choice, 'logprobs') and choice.logprobs:
+                logprobs = choice.logprobs.content
+                token_ids = choice.logprobs.token_ids
+                
+                # Calculate average log probability
+                if logprobs:
+                    avg_logprob = sum(logprob.logprob for logprob in logprobs) / len(logprobs)
+                    return max(0.0, min(1.0, (avg_logprob + 5.0) / 5.0))  # Normalize to [0,1]
+    
+    # Fallback to basic reward
+    return 1.0 if "correct" in completion.lower() else 0.0
 ```
 
 ## Specialized Rubrics
@@ -131,10 +241,11 @@ ToolRubric evaluates both correctness and proper tool usage:
 ```python
 from verifiers.rubrics import ToolRubric
 from verifiers.tools import calculator
+from typing import List, Callable
 
 tool_rubric = ToolRubric(
-    tools=[calculator],
-    weights=[0.5, 0.3, 0.2]  # correct_answer, tool_execution, format
+    tools=[calculator],  # List[Callable]
+    weights=[0.5, 0.3, 0.2]  # List[float] - correct_answer, tool_execution, format
 )
 
 # Automatically includes:
@@ -155,9 +266,11 @@ Use another LLM to evaluate responses:
 
 ```python
 from verifiers.rubrics import JudgeRubric
+from verifiers.parsers import XMLParser
+from typing import List
 
 judge_rubric = JudgeRubric(
-    judge_models=["gpt-4"],
+    judge_models=["gpt-4"],  # List[str]
     client=openai_client,
     template="""Evaluate this response for clarity and correctness.
 
@@ -175,6 +288,8 @@ Score from 0-10:""",
 Aggregate multiple rubrics for comprehensive evaluation:
 
 ```python
+from typing import List
+
 # Create specialized rubrics
 format_rubric = Rubric(
     funcs=[parser.get_format_reward_func()],
@@ -192,260 +307,148 @@ style_rubric = Rubric(
 )
 
 # Combine them
-combined = RubricGroup([content_rubric, format_rubric, style_rubric])
+combined = RubricGroup([content_rubric, format_rubric, style_rubric])  # List[Rubric]
 
 # Scores are aggregated across all rubrics
-scores = combined.score_rollouts(prompts, completions, answers, states)
+scores: Dict[str, List[float]] = combined.score_rollouts(prompts, completions, answers, states)
 ```
 
-## Advanced Reward Functions
+## Rubric Integration with Environments
 
-### State-Aware Rewards
-
-Use environment state for context-dependent evaluation:
+Rubrics work seamlessly with environments for both evaluation and training:
 
 ```python
-def efficiency_reward(completion, state, **kwargs):
-    """Reward based on number of attempts."""
-    attempts = state.get('attempts', 1)
-    return max(0, 1.0 - (attempts - 1) * 0.2)  # -0.2 per extra attempt
+from typing import Dict, Any
 
-def improvement_reward(completion, state, **kwargs):
-    """Reward if better than previous attempt."""
-    current_score = evaluate_answer(completion)
-    previous_score = state.get('previous_score', 0)
-    return 1.0 if current_score > previous_score else 0.0
-```
-
-### Task-Specific Rewards
-
-Different evaluation for different task types:
-
-```python
-def task_aware_reward(completion, answer, task, **kwargs):
-    """Evaluate based on task type."""
-    parsed = parser.parse(completion)
-    
-    if task == "classification":
-        # Exact match for classification
-        return 1.0 if parsed.answer == answer else 0.0
-    
-    elif task == "generation":
-        # Similarity for generation tasks
-        return calculate_similarity(parsed.answer, answer)
-    
-    elif task == "math":
-        # Numerical comparison for math
-        try:
-            return float(eval(parsed.answer)) == float(eval(answer))
-        except:
-            return 0.0
-    
-    return 0.0
-```
-
-### Multi-Aspect Rewards
-
-Evaluate multiple aspects in one function:
-
-```python
-def comprehensive_math_reward(completion, answer, **kwargs):
-    """Evaluate math solutions holistically."""
-    parsed = parser.parse(completion)
-    scores = {}
-    
-    # Correctness
-    try:
-        is_correct = float(eval(parsed.answer)) == float(eval(answer))
-        scores['correct'] = 1.0 if is_correct else 0.0
-    except:
-        scores['correct'] = 0.0
-    
-    # Method quality
-    scores['shows_work'] = 1.0 if '=' in parsed.reasoning else 0.0
-    scores['step_count'] = min(parsed.reasoning.count('\n') / 3, 1.0)
-    
-    # Clarity
-    scores['clear_final'] = 1.0 if 'therefore' in parsed.reasoning.lower() else 0.5
-    
-    # Weighted combination
-    return (scores['correct'] * 0.6 + 
-            scores['shows_work'] * 0.2 +
-            scores['step_count'] * 0.1 +
-            scores['clear_final'] * 0.1)
-```
-
-## Async Evaluation
-
-For expensive operations like API calls:
-
-```python
-import asyncio
-
-class APIValidationRubric(Rubric):
-    async def validate_with_api(self, answer):
-        """Expensive API validation."""
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={'answer': answer}) as resp:
-                return await resp.json()
-    
-    async def api_validation_reward(self, completion, **kwargs):
-        """Async reward function."""
-        parsed = self.parser.parse(completion)
-        result = await self.validate_with_api(parsed.answer)
-        return result['score']
-
-# Use async scoring
-async def score_with_validation():
-    scores = await rubric.score_rollout(
-        prompt=prompt,
-        completion=completion,
-        answer=answer,
-        state={}
-    )
-    return scores
-```
-
-## Design Patterns
-
-### 1. Progressive Evaluation
-
-Start simple, add complexity:
-
-```python
-# Phase 1: Basic correctness
-basic_rubric = Rubric(
-    funcs=[correct_answer],
-    weights=[1.0]
+# Create environment with custom rubric
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    parser=parser,
+    rubric=custom_rubric
 )
 
-# Phase 2: Add format requirements
-format_rubric = Rubric(
-    funcs=[correct_answer, format_check],
-    weights=[0.8, 0.2]
+# Evaluate model performance
+results: Dict[str, Any] = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=100
 )
 
-# Phase 3: Full evaluation
-full_rubric = Rubric(
-    funcs=[correct_answer, format_check, reasoning_quality, efficiency],
-    weights=[0.5, 0.1, 0.3, 0.1]
+# Generate training data with rewards
+results: Dict[str, Any] = vf_env.generate(
+    client=openai_client,
+    model="gpt-4",
+    n_samples=1000
 )
 ```
 
-### 2. Modular Rewards
+## Advanced Rubric Patterns
 
-Create reusable reward functions:
+### 1. Context-Aware Evaluation
 
 ```python
-# Generic reward functions
-def length_penalty(max_length=500):
-    def reward(completion, **kwargs):
-        return max(0, 1.0 - len(completion) / max_length)
-    return reward
+from typing import Dict, Any, Union, List
 
-def keyword_bonus(keywords):
-    def reward(completion, **kwargs):
-        found = sum(1 for kw in keywords if kw in completion.lower())
-        return min(found / len(keywords), 1.0)
-    return reward
-
-# Compose into rubrics
-rubric = Rubric(
-    funcs=[
-        correct_answer,
-        length_penalty(max_length=300),
-        keyword_bonus(['because', 'therefore', 'thus'])
-    ],
-    weights=[0.7, 0.1, 0.2]
-)
+def context_aware_reward(
+    completion: Union[str, List[Dict[str, str]]], 
+    prompt: Union[str, List[Dict[str, str]]], 
+    state: Dict[str, Any], 
+    **kwargs
+) -> float:
+    """Evaluate based on conversation context."""
+    # Check if this is a follow-up question
+    if "previous" in state:
+        # Require reference to previous answer
+        if state["previous"] not in completion:
+            return 0.5  # Partial credit
+    return 1.0
 ```
 
-### 3. Conditional Rubrics
-
-Different evaluation based on conditions:
+### 2. Multi-Stage Evaluation
 
 ```python
-class ConditionalRubric(Rubric):
-    def score_rollout_sync(self, prompt, completion, answer, state, **kwargs):
-        # Choose rubric based on task complexity
-        if self.is_complex_task(prompt):
-            return self.complex_rubric.score_rollout_sync(
-                prompt, completion, answer, state, **kwargs
-            )
-        else:
-            return self.simple_rubric.score_rollout_sync(
-                prompt, completion, answer, state, **kwargs
-            )
-```
+from typing import Union, List, Dict
 
-## Performance Optimization
-
-### Caching Expensive Operations
-
-```python
-from functools import lru_cache
-
-class CachedRubric(Rubric):
-    @lru_cache(maxsize=1000)
-    def expensive_parse(self, completion):
-        """Cache parsing results."""
-        return complex_parsing_logic(completion)
+class MultiStageRubric(Rubric):
+    """Rubric that evaluates different stages of reasoning."""
     
-    def cached_reward(self, completion, **kwargs):
-        parsed = self.expensive_parse(completion)
-        return evaluate(parsed)
+    def planning_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Evaluate planning phase."""
+        # Extract planning from completion
+        return evaluate_planning(completion)
+    
+    def execution_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Evaluate execution phase."""
+        # Extract execution from completion
+        return evaluate_execution(completion)
+    
+    def verification_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Evaluate verification phase."""
+        # Extract verification from completion
+        return evaluate_verification(completion)
 ```
 
-### Batch Processing
+### 3. Adaptive Rewards
 
 ```python
-def batch_similarity_reward(completions, answers):
-    """Compute similarities in batch for efficiency."""
-    # Vectorize all at once
-    completion_vecs = vectorize_batch(completions)
-    answer_vecs = vectorize_batch(answers)
+from typing import List, Union, Dict
+
+class AdaptiveRubric(Rubric):
+    """Rubric that adapts based on model performance."""
     
-    # Compute similarities
-    similarities = cosine_similarity(completion_vecs, answer_vecs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.performance_history: List[float] = []
     
-    return similarities.diagonal().tolist()
+    def adaptive_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+        """Adjust reward based on historical performance."""
+        base_reward = self.base_reward_func(completion, **kwargs)
+        
+        # Adjust based on recent performance
+        if len(self.performance_history) > 10:
+            avg_performance = sum(self.performance_history[-10:]) / 10
+            if avg_performance < 0.5:
+                # Increase reward for struggling models
+                return min(1.0, base_reward * 1.2)
+        
+        return base_reward
 ```
+
+## Message Format Handling
+
+Rubrics handle both chat and completion formats:
+
+```python
+from typing import Union, List, Dict
+
+def format_agnostic_reward(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+    """Reward function that works with both formats."""
+    
+    if isinstance(completion, str):
+        # Completion format - direct string
+        return evaluate_string(completion)
+    else:
+        # Chat format - extract content from messages
+        content = " ".join(msg["content"] for msg in completion if msg["role"] == "assistant")
+        return evaluate_string(content)
+```
+
+## Key Gotchas
+
+1. **Parser Integration**: Always include format rewards from your parser
+2. **Weight Balancing**: Ensure weights sum to reasonable values (typically 1.0)
+3. **Error Handling**: Reward functions should handle parsing failures gracefully
+4. **Performance**: Keep reward functions efficient for batch processing
+5. **Custom Rubrics**: For complex tasks, write custom rubrics rather than trying to force built-in ones
+6. **Type Hints**: Use proper type hints for better code clarity and IDE support
+7. **State Access**: Use state information carefully - it accumulates across the entire rollout
 
 ## Best Practices
 
-### 1. Weight Selection
-- Start with equal weights, tune based on data
-- Correctness typically gets 50-80% weight
-- Format/style usually 10-20%
-- Adjust based on task priorities
-
-### 2. Reward Function Design
-- Return values in [0, 1] range
-- Make functions deterministic when possible
-- Handle edge cases gracefully
-- Document expected inputs/outputs
-
-### 3. Modular Construction
-- Build small, focused reward functions
-- Combine them into task-specific rubrics
-- Reuse common patterns across projects
-
-### 4. Testing Rewards
-```python
-# Test reward functions independently
-def test_reasoning_reward():
-    assert reasoning_quality("<reasoning>Step 1\nStep 2</reasoning>") > 0.3
-    assert reasoning_quality("<reasoning>x</reasoning>") < 0.2
-    assert reasoning_quality("") == 0.0
-```
-
-## Integration with Training
-
-Rubrics directly influence model behavior through reinforcement learning:
-
-1. **Initial Training**: High weight on format compliance
-2. **Mid Training**: Balance correctness and quality
-3. **Fine-tuning**: Emphasize nuanced aspects
-4. **Evaluation**: Comprehensive multi-aspect scoring
-
-The modular design allows you to evolve evaluation criteria as models improve, ensuring continuous advancement toward desired behavior.
+1. **Start Simple**: Begin with basic correctness and format rewards
+2. **Add Complexity**: Gradually add more sophisticated evaluation criteria
+3. **Test Thoroughly**: Test rubrics with various input types
+4. **Document Intent**: Clearly document what each reward function evaluates
+5. **Monitor Performance**: Track how different reward components affect training
+6. **Use Type Hints**: Include proper type hints for better code clarity
+7. **Handle Errors**: Gracefully handle parsing failures and malformed input
