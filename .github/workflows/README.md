@@ -31,9 +31,6 @@ This directory contains automated workflows for the verifiers project.
 
 ## Setting Up
 
-### Required Secrets
-- `CODECOV_TOKEN` (optional): For uploading coverage reports to Codecov
-
 ### Branch Protection
 It's recommended to set up branch protection rules for your main branch:
 1. Go to Settings → Branches
