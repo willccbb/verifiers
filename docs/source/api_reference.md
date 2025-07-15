@@ -67,13 +67,13 @@ dataset: Dataset = Dataset.from_list([
 message_type = "chat"
 # Input: List[Dict[str, str]] with "role" and "content" keys
 # Example: [{"role": "user", "content": "What is 2+2?"}]
-# Supports: system prompts, few-shot examples, multi-turn conversations
+# Supports: system prompts, multi-turn conversations
 
 # Completion format (for legacy models)
 message_type = "completion"  
 # Input: str (raw text)
 # Example: "What is 2+2?"
-# Limited: no system prompts, no few-shot examples
+# Limited: no system prompts
 ```
 
 **Sampling Arguments**: Pass vLLM-specific arguments for fine-grained control:
@@ -117,7 +117,7 @@ class MultiTurnEnv(Environment):
         Args:
             dataset: Dataset with 'question' and 'answer' columns or 'info' dict
             system_prompt: System prompt for the model
-            few_shot: Few-shot examples as message lists
+            few_shot: Optional few-shot examples (not recommended)
             parser: Parser for extracting structured output
             rubric: Rubric for evaluation
             message_type: "chat" (recommended) or "completion" format
@@ -208,7 +208,7 @@ class ToolEnv(MultiTurnEnv):
         Args:
             dataset: Dataset with 'question' and 'answer' columns or 'info' dict
             system_prompt: System prompt for the model
-            few_shot: Few-shot examples as message lists
+            few_shot: Optional few-shot examples (not recommended)
             tools: List of available tools (callable functions)
             max_steps: Maximum number of tool use steps
             message_type: "chat" (recommended) or "completion" format
@@ -637,13 +637,7 @@ messages: List[Dict[str, str]] = [
     {"role": "user", "content": "Can you be more specific?"}
 ]
 
-# Few-shot examples
-few_shot: List[Dict[str, str]] = [
-    {"role": "user", "content": "What is 1+1?"},
-    {"role": "assistant", "content": "1+1=2"},
-    {"role": "user", "content": "What is 2+2?"},
-    {"role": "assistant", "content": "2+2=4"}
-]
+
 ```
 
 ### Completion Format (Legacy)

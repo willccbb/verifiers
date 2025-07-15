@@ -176,7 +176,7 @@ message_type = "completion"
 # Example: "What is 2+2?"
 ```
 
-**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts and few-shot examples.
+**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts.
 
 ### State Object
 
@@ -333,7 +333,7 @@ results = vf_env.evaluate(
     model="gpt-4",
     num_examples=10
 )
-print(results)
+print(f"Results: {results}")
 ```
 
 ## Environment Types

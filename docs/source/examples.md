@@ -44,8 +44,7 @@ results: Dict[str, Any] = vf_env.evaluate(
     num_examples=10
 )
 
-print(f"Average reward: {results['metrics']['reward_mean']}")
-print(f"Correctness: {results['metrics']['correct_answer_mean']}")
+print(f"Results: {results}")
 ```
 
 ## Dataset Format Examples
@@ -102,20 +101,12 @@ dataset: Dataset = Dataset.from_list([
 ```python
 from typing import List, Dict
 
-# Chat format supports system prompts and few-shot examples
+# Chat format supports system prompts
 system_prompt: str = "You are a helpful math tutor. Think step-by-step."
-
-few_shot: List[Dict[str, str]] = [
-    {"role": "user", "content": "What is 1+1?"},
-    {"role": "assistant", "content": "<think>1+1=2</think>The answer is 2."},
-    {"role": "user", "content": "What is 2+2?"},
-    {"role": "assistant", "content": "<think>2+2=4</think>The answer is 4."},
-]
 
 vf_env = vf.SingleTurnEnv(
     dataset=dataset,
     system_prompt=system_prompt,
-    few_shot=few_shot,
     message_type="chat"  # Recommended format
 )
 ```
@@ -276,7 +267,6 @@ calculator_tool: CalculatorTool = CalculatorTool()
 vf_env = SmolaToolEnv(
     dataset=dataset,
     system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
-    few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
     tools=[python_tool, calculator_tool],  # List[Callable]
     max_steps=5,
     message_type="chat"  # Recommended format
@@ -488,7 +478,7 @@ def train_with_environment(
             num_examples=50
         )
         
-        print(f"Epoch {epoch}: Reward = {eval_results['metrics']['reward_mean']}")
+        print(f"Epoch {epoch}: Results = {eval_results}")
 ```
 
 ## Complete Working Example
@@ -549,7 +539,7 @@ results: Dict[str, Any] = vf_env.evaluate(
     num_examples=10
 )
 
-print(f"Results: {results['metrics']}")
+print(f"Results: {results}")
 ```
 
 ## Key Takeaways

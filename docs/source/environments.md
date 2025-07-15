@@ -140,16 +140,16 @@ The framework supports two message formats:
 message_type = "chat"
 # Input: List[Dict[str, str]] with "role" and "content" keys
 # Example: [{"role": "user", "content": "What is 2+2?"}]
-# Supports: system prompts, few-shot examples, multi-turn conversations
+# Supports: system prompts, multi-turn conversations
 
 # Completion format (for legacy models)
 message_type = "completion"  
 # Input: str (raw text)
 # Example: "What is 2+2?"
-# Limited: no system prompts, no few-shot examples
+# Limited: no system prompts
 ```
 
-**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts and few-shot examples.
+**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts.
 
 ### Automatic Setup
 
@@ -268,7 +268,7 @@ calculator_tool: CalculatorTool = CalculatorTool()
 vf_env = SmolaToolEnv(
     dataset=dataset,
     system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
-    few_shot=CALCULATOR_SMOLA_FEW_SHOTS,
+
     tools=[python_tool, calculator_tool],  # List[Callable]
     max_steps=5,
     message_type="chat"  # Recommended format
@@ -297,7 +297,7 @@ dataset: Dataset = vf.load_example_dataset("math", "train", n=1000)
 vf_env = DoubleCheckEnv(
     dataset=dataset,
     system_prompt=SIMPLE_PROMPT,
-    few_shot=[],
+
     message_type="chat"  # Recommended format
 )
 ```
