@@ -1,8 +1,8 @@
 """Tests for the RubricGroup class."""
 
 import pytest
-from verifiers.rubrics import Rubric, RubricGroup
-from verifiers.parsers import Parser
+from verifiers import Rubric, RubricGroup
+from verifiers import Parser
 
 
 class TestRubricGroup:

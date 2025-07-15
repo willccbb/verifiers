@@ -118,3 +118,51 @@ Homepage = "https://github.com/willccbb/verifiers"
 Documentation = "https://github.com/willccbb/verifiers"
 Repository = "https://github.com/willccbb/verifiers.git"
 Issues = "https://github.com/willccbb/verifiers/issues"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "-ra",
+    "--quiet",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "asyncio: marks tests as async tests",
+    "parsers: marks tests for parser components",
+    "rubrics: marks tests for rubric components",
+    "environments: marks tests for environment components",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:transformers.*",
+]
+asyncio_mode = "auto"
+norecursedirs = [".git", ".tox", "dist", "build", "*.egg", "__pycache__"]
+
+[tool.coverage.run]
+source = ["verifiers"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

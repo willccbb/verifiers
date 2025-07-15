@@ -1,7 +1,7 @@
 """Tests for the XMLParser class."""
 
 import pytest
-from verifiers.parsers import XMLParser
+from verifiers import XMLParser
 
 
 class TestXMLParser:

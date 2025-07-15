@@ -1,7 +1,7 @@
 """Tests for the ThinkParser class."""
 
 import pytest
-from verifiers.parsers import ThinkParser
+from verifiers import ThinkParser
 
 
 class TestThinkParser:
