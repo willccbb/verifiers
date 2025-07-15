@@ -1,3 +1,14 @@
+SIMPLE_PROMPT = """
+Respond in the following format, using careful step-by-step reasoning.
+
+<reasoning>
+...
+</reasoning>
+<answer>
+...
+</answer>
+"""
+
 THINK_ANSWER_PROMPT = """
 Think step-by-step inside <think>...</think> tags, then give your final answer inside <answer>...</answer> tags.
 """
