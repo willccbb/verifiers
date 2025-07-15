@@ -123,11 +123,10 @@ class Rubric:
         else:
             reward_scores = []
             for func in self.get_reward_funcs():
-                reward_scores.append(
-                    self.call_reward_func(
-                        func, prompt, completion, answer, state, task, info, **kwargs
-                    )
+                score = await self.call_reward_func(
+                    func, prompt, completion, answer, state, task, info, **kwargs
                 )
+                reward_scores.append(score)
         rewards = {
             func.__name__: reward
             for func, reward in zip(self.get_reward_funcs(), reward_scores)
