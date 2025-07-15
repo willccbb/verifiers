@@ -6,7 +6,45 @@ Verifiers is a flexible framework for reinforcement learning with large language
 
 The framework is built around three fundamental primitives that work together:
 
-### 1. Parser: Structured Output Extraction
+### 1. Environment: Task Orchestration
+
+Environments manage the complete interaction flow between models, datasets, and evaluation. **Most users should start with `SingleTurnEnv` or `MultiTurnEnv`**:
+
+```python
+import verifiers as vf
+
+# SingleTurnEnv: One-shot Q&A tasks (most common)
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt="Solve the problem step by step.",
+    parser=parser,
+    rubric=rubric
+)
+
+# MultiTurnEnv: Interactive conversations
+class MyMultiTurnEnv(vf.MultiTurnEnv):
+    def is_completed(self, messages, state, **kwargs):
+        # Define when conversation should end
+        return len(state['responses']) >= 5
+    
+    def env_response(self, messages, state, **kwargs):
+        # Define environment's response logic
+        return {"role": "user", "content": "Continue..."}, state
+```
+
+**SingleTurnEnv** is perfect for:
+- Question-answer tasks
+- Classification problems  
+- Translation tasks
+- Any task with clear input-output structure
+
+**MultiTurnEnv** is ideal for:
+- Interactive conversations
+- Multi-step reasoning
+- Tool-augmented tasks
+- Games and simulations
+
+### 2. Parser: Structured Output Extraction
 
 Parsers extract structured information from model outputs. The base `Parser` class simply returns text as-is, but specialized parsers can extract specific formats.
 
@@ -19,7 +57,7 @@ parser = vf.Parser()
 # ThinkParser extracts content after </think> tags
 parser = vf.ThinkParser()
 
-# XMLParser extracts structured fields
+# XMLParser extracts structured fields (recommended for most use cases)
 parser = vf.XMLParser(fields=["reasoning", "answer"])
 ```
 
@@ -41,7 +79,9 @@ print(parsed.reasoning)  # "First, I calculate..."
 print(parsed.answer)     # "4"
 ```
 
-### 2. Rubric: Multi-Criteria Evaluation
+**For nontrivial environments, users will want to write their own parsers** to handle specific output formats and requirements.
+
+### 3. Rubric: Multi-Criteria Evaluation
 
 Rubrics combine multiple reward functions to evaluate model outputs. The base `Rubric` class takes a list of functions and weights.
 
@@ -75,50 +115,32 @@ rubric = vf.Rubric(
 )
 ```
 
-### 3. Environment: Task Orchestration
-
-Environments bring everything together, managing the interaction flow between models, parsers, and rubrics:
-
-```python
-import verifiers as vf
-
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Solve the problem step by step.",
-    parser=parser,
-    rubric=rubric
-)
-
-# Generate training data
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="example")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-```
+**For nontrivial environments, users will want to write their own rubrics** to define task-specific evaluation criteria.
 
 ## Why This Architecture?
 
 ### Separation of Concerns
-- **Parsing** handles format and structure
-- **Evaluation** defines what makes a good response  
-- **Orchestration** manages the interaction flow
+- **Environments** handle task orchestration and interaction flow
+- **Parsers** handle format and structure extraction
+- **Rubrics** define what makes a good response  
 
 ### Composability
 Build complex behaviors from simple components:
 - Combine multiple reward functions in a rubric
-- Use built-in rubric types like `MathRubric`, `ToolRubric`
+- Use built-in parsers like `XMLParser`, `ThinkParser` for common cases
 - Choose from different environment types for different tasks
+- Write custom parsers and rubrics for specific needs
 
 ### Flexibility
 - Support for both chat and completion APIs
 - Synchronous and asynchronous execution
 - Works with any OpenAI-compatible API
+- Environments are also evaluations - not just for training
 
 ## Key Design Principles
 
 ### 1. Start Simple
-Many environments provide sensible defaults:
+Most environments provide sensible defaults:
 
 ```python
 # Simple - let environment choose defaults
@@ -147,9 +169,9 @@ rubric = vf.Rubric(funcs=[
 Start with basic environments and add complexity as needed:
 
 1. Begin with `SingleTurnEnv` for Q&A tasks
-2. Use `ToolEnv` when models need external tools
-3. Try `DoubleCheckEnv` for verification workflows
-4. Use `MultiTurnEnv` for interactive tasks
+2. Use `MultiTurnEnv` for interactive tasks
+3. Write custom parsers for specific output formats
+4. Write custom rubrics for task-specific evaluation
 
 ## Quick Start Example
 
@@ -181,27 +203,46 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric
 )
 
-# 4. Setup and run training
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="quick-start")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
+# 4. Evaluate the environment
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=10
+)
+print(results)
 ```
 
 ## Environment Types
 
 Different environment types are designed for different tasks:
 
-- **SingleTurnEnv**: One-shot Q&A tasks
+- **SingleTurnEnv**: One-shot Q&A tasks (most common)
+- **MultiTurnEnv**: Interactive conversations and multi-step reasoning
 - **ToolEnv**: Tasks requiring external tools (calculators, code execution)
-- **DoubleCheckEnv**: Multi-stage verification workflows
 - **TextArenaEnv**: Game-based environments
-- **ReasoningGymEnv**: Integration with reasoning gym benchmarks
+- **Custom Environments**: Write your own by extending `Environment` or `MultiTurnEnv`
 
-## Next Steps
+## Training and Evaluation
 
-- [**Environments**](environments.md): Learn about different environment types
-- [**Parsers**](parsers.md): Master structured output parsing
-- [**Rubrics**](rubrics.md): Design sophisticated evaluation criteria
-- [**Examples**](examples.md): Walk through real-world implementations
-- [**Training**](training.md): Train models with GRPO
+Environments are not just for training - they're also powerful evaluation tools:
+
+```python
+# Evaluate a model
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=100
+)
+
+# Generate training data
+results = vf_env.generate(
+    client=openai_client,
+    model="gpt-4",
+    n_samples=1000
+)
+```
+
+The framework supports various training approaches:
+- **GRPO Trainer**: Reinforcement learning with the environment
+- **Verifiers**: Async FSDP environment training
+- **Custom Training**: Use environments as reward functions in your own training loops

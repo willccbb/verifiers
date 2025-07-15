@@ -6,14 +6,80 @@ Environments are the orchestration layer of the verifiers framework. They manage
 
 ```
 Environment (base class)
-├── SingleTurnEnv     # One-shot Q&A tasks
+├── MultiTurnEnv      # Interactive conversations (base for most environments)
+│   └── SingleTurnEnv # One-shot Q&A tasks (most common entry point)
 ├── ToolEnv           # Tool-augmented reasoning  
 ├── SmolaToolEnv      # SmolaAgents integration
 ├── DoubleCheckEnv    # Multi-stage verification
 ├── TextArenaEnv      # Game environments
-├── ReasoningGymEnv   # Reasoning benchmarks
-└── MultiTurnEnv      # Interactive conversations
+└── ReasoningGymEnv   # Reasoning benchmarks
 ```
+
+## Getting Started: SingleTurnEnv
+
+**Most users should start with `SingleTurnEnv`** for one-shot question-answer tasks. It's the simplest and most common environment type:
+
+```python
+import verifiers as vf
+
+# Load a dataset
+dataset = vf.load_example_dataset("gsm8k", split="train")
+
+# Create a simple environment
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt="Solve the problem step by step.",
+    parser=vf.ThinkParser(),
+    rubric=vf.Rubric(funcs=[correct_answer_func])
+)
+
+# Evaluate the environment
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=10
+)
+```
+
+**SingleTurnEnv is perfect for:**
+- Math problems and reasoning tasks
+- Classification and categorization
+- Translation tasks
+- Any task with clear input-output structure
+
+## MultiTurnEnv: Interactive Conversations
+
+`MultiTurnEnv` is the base class for interactive environments where the model and environment can have multiple exchanges:
+
+```python
+import verifiers as vf
+
+class MyMultiTurnEnv(vf.MultiTurnEnv):
+    def is_completed(self, messages, state, **kwargs):
+        """Define when the conversation should end."""
+        # End after 5 exchanges
+        return len(state['responses']) >= 5
+    
+    def env_response(self, messages, state, **kwargs):
+        """Define how the environment responds to the model."""
+        # Simple echo response
+        last_message = messages[-1]['content']
+        return {"role": "user", "content": f"You said: {last_message}"}, state
+
+# Use the custom environment
+vf_env = MyMultiTurnEnv(
+    dataset=dataset,
+    system_prompt="Have a conversation with the user.",
+    parser=parser,
+    rubric=rubric
+)
+```
+
+**MultiTurnEnv is ideal for:**
+- Interactive conversations
+- Multi-step reasoning tasks
+- Tool-augmented workflows
+- Games and simulations
 
 ## Core Environment Features
 
@@ -198,162 +264,71 @@ vf_env = TextArenaEnv(
 **Use TextArenaEnv when:**
 - Training on game-based tasks
 - Need interactive environment feedback
-- Examples: Wordle, word games, strategy games
 
-## ReasoningGymEnv: Reasoning Benchmarks
+## Custom Environments
 
-Integration with reasoning gym benchmarks:
-
-```python
-import verifiers as vf
-from verifiers.envs.reasoninggym_env import ReasoningGymEnv
-
-vf_env = ReasoningGymEnv(
-    gym="arc_1d",
-    num_samples=4000,
-    max_concurrent=128,
-    seed=1,
-)
-```
-
-**Use ReasoningGymEnv when:**
-- Training on established reasoning benchmarks
-- Need standardized evaluation metrics
-- Examples: ARC, logical reasoning tasks
-
-## MultiTurnEnv: Interactive Conversations
-
-For tasks requiring back-and-forth interaction (less commonly used):
+For nontrivial tasks, you'll want to write your own environment by extending `MultiTurnEnv`:
 
 ```python
 import verifiers as vf
 
-class CustomMultiTurnEnv(vf.MultiTurnEnv):
-    def __init__(self, dataset, max_turns=10):
-        super().__init__(
-            dataset=dataset,
-            system_prompt="You are a helpful tutor...",
-            max_turns=max_turns
-        )
+class MyCustomEnv(vf.MultiTurnEnv):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Add custom initialization
     
-    def env_response(self, messages, state):
-        """Generate environment's response to user."""
-        # Custom logic for generating responses
+    def is_completed(self, messages, state, **kwargs):
+        """Define completion criteria."""
+        # Your logic here
+        return some_condition
+    
+    def env_response(self, messages, state, **kwargs):
+        """Define environment responses."""
+        # Your logic here
         return response_message, updated_state
-    
-    def is_completed(self, messages, state):
-        """Check if interaction should end."""
-        return state.get("completed", False)
-```
 
-**Use MultiTurnEnv when:**
-- Task requires dialogue or negotiation
-- Environment needs to respond dynamically
-- Examples: Tutoring, debugging conversations
-
-## Training Setup
-
-All environments work with the same training pattern:
-
-```python
-# Load model and setup training
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="my-experiment")
-
-# Common configuration overrides
-args.per_device_train_batch_size = 8
-args.num_generations = 16
-args.max_steps = 500
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-)
-trainer.train()
-```
-
-## Environment Selection Guide
-
-Choose your environment type based on task requirements:
-
-| Environment | Use Case | Examples |
-|-------------|----------|----------|
-| **SingleTurnEnv** | Simple Q&A | Math problems, classification |
-| **ToolEnv** | Need external tools | Code execution, calculations |
-| **SmolaToolEnv** | Advanced tools | Complex scientific computation |
-| **DoubleCheckEnv** | Self-verification | Critical reasoning tasks |
-| **TextArenaEnv** | Games/simulations | Wordle, strategy games |
-| **ReasoningGymEnv** | Benchmarks | ARC, logical reasoning |
-| **MultiTurnEnv** | Multi-turn chat | Tutoring, dialogue |
-
-## Advanced Configuration
-
-### Custom System Prompts
-
-```python
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-Then give your final answer.
-
-Format requirements:
-- Show your reasoning clearly
-- Give a definitive answer
-- Be concise but complete
-"""
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt=system_prompt
-)
-```
-
-### Custom Parsers and Rubrics
-
-```python
-# Custom parser for structured output
-parser = vf.XMLParser(fields=["reasoning", "answer"])
-
-# Custom reward function
-def custom_reward(completion, answer, **kwargs):
-    parsed = parser.parse(completion)
-    # Your custom evaluation logic
-    return reward_score
-
-rubric = vf.Rubric(
-    funcs=[custom_reward, parser.get_format_reward_func()],
-    weights=[0.8, 0.2]
-)
-
-vf_env = vf.SingleTurnEnv(
+# Use your custom environment
+vf_env = MyCustomEnv(
     dataset=dataset,
     parser=parser,
     rubric=rubric
 )
 ```
 
-### Multi-GPU Setup
+## Environment Evaluation
 
-All environments support distributed training:
+Environments are powerful evaluation tools, not just for training:
 
-```bash
-# Start vLLM inference server
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' \
-    --tensor-parallel-size 4 --max-model-len 8192
+```python
+# Evaluate a model on the environment
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=100,
+    rollouts_per_example=3
+)
 
-# Run training on separate GPUs  
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 4 your_training_script.py
+# Generate training data
+results = vf_env.generate(
+    client=openai_client,
+    model="gpt-4",
+    n_samples=1000
+)
+
+# Process results for training
+processed = vf_env.process_env_results(
+    prompts=results['prompts'],
+    completions=results['completions'],
+    states=results['states'],
+    rewards=results['rewards'],
+    processing_class=tokenizer
+)
 ```
 
-## Best Practices
+## Key Gotchas
 
-1. **Start Simple**: Begin with SingleTurnEnv and add complexity as needed
-2. **Use Built-ins**: Leverage `vf.load_example_dataset()` and `vf.grpo_defaults()`
-3. **Test First**: Verify your environment works before large-scale training
-4. **Monitor Training**: Use appropriate eval datasets and logging
-5. **Scale Gradually**: Start with small models and datasets
-
-Each environment type is optimized for specific use cases. The framework handles the complexity of distributed training, async generation, and reward computation automatically.
-</rewritten_file>
+1. **Parser Integration**: Always include format rewards from your parser in the rubric
+2. **State Management**: MultiTurnEnv maintains conversation state - be careful about state mutations
+3. **Completion Criteria**: Define clear completion criteria in `is_completed()` to avoid infinite loops
+4. **Error Handling**: Environments should gracefully handle parsing failures and API errors
+5. **Dataset Format**: Ensure your dataset has the expected columns (`question`, `answer`) or pre-format with `prompt` column

@@ -1,10 +1,40 @@
-# Training
+# Training and Evaluation
 
-The verifiers framework integrates with Group Relative Policy Optimization (GRPO) to train language models using reward signals from your environments. Training is designed to be simple and scalable.
+The verifiers framework supports both evaluation and training workflows. Environments are powerful evaluation tools that can also be used for training models using reinforcement learning.
 
-## Quick Start
+## Environment Evaluation
 
-Here's the basic pattern used in all examples:
+Environments are not just for training - they're excellent evaluation tools:
+
+```python
+import verifiers as vf
+
+# Create environment
+dataset = vf.load_example_dataset("gsm8k", split="train")
+vf_env = vf.SingleTurnEnv(dataset=dataset)
+
+# Evaluate model performance
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=100,
+    rollouts_per_example=3
+)
+
+print(f"Average reward: {sum(results['rewards']) / len(results['rewards'])}")
+print(f"Correct answers: {sum(1 for r in results['rewards'] if r > 0.8)}")
+
+# Generate training data
+results = vf_env.generate(
+    client=openai_client,
+    model="gpt-4",
+    n_samples=1000
+)
+```
+
+## Training with GRPO
+
+For users who want to train models, the framework integrates with Group Relative Policy Optimization (GRPO). Here's the basic pattern:
 
 ```python
 import verifiers as vf
@@ -200,269 +230,123 @@ vf_env = vf.SingleTurnEnv(
     rubric=rubric,
 )
 
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-args = vf.grpo_defaults(run_name="gsm8k-grpo")
-args.per_device_train_batch_size = 12
-args.num_generations = 12
-args.max_steps = 100
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-    peft_config=vf.lora_defaults()
-)
+# Train
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="gsm8k-training")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
 trainer.train()
 ```
 
-### Tool Training
+### Tool-Augmented Training
 
 ```python
 import verifiers as vf
 from verifiers.tools import python
 
-TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags, then either call a tool or give your final answer.
-
-Tools can be called with JSON:
-<tool>
-{{"name": "python", "args": {{"code": "print(2+2)"}}}}
-</tool>
-"""
-
-dataset = vf.load_example_dataset("math", split="train")
-
+# Create tool environment
 vf_env = vf.ToolEnv(
     dataset=dataset,
-    system_prompt=TOOL_PROMPT,
     tools=[python],
     max_steps=3
 )
 
-model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-args = vf.grpo_defaults(run_name="math-tool-grpo")
-args.num_iterations = 2
-args.per_device_train_batch_size = 8
-args.num_generations = 8
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-)
+# Train with tools
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
+args = vf.grpo_defaults(run_name="tool-training")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
 trainer.train()
 ```
 
-### Game Training
+## Alternative Training Approaches
+
+### Using Environments as Reward Functions
+
+You can use environments as reward functions in your own training loops:
 
 ```python
-import verifiers as vf
-from verifiers.envs.textarena_env import TextArenaEnv
-
-model_name = 'willcb/Qwen2.5-7B-Wordle-SFT'
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-vf_env = TextArenaEnv(
-    game="Wordle-v0",
-    num_samples=2000, 
-    num_eval_samples=20
+# Generate training data with rewards
+results = vf_env.generate(
+    client=openai_client,
+    model="gpt-4",
+    n_samples=1000
 )
 
-args = vf.grpo_defaults(run_name="wordle-grpo")
-args.num_iterations = 1
-args.per_device_train_batch_size = 8
-args.num_generations = 16
-args.gradient_accumulation_steps = 6
-args.max_prompt_length = 1024
-args.max_completion_length = 3072
-args.max_steps = 100
-args.mask_env_responses = True
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
+# Process for training
+processed = vf_env.process_env_results(
+    prompts=results['prompts'],
+    completions=results['completions'],
+    states=results['states'],
+    rewards=results['rewards'],
+    processing_class=tokenizer
 )
-trainer.train()
+
+# Use in your own training loop
+for batch in processed:
+    # Your custom training logic here
+    pass
 ```
 
-## Advanced Configuration
+### Verifiers for Async FSDP Training
 
-### Custom Training Arguments
+The framework also supports async FSDP environment training through the verifiers package:
+
+```python
+# This is supported by prime-rl for async FSDP environment training
+# See the verifiers package for more details
+```
+
+## Best Practices
+
+### 1. Start with Evaluation
+Before training, thoroughly evaluate your environment:
+
+```python
+# Test environment with a few examples
+results = vf_env.evaluate(
+    client=openai_client,
+    model="gpt-4",
+    num_examples=10
+)
+print(f"Average reward: {sum(results['rewards']) / len(results['rewards'])}")
+```
+
+### 2. Use Appropriate Model Sizes
+Start with smaller models for experimentation:
+
+```python
+# Start small
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+
+# Scale up when ready
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
+```
+
+### 3. Monitor Training
+Use evaluation datasets and logging:
 
 ```python
 args = vf.grpo_defaults(run_name="my-experiment")
-
-# Scale up for larger experiments
-args.per_device_train_batch_size = 4
-args.num_generations = 32
-args.gradient_accumulation_steps = 8
-args.max_concurrent = 512
-args.max_steps = 1000
-
-# Memory optimization
-args.gradient_checkpointing = True
-args.bf16 = True
-
-# Learning schedule
-args.learning_rate = 1e-6
-args.lr_scheduler_type = "constant_with_warmup"
-args.warmup_steps = 10
-
-# Logging and saving
-args.logging_steps = 1
+args.eval_strategy = "steps"
+args.eval_steps = 100
 args.save_strategy = "steps"
-args.save_steps = 100
-args.report_to = "wandb"
+args.save_steps = 500
 ```
 
-### Environment Masking
+### 4. Handle Infrastructure
+For large-scale training, use proper infrastructure:
 
-For interactive environments, mask environment responses:
-
-```python
-args.mask_env_responses = True  # Don't train on environment responses
-args.mask_truncated_completions = True  # Ignore truncated outputs
-```
-
-### Concurrent Generation
-
-```python
-args.max_concurrent = 512  # Parallel rollouts
-args.async_generation_timeout = 300.0  # Timeout for generation
-```
-
-## Training Scripts
-
-### Complete Training Script
-
-```python
-import verifiers as vf
-
-def main():
-    # Load dataset and create environment
-    dataset = vf.load_example_dataset("gsm8k", split="train")
-    vf_env = vf.SingleTurnEnv(dataset=dataset)
-    
-    # Load model
-    model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-    
-    # Configure training
-    args = vf.grpo_defaults(run_name="my-experiment")
-    args.max_steps = 100
-    
-    # Create and run trainer
-    trainer = vf.GRPOTrainer(
-        model=model,
-        processing_class=tokenizer,
-        env=vf_env,
-        args=args,
-    )
-    trainer.train()
-
-if __name__ == "__main__":
-    main()
-```
-
-### Multi-GPU Script
-
-Save as `train.py`:
-
-```python
-import verifiers as vf
-
-def main():
-    dataset = vf.load_example_dataset("math", "train", n=6000)
-    vf_env = vf.ToolEnv(dataset=dataset, tools=[vf.tools.python])
-    
-    model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
-    args = vf.grpo_defaults(run_name="multi-gpu-experiment")
-    
-    trainer = vf.GRPOTrainer(
-        model=model,
-        processing_class=tokenizer,
-        env=vf_env,
-        args=args,
-    )
-    trainer.train()
-
-if __name__ == "__main__":
-    main()
-```
-
-Run with:
 ```bash
-accelerate launch --config-file configs/zero3.yaml --num-processes 4 train.py
+# Use vLLM for efficient generation
+vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' --tensor-parallel-size 4
+
+# Use DeepSpeed for efficient training
+accelerate launch --config-file configs/zero3.yaml training_script.py
 ```
 
-## Monitoring Training
+## Key Gotchas
 
-### Weights & Biases Integration
-
-```python
-args = vf.grpo_defaults(run_name="my-experiment")
-args.report_to = "wandb"
-args.log_completions = True  # Log sample completions
-
-# Will automatically log:
-# - Training loss
-# - Reward statistics
-# - Sample completions
-# - Model metrics
-```
-
-### Manual Evaluation
-
-```python
-# During training, evaluate on test set
-eval_results = trainer.env.evaluate(
-    client=trainer.oai_client,
-    model=trainer._get_model_name(),
-    sampling_args=trainer._get_sampling_args(),
-    num_samples=100
-)
-print(f"Eval reward: {eval_results['reward']}")
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **CUDA Out of Memory**
-   ```python
-   args.per_device_train_batch_size = 2  # Reduce batch size
-   args.gradient_checkpointing = True     # Enable checkpointing
-   args.bf16 = True                       # Use half precision
-   ```
-
-2. **Slow Training**
-   ```python
-   args.max_concurrent = 256              # Increase concurrency
-   args.gradient_accumulation_steps = 8   # Larger effective batch
-   ```
-
-3. **vLLM Connection Issues**
-   ```bash
-   # Check vLLM server is running
-   curl http://localhost:8000/health
-   
-   # Check GPU usage
-   nvidia-smi
-   ```
-
-### Performance Tips
-
-1. **Use appropriate batch sizes**: Start small and scale up
-2. **Enable async generation**: Set `max_concurrent` appropriately
-3. **Use LoRA for large models**: Add `peft_config=vf.lora_defaults()`
-4. **Monitor GPU utilization**: Ensure GPUs are fully used
-5. **Use bf16**: Enable mixed precision training
-
-The training framework is designed to scale from single GPU experiments to large multi-GPU production runs. All examples follow the same basic patterns, making it easy to reproduce and extend the training setups.
+1. **Environment Testing**: Always test your environment before training
+2. **Reward Scaling**: Ensure rewards are in reasonable ranges (typically 0-1)
+3. **Format Rewards**: Always include format compliance in your rubric
+4. **Infrastructure**: Use appropriate infrastructure for your model size
+5. **Evaluation**: Regular evaluation helps catch training issues early
