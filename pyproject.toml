@@ -60,6 +60,19 @@ all = [
     "nltk"
 ]
 
+dev = [
+    "ruff",
+    "pre-commit",
+    "setuptools",
+    "requests",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "sphinx",
+    "myst-parser",
+    "sphinx-rtd-theme"
+]
+
 train = [
     "torch>=2.7.0",
     "transformers",
@@ -90,18 +103,6 @@ envs = [
     "nltk"
 ]
 
-dev = [
-    "ruff",
-    "pre-commit",
-    "setuptools",
-    "requests",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.0.0",
-    "sphinx",
-    "myst-parser",
-    "sphinx-rtd-theme"
-]
 
 [project.scripts]
 vf-vllm = "verifiers.inference.vllm_server:main"
