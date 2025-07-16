@@ -48,7 +48,7 @@ vf_env = vf.SingleTurnEnv(
     max_concurrent=10
 )
 
-def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool):    
+def main(api: str, num_examples: int, rollouts_per_example: int, max_tokens: int, save_dataset: bool):    
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = "https://api.deepseek.com"
@@ -72,7 +72,8 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool):
         client=client,
         model=model_name,
         sampling_args=sampling_args,
-        num_samples=num_samples
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example
     ) 
     if save_dataset:
         dataset = vf_env.make_dataset(results)
@@ -87,4 +88,4 @@ if __name__ == "__main__":
     argparser.add_argument("--max-tokens", "-t", type=int, default=4096)
     argparser.add_argument("--save-dataset", "-s", type=bool, default=False)
     args = argparser.parse_args()
-    main(args.api, args.num_samples, args.max_tokens, args.save_dataset)
+    main(args.api, args.num_examples, args.rollouts_per_example, args.max_tokens, args.save_dataset)

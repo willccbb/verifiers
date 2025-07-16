@@ -28,7 +28,7 @@ def partial_credit_reward_func(completion, **kwargs) -> float:
 
 vf_env.rubric.add_reward_func(partial_credit_reward_func)
 
-def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False):
+def main(api: str, num_examples: int, rollouts_per_example: int, max_tokens: int, save_dataset: bool = False):
     # collect V3/R1 rollouts from API
     if api == "deepseek":
         base_url = os.getenv("DEEPINFRA_API_URL")
@@ -56,7 +56,8 @@ def main(api: str, num_samples: int, max_tokens: int, save_dataset: bool = False
         client=client,
         model=model_name, 
         sampling_args=sampling_args,
-        num_samples=num_samples,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
         max_concurrent=20
     )
 
@@ -82,8 +83,9 @@ if __name__ == "__main__":
     import argparse
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--api", "-a", type=str, default="openai")
-    argparser.add_argument("--num-samples", "-n", type=int, default=20)
-    argparser.add_argument("--max-tokens", "-t", type=int, default=2048)
+    argparser.add_argument("--num-examples", "-n", type=int, default=20)
+    argparser.add_argument("--rollouts-per-example", "-r", type=int, default=1)
+    argparser.add_argument("--max-tokens", "-t", type=int, default=20)
     argparser.add_argument("--save-dataset", "-s", action="store_true", default=False)
     args = argparser.parse_args()
-    main(args.api, args.num_samples, args.max_tokens, args.save_dataset)
+    main(args.api, args.num_examples, args.rollouts_per_example, args.max_tokens, args.save_dataset)

@@ -1,4 +1,4 @@
-import os, sys
+from copy import deepcopy
 import random
 from typing import Tuple, List, Dict, Any
 
@@ -45,6 +45,7 @@ class TextArenaEnv(MultiTurnEnv):
                  seed: int = 0,
                  **kwargs):
         self.game = game
+        self.ta_env = ta.make(env_id=game)
         self.num_train_examples = num_train_examples
         self.num_eval_examples = num_eval_examples
         self.seed = seed
@@ -91,7 +92,7 @@ class TextArenaEnv(MultiTurnEnv):
                      **kwargs: Any) -> Tuple[Message, State]:
         # load env 
         if 'ta_env' not in state:
-            ta_env = ta.make(env_id=self.game)
+            ta_env = deepcopy(self.ta_env)
             ta_env.reset(num_players=1)
             ta_env.state.game_state['secret_word'] = state['answer']
             state['ta_env'] = ta_env
