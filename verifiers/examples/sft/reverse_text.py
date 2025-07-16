@@ -3,7 +3,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 """
-accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/sft/warmup_reverse.py
+accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/sft/reverse_text.py
 """
 
 # convenience function for FA2 initialization
