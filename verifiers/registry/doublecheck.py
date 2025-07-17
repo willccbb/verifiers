@@ -11,8 +11,8 @@ from verifiers import (
     MultiTurnEnv,
 )
 from verifiers.prompts import SIMPLE_PROMPT
-from verifiers.rubrics import MathRubric
-
+from verifiers.rubrics.math_rubric import MathRubric
+from verifiers.utils.data_utils import load_example_dataset
 
 class DoubleCheckEnv(MultiTurnEnv):
     def __init__(self,
@@ -51,3 +51,12 @@ class DoubleCheckEnv(MultiTurnEnv):
                      state: State,
                      **kwargs) -> Tuple[ChatMessage, State]:
         return {'role': 'user', 'content': 'Are you sure?'}, state
+
+def load_environment(**kwargs):
+    dataset = load_example_dataset("math", "train", n=1000)
+    vf_env = DoubleCheckEnv(
+        dataset=dataset,
+        system_prompt=SIMPLE_PROMPT,
+        few_shot=[]
+    )
+    return vf_env
