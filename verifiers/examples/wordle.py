@@ -3,10 +3,10 @@ from verifiers.envs.textarena_env import TextArenaEnv
 
 """
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 7 --enforce-eager
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager
 
 training:
-CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 verifiers/examples/wordle.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/wordle.py
 """
 
 model_name = "willcb/Qwen3-4B-Wordle"
@@ -34,10 +34,10 @@ vf_env.rubric.add_reward_func(partial_credit_reward_func)
 run_name = "wordle-grpo-4b"
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size = 8
-training_args.num_generations = 8
+training_args.num_generations = 16
 training_args.gradient_accumulation_steps = 16
-training_args.max_prompt_length = 1024
-training_args.max_completion_length = 3072
+training_args.max_tokens = 1024 # per turn
+training_args.max_seq_len = 4096
 training_args.max_steps = 200
 training_args.eval_strategy = "steps"
 training_args.eval_steps = 20
