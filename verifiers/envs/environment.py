@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, List, Literal, Tuple
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 
-from verifiers import (
+from verifiers.parsers.parser import Parser
+from verifiers.rubrics.rubric import Rubric
+from verifiers.types import (
     ChatCompletion,
     ChatMessage,
     GenerateInputs,
@@ -17,10 +19,8 @@ from verifiers import (
     Messages,
     MessageType,
     ModelResponse,
-    Parser,
     ProcessedOutputs,
     RewardFunc,
-    Rubric,
     SamplingArgs,
     State,
 )

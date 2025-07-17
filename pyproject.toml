@@ -106,6 +106,7 @@ envs = [
 
 [project.scripts]
 vf-vllm = "verifiers.inference.vllm_server:main"
+vf-test = "verifiers.scripts.test_env:main"
 
 [tool.setuptools]
 packages = ["verifiers"]

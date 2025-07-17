@@ -3,10 +3,10 @@ from verifiers.envs.textarena_env import TextArenaEnv
 
 """
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-1.7B-Wordle --tensor-parallel-size 1 --data-parallel-size 6 --enforce-eager
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager
 
 training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 verifiers/examples/wordle_nothink.py
+CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 verifiers/examples/wordle_nothink.py
 """
 
 model_name = "willcb/Qwen3-1.7B-Wordle"
@@ -26,11 +26,9 @@ vf_env = TextArenaEnv(
     parser=vf.XMLParser(fields=["guess"], answer_field="guess"),
 )
 
+
 # partial credit reward function
-parser = vf_env.parser
-
-
-def partial_credit_reward_func(completion, **kwargs) -> float:
+def partial_credit_reward_func(parser, completion, **kwargs) -> float:
     """Reward function that gives partial credit for the correct guess."""
     final_env_response = parser.get_user_messages(completion)[-1]["content"].strip()
     guess, scoring = final_env_response.split("\n")[:2]
@@ -45,7 +43,7 @@ run_name = "wordle-nothink-grpo-1.7b"
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size = 16
 training_args.num_generations = 16
-training_args.gradient_accumulation_steps = 4
+training_args.gradient_accumulation_steps = 16
 training_args.max_seq_len = 1024
 training_args.max_tokens = 16
 training_args.max_steps = 500

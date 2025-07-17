@@ -11,6 +11,7 @@ CLAUDE.md
 .cursor/
 
 # artifacts
+core.* 
 .coverage
 dist/
 build/

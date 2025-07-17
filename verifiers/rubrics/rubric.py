@@ -3,7 +3,8 @@ import inspect
 import logging
 from typing import Dict, List, Union
 
-from verifiers import ChatMessage, Info, Parser, RewardFunc, State
+from verifiers.parsers.parser import Parser
+from verifiers.types import ChatMessage, Info, RewardFunc, State
 
 
 class Rubric:
@@ -55,6 +56,7 @@ class Rubric:
     async def call_reward_func(
         self,
         func: RewardFunc,
+        parser: Parser,
         prompt: Union[str, List[ChatMessage]],
         completion: Union[str, List[ChatMessage]],
         answer: str,
@@ -75,6 +77,7 @@ class Rubric:
         sig = inspect.signature(func)
 
         common = dict(
+            parser=parser,
             prompt=prompt,
             completion=completion,
             answer=answer,
@@ -115,7 +118,15 @@ class Rubric:
         if self.parallelize_scoring:
             score_tasks = [
                 self.call_reward_func(
-                    func, prompt, completion, answer, state, task, info, **kwargs
+                    func=func,
+                    parser=self.parser,
+                    prompt=prompt,
+                    completion=completion,
+                    answer=answer,
+                    state=state,
+                    task=task,
+                    info=info,
+                    **kwargs,
                 )
                 for func in self.get_reward_funcs()
             ]
@@ -124,7 +135,15 @@ class Rubric:
             reward_scores = []
             for func in self.get_reward_funcs():
                 score = await self.call_reward_func(
-                    func, prompt, completion, answer, state, task, info, **kwargs
+                    func=func,
+                    parser=self.parser,
+                    prompt=prompt,
+                    completion=completion,
+                    answer=answer,
+                    state=state,
+                    task=task,
+                    info=info,
+                    **kwargs,
                 )
                 reward_scores.append(score)
         rewards = {

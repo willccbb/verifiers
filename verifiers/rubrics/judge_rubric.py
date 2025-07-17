@@ -1,6 +1,7 @@
 from openai import OpenAI
 
-from verifiers import Parser, Rubric
+from verifiers.parsers.parser import Parser
+from verifiers.rubrics.rubric import Rubric
 
 DEFAULT_JUDGE_PROMPT = """Given a ground truth answer \
 and a response, determine if the response is correct.
