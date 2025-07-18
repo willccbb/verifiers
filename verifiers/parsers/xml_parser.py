@@ -69,6 +69,28 @@ class XMLParser(Parser):
                     results[alt] = None
         return SimpleNamespace(**results)
 
+    def parse_all(self, text: str, strip: bool = True) -> Any:
+        """
+        Parse the given XML string and return an object with attributes corresponding
+        to all allowed tags in the schema, but return lists for each field to handle
+        multiple occurrences.
+
+        For each field defined:
+          - Returns a list of all occurrences of that field (empty list if none found)
+        """
+        results: Dict[str, List[str]] = {}
+        for canonical, alternatives in self._fields:
+            # For each allowed alternative tag, search all occurrences
+            for alt in alternatives:
+                # Regex pattern to capture all contents between the tags
+                pattern = rf"<{alt}>\s*(.*?)\s*</{alt}>"
+                matches = re.findall(pattern, text, re.DOTALL)
+                if matches:
+                    results[alt] = [m.strip() if strip else m for m in matches]
+                else:
+                    results[alt] = []
+        return SimpleNamespace(**results)
+
     def parse_answer(self, completion: Messages) -> str | None:
         """Extract the last answer from a completion."""
         if isinstance(completion, str):
