@@ -161,18 +161,33 @@ class ToolEnv(MultiTurnEnv):
             # Check if we have any tool calls
             if hasattr(parsed_all, 'tool') and len(parsed_all.tool) > 0:
                 results = []
+                tool_names = []
+
                 # Execute each tool call
                 for tool_json in parsed_all.tool:
                     result = self.call_tool(tool_json)
                     results.append(result)
 
+                    # Extract tool name for labeling
+                    try:
+                        import json
+                        tool_data = json.loads(tool_json)
+                        tool_name = tool_data.get("name", "unknown_tool")
+                        tool_names.append(tool_name)
+                    except:
+                        tool_names.append("unknown_tool")
+
                 # Combine all results
                 if results:
-                    combined_results = "\n\n".join(f"Tool {i+1} result:\n{r}" for i, r in enumerate(results))
-
-                    # If only one tool was called, simplify the output
                     if len(results) == 1:
+                        # Single tool - no label needed
                         combined_results = results[0]
+                    else:
+                        # Multiple tools - label with tool names
+                        labeled_results = []
+                        for tool_name, result in zip(tool_names, results):
+                            labeled_results.append(f"{tool_name} result:\n{result}")
+                        combined_results = "\n\n".join(labeled_results)
 
                     return {'role': 'user', 'content': self.env_parser.format(result=combined_results)}, state
                 else:

@@ -88,8 +88,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "add_tool result:" in content
+        assert "multiply_tool result:" in content
         assert "5" in content  # Result of 2 + 3
         assert "20" in content  # Result of 4 * 5
 
@@ -108,9 +108,9 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
-        assert "Tool 3 result:" in content
+        assert "add_tool result:" in content
+        assert "multiply_tool result:" in content
+        assert "greet_tool result:" in content
         assert "3" in content  # Result of 1 + 2
         assert "12" in content  # Result of 3 * 4
         assert "Hello, Alice!" in content  # Result of greet_tool
@@ -129,8 +129,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "add_tool result:" in content
+        assert "invalid_tool result:" in content  # Tool name is extracted from JSON even if tool doesn't exist
         assert "15" in content  # Valid result from add_tool
         assert "Error:" in content  # Error from invalid_tool
 
@@ -148,8 +148,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "add_tool result:" in content
+        assert "unknown_tool result:" in content  # Invalid JSON gets "unknown_tool" label
         assert "3" in content  # Valid result
         assert "Error:" in content  # Error from invalid JSON
 
@@ -164,8 +164,8 @@ class TestToolEnv:
         response, new_state = tool_env.env_response(messages, state)
         
         assert response["role"] == "user"
-        # Should not have "Tool 1 result:" prefix for single tool
-        assert "Tool 1 result:" not in response["content"]
+        # Should not have tool name prefix for single tool
+        assert "greet_tool result:" not in response["content"]
         assert "Hello, World!" in response["content"]
 
     def test_no_tools_fallback(self, tool_env):
@@ -209,8 +209,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "add_tool result:" in content
+        assert "empty_tool result:" in content
         assert "2" in content  # Result from add_tool
 
     def test_tool_with_default_args(self, tool_env):
@@ -227,8 +227,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "greet_tool result:" in content
+        # Both calls use same tool name, so we'll see it twice
         assert "Hello, World!" in content  # Default name
         assert "Hello, Bob!" in content  # Specified name
 
@@ -253,9 +253,9 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
-        assert "Tool 3 result:" in content
+        assert "add_tool result:" in content
+        assert "error_tool result:" in content
+        assert "greet_tool result:" in content
         assert "3" in content  # Successful result
         assert "Error:" in content  # Error from error_tool
         assert "Hello, World!" in content  # Successful result after error
@@ -355,8 +355,8 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "special_output_tool result:" in content
+        assert "greet_tool result:" in content
         assert "Line 1\nLine 2" in content
         assert "Tab:\tHere" in content
         assert "Special: !@#$%^&*()" in content
@@ -381,9 +381,8 @@ class TestToolEnv:
         assert response["role"] == "user"
         content = response["content"]
         
-        # Should have all 15 results
-        for i in range(1, 16):
-            assert f"Tool {i} result:" in content
+        # Should have all 15 results with add_tool labels
+        assert content.count("add_tool result:") == 15
         
         # Check some specific calculations
         assert str(0 + 1) in content  # First result: 0+1=1
@@ -409,7 +408,7 @@ class TestToolEnv:
         
         assert response["role"] == "user"
         content = response["content"]
-        assert "Tool 1 result:" in content
-        assert "Tool 2 result:" in content
+        assert "long_output_tool result:" in content
+        assert "greet_tool result:" in content
         # Long output should be truncated if max_chars is set
         assert "Hello, World!" in content  # Second tool should still work
