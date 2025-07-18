@@ -153,8 +153,33 @@ class ToolEnv(MultiTurnEnv):
                      state: State,
                      **kwargs) -> Tuple[Message, State]:
         try:
-            parsed = self.parser.parse(messages[-1]['content'])
-            # Check if we got a valid tool field (not just None from failed parsing)
+            content = messages[-1]['content']
+
+            # Parse all tool calls (supports multiple)
+            parsed_all = self.parser.parse_all(content)
+
+            # Check if we have any tool calls
+            if hasattr(parsed_all, 'tool') and len(parsed_all.tool) > 0:
+                results = []
+                # Execute each tool call
+                for tool_json in parsed_all.tool:
+                    result = self.call_tool(tool_json)
+                    results.append(result)
+
+                # Combine all results
+                if results:
+                    combined_results = "\n\n".join(f"Tool {i+1} result:\n{r}" for i, r in enumerate(results))
+
+                    # If only one tool was called, simplify the output
+                    if len(results) == 1:
+                        combined_results = results[0]
+
+                    return {'role': 'user', 'content': self.env_parser.format(result=combined_results)}, state
+                else:
+                    return {'role': 'user', 'content': "Error: Tool execution returned no output."}, state
+
+            # If no tools found, check with single parse (for backward compatibility)
+            parsed = self.parser.parse(content)
             if hasattr(parsed, 'tool') and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
                 if len(result.strip()) > 0:
