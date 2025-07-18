@@ -37,6 +37,7 @@ logs/
 .DS_Store
 
 # WIPs
+verifiers/envs/multibranch_env.py
 wip/
 old/
 notebooks/

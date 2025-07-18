@@ -20,6 +20,10 @@ def main():
     parser.add_argument("--max-concurrent-requests", "-c", type=int, default=32)
     parser.add_argument("--max-tokens", "-t", type=int, default=1024)
     parser.add_argument("--temperature", "-T", type=float, default=0.7)
+    parser.add_argument("--save-dataset", "-s", default=False, action="store_true")
+    parser.add_argument("--save-path", "-p", type=str, default="results.jsonl")
+    parser.add_argument("--save-to-hf-hub", "-H", default=False, action="store_true")
+    parser.add_argument("--hf-hub-dataset-name", "-D", type=str, default="")
     args = parser.parse_args()
     print(args)
 
@@ -61,6 +65,16 @@ def main():
                 trials = [round(v[(i * r) + j], 3) for j in range(n)]
                 out = f"r{i + 1}: {trials}"
                 print(out)
+    if args.save_dataset:
+        dataset = vf_env.make_dataset(results)
+        dataset.save_to_disk(args.save_path)
+        print(f"Saved dataset to {args.save_path}")
+    if args.save_to_hf_hub:
+        if args.hf_hub_dataset_name == "":
+            dataset_name = f"{args.env}--{args.model}--results"
+        else:
+            dataset_name = args.hf_hub_dataset_name
+        vf_env.make_dataset(results, push_to_hub=True, hub_name=dataset_name)
 
 
 if __name__ == "__main__":

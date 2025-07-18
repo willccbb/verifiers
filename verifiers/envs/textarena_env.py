@@ -1,6 +1,6 @@
 import random
 from copy import deepcopy
-from typing import Any, Tuple
+from typing import Any, Callable, Tuple
 
 import nltk
 from datasets import Dataset
@@ -30,13 +30,16 @@ In each turn, think step-by-step inside <think>...</think> tags, \
 then follow the instructions inside <guess>...</guess> tags."""
 
 
+def wordle_feedback_fn(observation: str) -> str:
+    if "Feedback:" in observation:
+        return observation.split("Feedback:")[-1]
+    else:
+        return observation
+
+
 class TextArenaEnv(MultiTurnEnv):
     """
     Wrapper for TextArena environments.
-
-    Supported games:
-    - Wordle-v0
-    - Hangman-v0
     """
 
     def __init__(
@@ -46,6 +49,7 @@ class TextArenaEnv(MultiTurnEnv):
         num_eval_examples: int = 0,
         system_prompt: str = GUESS_SYSTEM_PROMPT,
         parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
+        feedback_fn: Callable[[str], str] = lambda x: x,
         seed: int = 0,
         **kwargs,
     ):
@@ -84,6 +88,7 @@ class TextArenaEnv(MultiTurnEnv):
         )
         self.parser = parser
         self.rubric = rubric
+        self.feedback_fn = feedback_fn
 
     def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
         if "is_finished" in state and state["is_finished"]:
@@ -110,10 +115,7 @@ class TextArenaEnv(MultiTurnEnv):
         is_finished, _ = ta_env.step(str(guess))
         state["is_finished"] = is_finished
         _, observation = ta_env.get_observation()
-        if "Feedback:" in observation:
-            feedback = observation.split("Feedback:")[-1]
-        else:
-            feedback = observation
+        feedback = self.feedback_fn(observation)
         env_message: ChatMessage = {"role": "user", "content": str(feedback)}
         return env_message, state
 

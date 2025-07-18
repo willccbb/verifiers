@@ -7,7 +7,7 @@ from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers.smola_parser import SmolaParser
 from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.rubrics.smola_tool_rubric import SmolaToolRubric
-from verifiers.types import ChatMessage, RewardFunc, State
+from verifiers.types import Message, Messages, RewardFunc, State
 
 
 class SmolaToolEnv(MultiTurnEnv):
@@ -63,8 +63,9 @@ class SmolaToolEnv(MultiTurnEnv):
     def get_reward_weights(self, **kwargs: Any) -> List[float]:
         return self.rubric.get_reward_weights()
 
-    def _get_step_count(self, messages: List[ChatMessage]) -> int:
+    def _get_step_count(self, messages: Messages) -> int:
         """Count the number of tool uses in the message history, excluding few-shot examples."""
+        assert isinstance(messages, list)
         step_count = 0
 
         # Skip messages that are part of few-shot examples
@@ -81,9 +82,8 @@ class SmolaToolEnv(MultiTurnEnv):
                 step_count += 1
         return step_count
 
-    def is_completed(
-        self, messages: List[ChatMessage], state: State, **kwargs: Any
-    ) -> bool:
+    def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
+        assert isinstance(messages, list)
         try:
             # Check if we've hit max steps by counting tool uses in the message history
             step_count = self._get_step_count(messages)
@@ -130,8 +130,9 @@ class SmolaToolEnv(MultiTurnEnv):
             )
 
     def env_response(
-        self, messages: List[ChatMessage], state: State, **kwargs: Any
-    ) -> Tuple[ChatMessage, State]:
+        self, messages: Messages, state: State, **kwargs: Any
+    ) -> Tuple[Message, State]:
+        assert isinstance(messages, list)
         try:
             parsed = self.llm_parser.parse(messages[-1]["content"])
             # Check if we got a valid tool field (not just None from failed parsing)

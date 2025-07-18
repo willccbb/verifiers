@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import Dict, List, Tuple
 
 from datasets import Dataset
 from openai import OpenAI
@@ -6,23 +6,26 @@ from openai import OpenAI
 from verifiers import (
     ChatMessage,
     Messages,
+    MultiTurnEnv,
     RewardFunc,
     State,
-    MultiTurnEnv,
 )
 from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics.math_rubric import MathRubric
 from verifiers.utils.data_utils import load_example_dataset
 
+
 class DoubleCheckEnv(MultiTurnEnv):
-    def __init__(self,
-                 client: OpenAI | None = None,
-                 model: str | None = None,
-                 dataset: Dataset | None = None,
-                 eval_dataset: Dataset | None = None,
-                 system_prompt: str = SIMPLE_PROMPT,
-                 few_shot: List[Dict[str, str]] = [],
-                 **kwargs):
+    def __init__(
+        self,
+        client: OpenAI | None = None,
+        model: str | None = None,
+        dataset: Dataset | None = None,
+        eval_dataset: Dataset | None = None,
+        system_prompt: str = SIMPLE_PROMPT,
+        few_shot: List[Dict[str, str]] = [],
+        **kwargs,
+    ):
         super().__init__(
             client=client,
             model=model,
@@ -30,33 +33,26 @@ class DoubleCheckEnv(MultiTurnEnv):
             eval_dataset=eval_dataset,
             system_prompt=system_prompt,
             few_shot=few_shot,
-            **kwargs
+            **kwargs,
         )
         self.rubric = MathRubric()
 
     def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
-    
+
     def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
 
-    def is_completed(self,
-                     messages: Messages,
-                     state: State,
-                     **kwargs) -> bool:
-        return len(state['responses']) == 1
-    
-    def env_response(self,
-                     messages: Messages,
-                     state: State,
-                     **kwargs) -> Tuple[ChatMessage, State]:
-        return {'role': 'user', 'content': 'Are you sure?'}, state
+    def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
+        return len(state["responses"]) == 1
+
+    def env_response(
+        self, messages: Messages, state: State, **kwargs
+    ) -> Tuple[ChatMessage, State]:
+        return {"role": "user", "content": "Are you sure?"}, state
+
 
 def load_environment(**kwargs):
     dataset = load_example_dataset("math", "train", n=1000)
-    vf_env = DoubleCheckEnv(
-        dataset=dataset,
-        system_prompt=SIMPLE_PROMPT,
-        few_shot=[]
-    )
+    vf_env = DoubleCheckEnv(dataset=dataset, system_prompt=SIMPLE_PROMPT, few_shot=[])
     return vf_env

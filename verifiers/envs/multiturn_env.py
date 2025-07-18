@@ -86,7 +86,7 @@ class MultiTurnEnv(Environment):
                 assert isinstance(rollout, list)
                 assert isinstance(completion, list)
                 assert isinstance(response, ChatCompletion)
-                response_text: str = response.choices[0].message.content or ""
+                response_text: str = response.choices[0].message.content or ""  # type: ignore
                 response_message: ChatMessage = {
                     "role": "assistant",
                     "content": response_text,
@@ -97,7 +97,7 @@ class MultiTurnEnv(Environment):
                 assert isinstance(rollout, str)
                 assert isinstance(completion, str)
                 assert isinstance(response, Completion)
-                response_text: str = response.choices[0].text or ""
+                response_text: str = response.choices[0].text or ""  # type: ignore
                 rollout += response_text
                 completion += response_text
             state["turn"] += 1

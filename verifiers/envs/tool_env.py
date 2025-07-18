@@ -125,9 +125,8 @@ class ToolEnv(MultiTurnEnv):
     def get_reward_weights(self, **kwargs) -> List[float]:
         return self.rubric.get_reward_weights()
 
-    def is_completed(
-        self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs: Any
-    ) -> bool:
+    def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
+        assert isinstance(messages, list)
         return self.parser.parse_answer(messages) is not None
 
     def call_tool(self, tool_json: str, max_chars: int = 1024, **kwargs) -> str:
@@ -174,8 +173,9 @@ class ToolEnv(MultiTurnEnv):
     def env_response(
         self, messages: Messages, state: State, **kwargs
     ) -> Tuple[Message, State]:
+        assert isinstance(messages, list)
         try:
-            parsed = self.parser.parse(messages[-1]["content"])
+            parsed = self.parser.parse(messages[-1]["content"])  # type: ignore
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, "tool") and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
