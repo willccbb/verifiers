@@ -1,6 +1,6 @@
 from datasets import concatenate_datasets
 
-from verifiers.envs.smola_tool_env import SmolaToolEnv
+from verifiers.envs.smolagents_tool_env import SmolagentsToolEnv
 from verifiers.prompts.few_shots import CALCULATOR_SMOLA_FEW_SHOTS
 from verifiers.prompts.system_prompts import MATH_SMOLA_PROMPT_TEMPLATE
 from verifiers.utils.data_utils import load_example_dataset
@@ -25,13 +25,14 @@ def load_environment(use_few_shot: bool = False, **kwargs):
     # Add our custom calculator tool
     calculator_tool = CalculatorTool()
 
-    vf_env = SmolaToolEnv(
+    vf_env = SmolagentsToolEnv(
         dataset=dataset,
         eval_dataset=eval_dataset,
         system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
         few_shot=CALCULATOR_SMOLA_FEW_SHOTS if use_few_shot else [],
         tools=[python_tool, calculator_tool],
         max_steps=5,
+        **kwargs,
     )
 
     return vf_env

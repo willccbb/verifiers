@@ -87,3 +87,15 @@ class ReasoningGymEnv(SingleTurnEnv):
         dataset = Dataset.from_list(dataset_rows)
         eval_dataset = Dataset.from_list(eval_rows)
         return dataset, eval_dataset
+
+
+def load_environment(
+    gym: str | List[str | dict] = "arc_1d",
+    num_samples: int = 2000,
+    num_eval_samples: int = 2000,
+    **kwargs,
+):
+    vf_env = ReasoningGymEnv(
+        gym=gym, num_samples=num_samples, num_eval_samples=num_eval_samples, **kwargs
+    )
+    return vf_env

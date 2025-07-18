@@ -1,6 +1,5 @@
 import verifiers as vf
-from verifiers.utils.data_utils import load_example_dataset, extract_boxed_answer
-
+from verifiers.utils.data_utils import extract_boxed_answer, load_example_dataset
 
 
 def load_environment(num_train_examples=-1, num_eval_examples=-1):
@@ -18,11 +17,9 @@ def load_environment(num_train_examples=-1, num_eval_examples=-1):
     """
     parser = vf.ThinkParser(extract_fn=extract_boxed_answer)
 
-
     def correct_answer_reward_func(completion, answer, **kwargs):
         response = parser.parse_answer(completion) or ""
         return 1.0 if response == answer else 0.0
-
 
     rubric = vf.Rubric(
         funcs=[correct_answer_reward_func, parser.get_format_reward_func()],

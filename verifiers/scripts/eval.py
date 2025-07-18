@@ -27,7 +27,9 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    client = OpenAI(api_key=os.getenv(args.api_key_var), base_url=args.api_base_url)
+    client = OpenAI(
+        api_key=os.getenv(args.api_key_var, "EMPTY"), base_url=args.api_base_url
+    )
     vf_env = vf.load_environment(env_id=args.env, env_args={})
     sampling_args = {
         "max_tokens": args.max_tokens,

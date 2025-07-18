@@ -1,35 +1,38 @@
+from datasets import concatenate_datasets, load_dataset
+from trl import SFTConfig, SFTTrainer
+
 import verifiers as vf
-from datasets import load_dataset, concatenate_datasets
-from trl import SFTTrainer, SFTConfig
 
 """
-accelerate launch --config-file configs/zero3.yaml --num-processes 8 verifiers/examples/sft/wordle_nothink.py
+accelerate launch --config-file configs/zero3.yaml --num-processes 8 examples/sft/wordle_nothink.py
 """
 
 # convenience function for FA2 initialization
 model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-1.7B", use_liger=False)
 
+
 def strip_nothink_from_prompt(x):
-    x['prompt'] = [
-        {'role': 'system', 'content': x['prompt'][0]['content'].replace('/no_think', '')}
-    ] + x['prompt'][1:]
+    x["prompt"] = [
+        {
+            "role": "system",
+            "content": x["prompt"][0]["content"].replace("/no_think", ""),
+        }
+    ] + x["prompt"][1:]
     return x
 
-dataset_v1 = load_dataset('willcb/V3-wordle-nothink', split='train')
-dataset_v2 = load_dataset('willcb/V3-wordle-nothink-100', split='train')
-dataset_v3 = load_dataset('willcb/mini-wordle-nothink-100', split='train')
 
-dataset = concatenate_datasets([dataset_v1, dataset_v2, dataset_v3]) # type: ignore
+dataset_v1 = load_dataset("willcb/V3-wordle-nothink", split="train")
+dataset_v2 = load_dataset("willcb/V3-wordle-nothink-100", split="train")
+dataset_v3 = load_dataset("willcb/mini-wordle-nothink-100", split="train")
+
+dataset = concatenate_datasets([dataset_v1, dataset_v2, dataset_v3])  # type: ignore
 dataset = dataset.map(strip_nothink_from_prompt)
 
 tok_counts = []
 for row in dataset:
     # count tokens in (prompt, completion)
-    messages = row['prompt'] + row['completion'] # type: ignore
-    toks = tokenizer.apply_chat_template( 
-        messages,
-        tokenize=True
-    )
+    messages = row["prompt"] + row["completion"]  # type: ignore
+    toks = tokenizer.apply_chat_template(messages, tokenize=True)
     tok_counts.append(len(toks))
 
 # tok count stats
@@ -63,6 +66,6 @@ args = SFTConfig(
 trainer = SFTTrainer(
     model=model,
     args=args,
-    train_dataset=dataset # type: ignore
+    train_dataset=dataset,  # type: ignore
 )
 trainer.train()

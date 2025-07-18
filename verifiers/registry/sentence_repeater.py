@@ -119,6 +119,8 @@ def load_environment(**kwargs) -> vf.Environment:
 
     rubric = vf.Rubric(parser=parser, funcs=[compare_answers_reward_func])
 
-    vf_env = SentenceRepeaterEnv(dataset=dataset, parser=parser, rubric=rubric)
+    vf_env = SentenceRepeaterEnv(
+        dataset=dataset, parser=parser, rubric=rubric, **kwargs
+    )
 
     return vf_env

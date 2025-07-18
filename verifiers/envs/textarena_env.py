@@ -23,19 +23,6 @@ from verifiers.types import (  # noqa
     State,
 )
 
-GUESS_SYSTEM_PROMPT = """You are a competitive game player. \
-Make sure you read the game instructions carefully, and always follow the required format.
-
-In each turn, think step-by-step inside <think>...</think> tags, \
-then follow the instructions inside <guess>...</guess> tags."""
-
-
-def wordle_feedback_fn(observation: str) -> str:
-    if "Feedback:" in observation:
-        return observation.split("Feedback:")[-1]
-    else:
-        return observation
-
 
 class TextArenaEnv(MultiTurnEnv):
     """
@@ -47,8 +34,9 @@ class TextArenaEnv(MultiTurnEnv):
         game: str = "Wordle-v0",
         num_train_examples: int = 1000,
         num_eval_examples: int = 0,
-        system_prompt: str = GUESS_SYSTEM_PROMPT,
+        system_prompt: str | None = None,
         parser: XMLParser = XMLParser(fields=["think", "guess"], answer_field="guess"),
+        rubric: Rubric = Rubric(),
         feedback_fn: Callable[[str], str] = lambda x: x,
         seed: int = 0,
         **kwargs,
@@ -62,20 +50,6 @@ class TextArenaEnv(MultiTurnEnv):
         nltk.download("words", quiet=True)
         nltk.download("averaged_perceptron_tagger_eng", quiet=True)
         dataset, eval_dataset = self.ta_to_hf()
-        rubric = Rubric(parser=parser)
-
-        def check_answer_reward_func(completion, answer, **kwargs) -> float:
-            guess = self.parser.parse_answer(completion)
-            return 1.0 if guess == "[" + answer + "]" else 0.0
-
-        def count_turns_reward_func(completion, answer, **kwargs) -> float:
-            num_turns = len([x for x in completion if x["role"] == "assistant"])
-            is_correct = check_answer_reward_func(completion, answer, **kwargs)
-            return is_correct / (num_turns + 1)
-
-        rubric.add_reward_func(check_answer_reward_func)
-        rubric.add_reward_func(count_turns_reward_func)
-        rubric.add_reward_func(parser.get_format_reward_func(), weight=0.2)
 
         super().__init__(
             dataset=dataset,
@@ -109,8 +83,7 @@ class TextArenaEnv(MultiTurnEnv):
             ta_env = state["ta_env"]
         # parse guess
         assert isinstance(messages[-1], dict)
-        turn = self.parser.parse(messages[-1]["content"])
-        guess = turn.guess
+        guess = self.parser.parse_answer(messages)
         # step env
         is_finished, _ = ta_env.step(str(guess))
         state["is_finished"] = is_finished

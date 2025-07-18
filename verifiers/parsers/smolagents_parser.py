@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from verifiers.parsers.parser import Parser
 
 
-class SmolaParser(Parser):
+class SmolagentsParser(Parser):
     def __init__(self, fields: List[Union[str, Tuple[str, ...]]]):
         """
         Initialize the parser with field definitions.

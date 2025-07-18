@@ -1,8 +1,8 @@
 import os
 
 # requires: `chromadb`
-import chromadb
-from chromadb.utils import embedding_functions
+import chromadb  # type: ignore
+from chromadb.utils import embedding_functions  # type: ignore
 from datasets import load_dataset
 from openai import OpenAI
 
