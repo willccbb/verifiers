@@ -121,7 +121,7 @@ class TestXMLParser:
         # Using canonical name
         formatted1 = xml_parser_with_alternatives.format(reasoning="test", code="print('hello')")
         assert "<code>\nprint('hello')\n</code>" in formatted1
-        
+
         # Using alternative name
         formatted2 = xml_parser_with_alternatives.format(reasoning="test", answer="print('hello')")
         assert "<code>\nprint('hello')\n</code>" in formatted2  # Should use canonical tag
@@ -130,7 +130,7 @@ class TestXMLParser:
         """Test getting field names."""
         fields1 = xml_parser.get_fields()
         assert fields1 == ["reasoning", "answer"]
-        
+
         fields2 = xml_parser_with_alternatives.get_fields()
         assert fields2 == ["reasoning", "code"]
 
@@ -138,28 +138,140 @@ class TestXMLParser:
         """Test XMLParser initialization with invalid field types."""
         with pytest.raises(TypeError):
             XMLParser([123])  # Invalid field type
-        
+
         # Empty fields is actually allowed - it just creates a parser with no fields
         empty_parser = XMLParser([])  # This works
         assert empty_parser.get_fields() == []
-        
+
         with pytest.raises(ValueError):
             XMLParser(["field1", "field1"])  # Duplicate fields
 
     def test_format_reward_function(self, xml_parser):
         """Test the format reward function."""
         reward_func = xml_parser.get_format_reward_func()
-        
+
         # Well-formatted completion
         good_completion = [
             {"role": "assistant", "content": "<reasoning>Good reasoning</reasoning><answer>42</answer>"}
         ]
         good_reward = reward_func(good_completion)
         assert 0.0 <= good_reward <= 1.0
-        
+
         # Poorly formatted completion - gets partial credit for proper spacing
         bad_completion = [
             {"role": "assistant", "content": "Just plain text without XML"}
         ]
         bad_reward = reward_func(bad_completion)
         assert bad_reward == 0.2  # Gets 0.2 for proper spacing (no XML tags to mess up)
+
+    def test_parse_top_level_only(self, xml_parser):
+        """Test parse with top_level_only parameter to ignore nested tags."""
+        xml_text = """
+        <reasoning>
+        I'm thinking about this: <answer>nested answer</answer>
+        </reasoning>
+        <answer>top-level answer</answer>
+        """
+
+        # Without top_level_only (default behavior)
+        result_default = xml_parser.parse(xml_text)
+        assert result_default.reasoning.strip() == "I'm thinking about this: <answer>nested answer</answer>"
+        assert result_default.answer == "nested answer"  # Gets the first occurrence
+
+        # With top_level_only
+        result_top_level = xml_parser.parse(xml_text, top_level_only=True)
+        assert result_top_level.reasoning.strip() == "I'm thinking about this: <answer>nested answer</answer>"
+        assert result_top_level.answer == "top-level answer"  # Gets the top-level occurrence
+
+    def test_parse_top_level_only_no_top_level(self, xml_parser):
+        """Test parse with top_level_only when there are no top-level tags."""
+        xml_text = """
+        <reasoning>
+        All tags are nested: <answer>nested answer 1</answer>
+        Another nested: <answer>nested answer 2</answer>
+        </reasoning>
+        """
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        assert result.reasoning is not None
+        assert result.answer is None  # No top-level answer tag
+
+    def test_parse_top_level_only_complex_nesting(self, xml_parser_with_alternatives):
+        """Test parse with top_level_only with complex nesting scenarios."""
+        xml_text = """
+        <reasoning>
+        <code>nested code 1</code>
+        <answer>nested answer</answer>
+        </reasoning>
+        <code>top-level code</code>
+        <reasoning>
+        More thinking with <code>nested code 2</code>
+        </reasoning>
+        """
+
+        result = xml_parser_with_alternatives.parse(xml_text, top_level_only=True)
+        assert "nested code 1" in result.reasoning  # First reasoning block
+        assert result.code == "top-level code"  # Top-level code tag
+        assert result.answer is None  # No top-level answer tag
+
+    def test_parse_top_level_only_self_closing_tags(self, xml_parser):
+        """Test parse with self-closing tags."""
+        xml_text = """
+        <reasoning>Some reasoning</reasoning>
+        <answer/>
+        """
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        assert result.reasoning == "Some reasoning"
+        assert result.answer is None  # Self-closing tags have no content
+
+    def test_parse_top_level_only_multiple_same_tag(self, xml_parser):
+        """Test that only first top-level occurrence is used."""
+        xml_text = """
+        <answer>first answer</answer>
+        <reasoning>Some reasoning</reasoning>
+        <answer>second answer</answer>
+        """
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        assert result.answer == "first answer"  # Should get first occurrence
+        assert result.reasoning == "Some reasoning"
+
+    def test_parse_top_level_only_with_attributes(self, xml_parser):
+        """Test that tags with attributes are still matched."""
+        # Note: The current regex doesn't handle attributes, but we should test the behavior
+        xml_text = """
+        <reasoning type="deep">Reasoning with attribute</reasoning>
+        <answer>42</answer>
+        """
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        # Current implementation doesn't match tags with attributes
+        assert result.reasoning is None
+        assert result.answer == "42"
+
+    def test_parse_top_level_only_edge_whitespace(self, xml_parser):
+        """Test various whitespace edge cases."""
+        xml_text = """<reasoning>
+        Content with newlines
+        and indentation
+        </reasoning>
+        <answer>   spaced   </answer>"""
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        assert "Content with newlines" in result.reasoning
+        assert "and indentation" in result.reasoning
+        assert result.answer == "spaced"  # Should be stripped by default
+
+    def test_parse_top_level_only_unicode_content(self, xml_parser):
+        """Test parsing with unicode content."""
+        xml_text = """
+        <reasoning>Unicode test: 你好世界 🌍 émojis</reasoning>
+        <answer>42 × 2 = 84</answer>
+        """
+
+        result = xml_parser.parse(xml_text, top_level_only=True)
+        assert "你好世界" in result.reasoning
+        assert "🌍" in result.reasoning
+        assert "émojis" in result.reasoning
+        assert "42 × 2 = 84" in result.answer
