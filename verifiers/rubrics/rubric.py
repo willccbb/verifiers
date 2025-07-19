@@ -91,6 +91,9 @@ class Rubric:
             try:
                 ans = func(**merged)
             except Exception as e:
+                print(self.parser)
+                print(parser)
+                print(merged)
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
         else:
