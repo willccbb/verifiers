@@ -28,9 +28,9 @@ def check_answer_reward_func(parser, completion, answer, **kwargs) -> float:
     return 1.0 if guess == "[" + answer + "]" else 0.0
 
 
-def count_turns_reward_func(completion, answer, **kwargs) -> float:
+def count_turns_reward_func(parser, completion, answer, **kwargs) -> float:
     num_turns = len([x for x in completion if x["role"] == "assistant"])
-    is_correct = check_answer_reward_func(completion, answer, **kwargs)
+    is_correct = check_answer_reward_func(parser, completion, answer, **kwargs)
     return is_correct / (num_turns + 1)
 
 
