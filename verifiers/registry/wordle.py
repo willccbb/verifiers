@@ -1,12 +1,12 @@
 import verifiers as vf
 from verifiers.envs.textarena_env import TextArenaEnv
 
+### prompts
 THINK_GUESS_SYSTEM_PROMPT = """You are a competitive game player. \
 Make sure you read the game instructions carefully, and always follow the required format.
 
 In each turn, think step-by-step inside <think>...</think> tags, \
 then follow the instructions inside <guess>...</guess> tags."""
-
 
 NOTHINK_GUESS_SYSTEM_PROMPT = """You are a competitive game player. \
 Make sure you read the game instructions carefully, and always follow the required format.
@@ -14,6 +14,7 @@ Make sure you read the game instructions carefully, and always follow the requir
 In each turn, give only your guess inside <guess>...</guess> tags."""
 
 
+### feedback functions
 def wordle_feedback_fn(observation: str) -> str:
     if "Feedback:" in observation:
         return observation.split("Feedback:")[-1]
@@ -21,6 +22,7 @@ def wordle_feedback_fn(observation: str) -> str:
         return observation
 
 
+### reward functions
 def check_answer_reward_func(parser, completion, answer, **kwargs) -> float:
     guess = parser.parse_answer(completion)
     return 1.0 if guess == "[" + answer + "]" else 0.0
@@ -41,6 +43,7 @@ def partial_credit_reward_func(parser, completion, **kwargs) -> float:
     return 0.2 * num_greens + 0.1 * num_yellows
 
 
+### environment loader
 def load_environment(
     num_train_examples: int = 2000,
     num_eval_examples: int = 20,

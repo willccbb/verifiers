@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Tuple
 from datasets import Dataset
 
 from verifiers.envs.multiturn_env import MultiTurnEnv
+from verifiers.envs.tool_env import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.parsers.smolagents_parser import SmolagentsParser
-from verifiers.prompts.system_prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.rubrics.smolagents_tool_rubric import (
     SmolagentsToolRubric,  # type: ignore
 )

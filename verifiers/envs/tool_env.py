@@ -4,9 +4,29 @@ from typing import Any, Callable, Dict, List, Tuple
 
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.parsers.xml_parser import XMLParser
-from verifiers.prompts import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.rubrics.tool_rubric import ToolRubric
 from verifiers.types import Message, Messages, RewardFunc, State
+
+DEFAULT_TOOL_PROMPT_TEMPLATE = """\
+You have access to the following tools to help solve problems:
+
+{tool_descriptions}
+
+For each step:
+1. Think through your reasoning inside <reasoning> tags
+2. If needed, use a tool by writing a JSON command inside <tool> tags with:
+   - "name": the tool to use
+   - "args": the arguments for the tool
+3. You will see the tool's output inside <result> tags
+4. Continue until you can give the final answer inside <answer> tags
+
+Tools expect specific JSON input formats. Follow the examples carefully.
+Do not make up tools or arguments that aren't listed.
+"""
+
+"""
+Templates for SmolaAgents-style tool prompts.
+"""
 
 
 def infer_schema_from_function(func: Callable) -> Dict[str, Any]:
