@@ -356,7 +356,7 @@ class GRPOTrainer(Trainer):
             raise ValueError("Train dataset must contain a 'prompt' column")
         if "answer" not in train_dataset.column_names:
             train_dataset = train_dataset.map(
-                lambda x: {"answer": x["completion"]},
+                lambda x: {"answer": ""},
                 num_proc=self.max_data_workers,
             )
         if eval_dataset is not None and "answer" not in eval_dataset.column_names:
