@@ -195,23 +195,27 @@ class Environment(ABC):
         Convenience function for wrapping (chat, completion) API calls.
         Returns special error messages for context length issues.
         """
-        if message_type is None:
-            message_type = self.message_type
+        try:
+            if message_type is None:
+                message_type = self.message_type
 
-        if message_type == "chat":
-            assert isinstance(prompt, list)
-            response = await client.chat.completions.create(
-                model=model,
-                messages=prompt,  # type: ignore
-                **sampling_args,
-            )
-            return response
-        elif message_type == "completion":
-            assert isinstance(prompt, str)
-            response = await client.completions.create(
-                model=model, prompt=prompt, **sampling_args
-            )
-            return response
+            if message_type == "chat":
+                assert isinstance(prompt, list)
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=prompt,  # type: ignore
+                    **sampling_args,
+                )
+                return response
+            elif message_type == "completion":
+                assert isinstance(prompt, str)
+                response = await client.completions.create(
+                    model=model, prompt=prompt, **sampling_args
+                )
+                return response
+        except Exception as e:
+            self.logger.error(f"Error getting model response: {e} \n\nExiting...")
+            raise e
 
     @abstractmethod
     async def rollout(
