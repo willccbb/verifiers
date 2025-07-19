@@ -9,17 +9,24 @@ from openai import OpenAI
 import verifiers as vf
 from verifiers.rubrics.judge_rubric import JudgeRubric
 
+WIKI_DIR = "notebooks/data/wiki"
+CHROMA_DB_DIR = "notebooks/.chroma_db"
 
-def load_environment(**kwargs):
-    WIKI_DIR = "notebooks/data/wiki"
-    CHROMA_DB_DIR = "notebooks/.chroma_db"
-
-    # Create embedding function using OpenAI
-
+def load_environment(
+    judge_model: str = "gpt-4.1-mini",
+    judge_base_url: str = "https://api.openai.com/v1",
+    judge_api_key_var: str = "OPENAI_API_KEY",
+    embed_model: str = "text-embedding-3-small",
+    embed_base_url: str = "https://api.openai.com/v1",
+    embed_api_key_var: str = "OPENAI_API_KEY",
+    wiki_dir: str = WIKI_DIR,
+    chroma_db_dir: str = CHROMA_DB_DIR,
+    **kwargs,
+) -> vf.Environment:
     openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=os.environ.get("OPENAI_API_KEY"), model_name="text-embedding-3-small"
+        api_key=os.getenv(embed_api_key_var, "EMPTY"), model_name=embed_model, base_url=embed_base_url
     )
-    db_client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+    db_client = chromadb.PersistentClient(path=chroma_db_dir)
     collection = db_client.get_collection("wiki_titles", embedding_function=openai_ef)  # type: ignore
 
     def search_pages(query: str) -> list[dict]:
@@ -69,7 +76,7 @@ def load_environment(**kwargs):
             raise ValueError(f"Page not found: {page_id}")
 
         filename = results["metadatas"][0]["title"] + ".md"  # type: ignore
-        filepath = os.path.join(WIKI_DIR, filename)  # type: ignore
+        filepath = os.path.join(wiki_dir, filename)  # type: ignore
 
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
@@ -135,7 +142,7 @@ def load_environment(**kwargs):
             raise ValueError(f"Page not found: {page_id}")
 
         filename = results["metadatas"][0]["title"] + ".md"  # type: ignore
-        filepath = os.path.join(WIKI_DIR, filename)
+        filepath = os.path.join(wiki_dir, filename)
 
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
@@ -216,8 +223,8 @@ def load_environment(**kwargs):
         dataset=dataset, system_prompt=system_prompt, tools=tools, max_turns=10
     )
 
-    judge_client = OpenAI(base_url="http://0.0.0.0:8008/v1", api_key="EMPTY")
-    judge_model = "Qwen/Qwen2.5-7B-Instruct"
+    judge_client = OpenAI(base_url=judge_base_url, api_key=os.getenv(judge_api_key_var, "EMPTY"))
+    judge_model = judge_model
     judge_rubric = JudgeRubric(
         judge_client=judge_client, judge_model=judge_model, parser=vf_env.parser
     )
