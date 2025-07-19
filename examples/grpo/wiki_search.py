@@ -5,7 +5,7 @@ Multi-GPU training (single node, 4 training + 4 inference)
 
 CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/wiki_search.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml examples/grpo/wiki_search.py
 """
 
 vf_env = vf.load_environment(env_id="wiki-search")

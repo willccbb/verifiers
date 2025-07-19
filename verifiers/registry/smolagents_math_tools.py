@@ -306,7 +306,7 @@ class CalculatorTool(Tool):
         self.allowed = set("0123456789+-*/.() ")
         self.is_initialized = True
 
-    def forward(self, expression: str) -> str:
+    def forward(self, expression: str) -> str:  # type: ignore
         """Evaluates a single line of Python math expression. No imports or variables allowed.
 
         Args:

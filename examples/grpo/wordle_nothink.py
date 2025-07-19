@@ -5,7 +5,7 @@ inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager
 
 training:
-CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 verifiers/examples/wordle_nothink.py
+CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 examples/grpo/wordle_nothink.py
 """
 
 model_name = "willcb/Qwen3-1.7B-Wordle"
