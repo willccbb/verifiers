@@ -17,7 +17,7 @@ run_name = "wordle-grpo-4b"
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size = 8
 training_args.num_generations = 16
-training_args.gradient_accumulation_steps = 16
+training_args.gradient_accumulation_steps = 8
 training_args.max_tokens = 1024  # per turn
 training_args.max_seq_len = 4096
 training_args.max_steps = 200
@@ -26,6 +26,7 @@ training_args.eval_steps = 20
 training_args.mask_env_responses = True
 training_args.max_grad_norm = 0.1
 training_args.beta = 0.0
+training_args.async_generation_timeout = 600
 
 trainer = vf.GRPOTrainer(
     model=model,
