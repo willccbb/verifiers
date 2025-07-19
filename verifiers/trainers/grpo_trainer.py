@@ -352,6 +352,40 @@ class GRPOTrainer(Trainer):
 
         eval_dataset = env.get_eval_dataset()
 
+        if "prompt" not in train_dataset.column_names:
+            raise ValueError("Train dataset must contain a 'prompt' column")
+        if "answer" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"answer": x["completion"]},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "answer" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"answer": ""},
+                num_proc=self.max_data_workers,
+            )
+        if "info" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"info": {}},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "info" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"info": {}},
+                num_proc=self.max_data_workers,
+            )
+
+        if "task" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"task": "default"},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "task" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"task": "default"},
+                num_proc=self.max_data_workers,
+            )
+
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
             self.logger.info(
