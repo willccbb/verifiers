@@ -1,19 +1,21 @@
 import argparse
+
 import verifiers as vf
 
 """
 1.7b inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager --disable-log-requests
 
 1.7b training:
 CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 examples/grpo/wordle.py --size 1.7B
 
 4b inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 4b training:
 CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/grpo/wordle.py --size 4B
 """
+
 
 def main(args):
     size = args.size
@@ -42,6 +44,7 @@ def main(args):
         args=training_args,
     )
     trainer.train()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
