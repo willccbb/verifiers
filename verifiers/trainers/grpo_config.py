@@ -249,7 +249,7 @@ class GRPOConfig(TrainingArguments):
         },
     )
     scale_rewards: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": "Whether to scale the rewards by dividing them by their standard deviation. If `True` (default), "
             "the rewards are normalized by the standard deviation, ensuring they have unit variance. If `False`, no "

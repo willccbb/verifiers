@@ -1215,7 +1215,7 @@ class GRPOTrainer(Trainer):
             ).sum() / completion_mask.sum().clamp(min=1.0)
         elif self.loss_type == "dr_grpo":
             loss = (per_token_loss * completion_mask).sum() / (
-                per_token_loss.size(0) * self.max_completion_length
+                per_token_loss.size(0) * self.max_seq_len
             )  # type: ignore
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
