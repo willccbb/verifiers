@@ -2,18 +2,18 @@ import verifiers as vf
 
 """
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen2.5-1.5B --data-parallel-size 6 --enforce-eager
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-1.5B-Instruct --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 training:
 CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/grpo/sentence_repeater.py
 """
 
-model_name = "willcb/Qwen3-4B-Wordle"
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
-vf_env = vf.load_environment(env_id="wordle", use_think=True)
+vf_env = vf.load_environment(env_id="sentence_repeater")
 
-run_name = "wordle-grpo-4b"
+run_name = "sentence-repeater-grpo-qwen1.5b"
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.per_device_train_batch_size = 8
 training_args.num_generations = 16
