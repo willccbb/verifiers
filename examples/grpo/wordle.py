@@ -5,15 +5,13 @@ inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager
 
 training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/grpo/wordle.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/wordle.py
 """
 
 model_name = "willcb/Qwen3-4B-Wordle"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
-vf_env = vf.load_environment(
-    env_id="wordle", num_train_examples=2000, num_eval_examples=20
-)
+vf_env = vf.load_environment(env_id="wordle", use_think=True)
 
 run_name = "wordle-grpo-4b"
 training_args = vf.grpo_defaults(run_name=run_name)
