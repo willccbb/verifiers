@@ -26,7 +26,9 @@ from verifiers.types import (
 )
 
 if TYPE_CHECKING:
-    from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+    from transformers.tokenization_utils_base import (  # type: ignore
+        PreTrainedTokenizerBase,
+    )
 
 
 class Environment(ABC):

@@ -104,13 +104,9 @@ def load_environment(**kwargs) -> vf.Environment:
         answers = info["answers"]
         reward = 0
         if len(model_answers) != len(answers):
-            print(f"Model answers: {model_answers}")
-            print(f"Answers: {answers}")
             return 0
 
         def similarity(a, b):
-            print(f"A: {a}")
-            print(f"B: {b}")
             return SequenceMatcher(None, a, b).ratio()
 
         for model_answer, answer in zip(model_answers[: len(answers)], answers):

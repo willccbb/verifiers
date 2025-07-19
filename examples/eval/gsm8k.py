@@ -1,39 +1,13 @@
 import os
+
 from openai import OpenAI
 
 import verifiers as vf
-from verifiers.utils.data_utils import load_example_dataset, extract_boxed_answer
-
-dataset = load_example_dataset("gsm8k").select(range(100))
-
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-
-Then, give your final numerical answer inside \\boxed{{...}}.
-"""
-
-parser = vf.ThinkParser(extract_fn=extract_boxed_answer)
-
-
-def correct_answer_reward_func(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ""
-    return 1.0 if response == answer else 0.0
-
-
-rubric = vf.Rubric(
-    funcs=[correct_answer_reward_func, parser.get_format_reward_func()],
-    weights=[1.0, 0.2],
-)
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-)
 
 
 def main(num_examples: int, rollouts_per_example: int, max_tokens: int):
+    vf_env = vf.load_environment(env_id="gsm8k")
+
     api_key = os.getenv("OPENAI_API_KEY")
     model_name = "gpt-4.1-nano"
     client = OpenAI(api_key=api_key)

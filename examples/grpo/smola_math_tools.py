@@ -1,6 +1,6 @@
 import verifiers as vf
 
-vf_env = vf.load_environment("smolagents_math_tools", {"use_few_shot": True})
+vf_env = vf.load_environment("smolagents_math_tools", use_few_shot=True)
 
 model_name = "Qwen/Qwen2.5-7B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)

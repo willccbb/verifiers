@@ -11,7 +11,7 @@ nltk.download = lambda *args, **kwargs: _original_nltk_download(
     *args, **{**kwargs, "quiet": True}
 )
 
-import textarena as ta  # noqa
+import textarena as ta  # type: ignore # noqa
 
 from verifiers.envs.multiturn_env import MultiTurnEnv  # noqa
 from verifiers.parsers.xml_parser import XMLParser  # noqa

@@ -52,7 +52,11 @@ class DoubleCheckEnv(MultiTurnEnv):
         return {"role": "user", "content": "Are you sure?"}, state
 
 
-def load_environment(**kwargs):
-    dataset = load_example_dataset("math", "train", n=1000)
+def load_environment(
+    dataset_name: str = "math",
+    dataset_split: str = "train",
+    num_train_examples: int = -1,
+):
+    dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
     vf_env = DoubleCheckEnv(dataset=dataset, system_prompt=SIMPLE_PROMPT, few_shot=[])
     return vf_env

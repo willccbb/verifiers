@@ -36,8 +36,13 @@ Let's submit the answer.
 """
 
 
-def load_environment(**kwargs):
-    dataset = load_example_dataset("math", split="train")
+def load_environment(
+    dataset_name: str = "math",
+    dataset_split: str = "train",
+    num_train_examples: int = -1,
+    **kwargs,
+):
+    dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
 
     vf_env = vf.ToolEnv(
         dataset=dataset,

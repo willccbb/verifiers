@@ -1,14 +1,22 @@
 import argparse
+import importlib
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 from openai import OpenAI
 
 import verifiers as vf
 
+current_dir = Path.cwd()
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--local-dir-name", "-d", type=str, default="local")
     parser.add_argument("--env", "-e", type=str, default="gsm8k")
     parser.add_argument("--model", "-m", type=str, default="gpt-4.1-mini")
     parser.add_argument("--api-key-var", "-k", type=str, default="OPENAI_API_KEY")
@@ -25,7 +33,22 @@ def main():
     parser.add_argument("--save-to-hf-hub", "-H", default=False, action="store_true")
     parser.add_argument("--hf-hub-dataset-name", "-D", type=str, default="")
     args = parser.parse_args()
-    print(args)
+    try:
+        ENDPOINTS = importlib.import_module(
+            f"{args.local_dir_name}.endpoints"
+        ).ENDPOINTS
+    except ImportError:
+        print(
+            f"No local endpoint registry found at {args.local_dir_name}/endpoints.py. \
+Please run `uv run vf-local` to create a local workspace, \
+or specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
+        )
+        ENDPOINTS = {}
+
+    if args.model in ENDPOINTS:
+        args.api_key_var = ENDPOINTS[args.model]["key"]
+        args.api_base_url = ENDPOINTS[args.model]["url"]
+        args.model = ENDPOINTS[args.model]["model"]
 
     client = OpenAI(
         api_key=os.getenv(args.api_key_var, "EMPTY"), base_url=args.api_base_url

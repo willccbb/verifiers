@@ -4,7 +4,7 @@ import importlib.util
 from ..envs.environment import Environment
 
 
-def load_environment(env_id: str, env_args: dict = {}) -> Environment:
+def load_environment(env_id: str, **env_args) -> Environment:
     module_name = env_id.replace("-", "_")
 
     try:
@@ -27,7 +27,7 @@ def load_environment(env_id: str, env_args: dict = {}) -> Environment:
         raise RuntimeError(f"Failed to load environment '{env_id}': {str(e)}") from e
 
 
-def load_eval(env_id: str, env_args: dict = {}) -> Environment:
+def load_eval(env_id: str, **env_args) -> Environment:
     module_name = env_id.replace("-", "_")
     module = importlib.import_module(
         f".{module_name}", package="verifiers.registry.evals"
@@ -39,7 +39,7 @@ def load_eval(env_id: str, env_args: dict = {}) -> Environment:
     return module.load_eval(**env_args)
 
 
-def load_local_environment(file_path: str, env_args: dict = {}) -> Environment:
+def load_local_environment(file_path: str, **env_args) -> Environment:
     try:
         spec = importlib.util.spec_from_file_location("local_env", file_path)
         if spec is None or spec.loader is None:
