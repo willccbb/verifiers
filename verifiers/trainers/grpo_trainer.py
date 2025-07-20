@@ -1300,8 +1300,16 @@ class GRPOTrainer(Trainer):
 
         self.logger.info("Running evaluation using environment's evaluate method")
 
-        # Use async generator's evaluate method to run in the same event loop
-        eval_results = self.async_generator.evaluate(num_samples=-1)
+        # Only the main process computes evaluation to avoid duplicate work
+        if self.accelerator.is_main_process:
+            eval_results = self.async_generator.evaluate(num_samples=-1)
+        else:
+            eval_results = {}
+
+        # Broadcast the results from rank 0 to all other ranks
+        broadcast_list = [eval_results]
+        broadcast_object_list(broadcast_list, from_process=0)
+        eval_results = broadcast_list[0]
 
         # Process results to compute metrics
         metrics = {}
