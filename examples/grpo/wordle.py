@@ -42,7 +42,7 @@ def main(args):
         processing_class=tokenizer,
         env=vf_env,
         args=training_args,
-        lora_config=vf.lora_defaults(),
+        #lora_config=vf.lora_defaults()
     )
     trainer.train()
 
