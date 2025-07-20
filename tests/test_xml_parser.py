@@ -163,3 +163,107 @@ class TestXMLParser:
         ]
         bad_reward = reward_func(bad_completion)
         assert bad_reward == 0.2  # Gets 0.2 for proper spacing (no XML tags to mess up)
+
+    def test_parse_all_single_occurrence(self, xml_parser):
+        """Test parse_all with single occurrence of each field."""
+        xml_text = """
+        <reasoning>Single reasoning</reasoning>
+        <answer>Single answer</answer>
+        """
+        result = xml_parser.parse_all(xml_text)
+        assert result.reasoning == ["Single reasoning"]
+        assert result.answer == ["Single answer"]
+
+    def test_parse_all_multiple_occurrences(self, xml_parser):
+        """Test parse_all with multiple occurrences of the same field."""
+        xml_text = """
+        <reasoning>First reasoning</reasoning>
+        <answer>First answer</answer>
+        <reasoning>Second reasoning</reasoning>
+        <answer>Second answer</answer>
+        """
+        result = xml_parser.parse_all(xml_text)
+        assert result.reasoning == ["First reasoning", "Second reasoning"]
+        assert result.answer == ["First answer", "Second answer"]
+
+    def test_parse_all_no_occurrences(self, xml_parser):
+        """Test parse_all with no occurrences of fields."""
+        xml_text = "Just plain text with no XML tags"
+        result = xml_parser.parse_all(xml_text)
+        assert result.reasoning == []
+        assert result.answer == []
+
+    def test_parse_all_mixed_occurrences(self, xml_parser):
+        """Test parse_all with mixed occurrences (some fields present, others not)."""
+        xml_text = """
+        <reasoning>Only reasoning here</reasoning>
+        <reasoning>More reasoning</reasoning>
+        """
+        result = xml_parser.parse_all(xml_text)
+        assert result.reasoning == ["Only reasoning here", "More reasoning"]
+        assert result.answer == []
+
+    def test_parse_all_with_alternatives(self, xml_parser_with_alternatives):
+        """Test parse_all with alternative field names."""
+        xml_text = """
+        <reasoning>First reasoning</reasoning>
+        <code>First code</code>
+        <reasoning>Second reasoning</reasoning>
+        <answer>Alternative answer</answer>
+        """
+        result = xml_parser_with_alternatives.parse_all(xml_text)
+        assert result.reasoning == ["First reasoning", "Second reasoning"]
+        assert result.code == ["First code"]
+        assert result.answer == ["Alternative answer"]
+
+    def test_parse_all_no_strip(self, xml_parser):
+        """Test parse_all without stripping whitespace."""
+        xml_text = """
+        <reasoning>  spaced reasoning  </reasoning>
+        <answer>  spaced answer  </answer>
+        """
+        result_strip = xml_parser.parse_all(xml_text, strip=True)
+        result_no_strip = xml_parser.parse_all(xml_text, strip=False)
+
+        assert result_strip.reasoning == ["spaced reasoning"]
+        assert result_strip.answer == ["spaced answer"]
+        assert result_no_strip.reasoning == ["spaced reasoning"]  # regex pattern strips
+        assert result_no_strip.answer == ["spaced answer"]
+
+    def test_parse_all_malformed_xml(self, xml_parser):
+        """Test parse_all with malformed XML tags."""
+        xml_text = """
+        <reasoning>Good reasoning</reasoning>
+        <answer>Good answer</answer>
+        <reasoning>Unclosed reasoning without proper closing
+        <reasoning>Another good reasoning</reasoning>
+        """
+        result = xml_parser.parse_all(xml_text)
+        # Regex will find content between properly matched opening/closing tags
+        # The unclosed reasoning tag will match with the next closing tag
+        assert "Good reasoning" in result.reasoning
+        assert result.answer == ["Good answer"]
+        # Check that we got some reasoning results (behavior depends on regex matching)
+        assert len(result.reasoning) >= 1
+
+    def test_parse_all_nested_tags(self, xml_parser):
+        """Test parse_all with nested tags (should not match nested)."""
+        xml_text = """
+        <reasoning>
+        Outer reasoning with <reasoning>nested reasoning</reasoning> inside
+        </reasoning>
+        <answer>Simple answer</answer>
+        """
+        result = xml_parser.parse_all(xml_text)
+        # Due to non-greedy matching, this should work correctly
+        assert len(result.reasoning) >= 1
+        assert result.answer == ["Simple answer"]
+
+    def test_parse_all_empty_xml_parser(self):
+        """Test parse_all with XMLParser that has no fields."""
+        empty_parser = XMLParser([])
+        xml_text = "<reasoning>Should be ignored</reasoning><answer>Also ignored</answer>"
+        result = empty_parser.parse_all(xml_text)
+        # Should have no attributes since no fields defined
+        assert not hasattr(result, 'reasoning')
+        assert not hasattr(result, 'answer')
