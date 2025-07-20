@@ -104,13 +104,13 @@ We aim to include support for additional trainer backends in the future, and are
 import verifiers as vf
 parser = vf.XMLParser(['think', 'answer']) # <think>...</think>\n<answer>...</answer>
 rubric = vf.Rubric(
-	your_custom_reward_func, # def func(prompt, completion, answer, **kwargs)
-	parser.get_format_reward_func(),
-weights=[1.0, 0.2])
+	funcs=[your_custom_reward_func, # def func(prompt, completion, answer, **kwargs)
+	parser.get_format_reward_func()],
+	weights=[1.0, 0.2])
 vf_env = vf.SingleTurnEnv(
 	dataset=..., # hf Dataset with 'question' + 'answer' columns
 	system_prompt=f"... Respond in the following format: {parser.get_format_str()}",
-	rubric
+	rubric=rubric
 )
 ```
 
