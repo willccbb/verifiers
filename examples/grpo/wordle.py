@@ -35,7 +35,6 @@ def main(args):
     training_args.mask_env_responses = True
     training_args.max_grad_norm = 0.1
     training_args.beta = 0.0
-    training_args.async_generation_timeout = 600
 
     trainer = vf.GRPOTrainer(
         model=model,
