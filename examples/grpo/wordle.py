@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 4b training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/grpo/wordle.py --size 4B
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager --disable-log-requests --size 4B
 """
 
 
@@ -42,6 +42,7 @@ def main(args):
         processing_class=tokenizer,
         env=vf_env,
         args=training_args,
+        lora_config=vf.lora_defaults()
     )
     trainer.train()
 
