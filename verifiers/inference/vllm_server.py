@@ -4,20 +4,15 @@ import signal
 from argparse import Namespace
 from typing import Sequence
 
+import torch
 import uvloop
 from fastapi import Request
-import torch
-
+from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
 from vllm.distributed.parallel_state import get_world_group
 from vllm.distributed.utils import StatelessProcessGroup
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-
-
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
-from vllm.utils import FlexibleArgumentParser
-from vllm.usage.usage_lib import UsageContext
-
+from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.api_server import (
     build_app,
     create_server_socket,
@@ -27,18 +22,18 @@ from vllm.entrypoints.openai.cli_args import (
     make_arg_parser,
     validate_parsed_serve_args,
 )
-from vllm.entrypoints.launcher import serve_http
-from vllm.utils import set_ulimit
 from vllm.usage.usage_lib import UsageContext
+from vllm.utils import FlexibleArgumentParser, set_ulimit
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 # Weight update throttling
-MAX_CONCURRENT_WEIGHT_UPDATES = 100
+MAX_CONCURRENT_WEIGHT_UPDATES = 10
 weight_update_semaphore = asyncio.Semaphore(MAX_CONCURRENT_WEIGHT_UPDATES)
 
 # Track background tasks for cleanup
 background_tasks = set()
+
 
 class WeightSyncWorkerExtension:
     """
@@ -68,11 +63,15 @@ class WeightSyncWorkerExtension:
                 Total number of participating processes in the update group.
         """
         if self.pynccl_comm is not None:
-            raise RuntimeError("Weight update group already initialized. Call close_communicator first.")
+            raise RuntimeError(
+                "Weight update group already initialized. Call close_communicator first."
+            )
 
         rank = get_world_group().rank
-        pg = StatelessProcessGroup.create(host=host, port=port, rank=rank, world_size=world_size)
-        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device) # type: ignore
+        pg = StatelessProcessGroup.create(
+            host=host, port=port, rank=rank, world_size=world_size
+        )
+        self.pynccl_comm = PyNcclCommunicator(pg, device=self.device)  # type: ignore
         self.client_rank = world_size - 1
 
     def update_named_param(self, name: str, dtype: str, shape: Sequence[int]) -> None:
@@ -88,13 +87,15 @@ class WeightSyncWorkerExtension:
                 Shape of the weight tensor.
         """
         if self.pynccl_comm is None:
-            raise RuntimeError("Communicator not initialized. Call `init_communicator` first.")
+            raise RuntimeError(
+                "Communicator not initialized. Call `init_communicator` first."
+            )
 
         torch_dtype = getattr(torch, dtype.split(".")[-1])
-        weight = torch.empty(shape, dtype=torch_dtype, device=self.device) # type: ignore
-        self.pynccl_comm.broadcast(weight, src=self.client_rank) # type: ignore
+        weight = torch.empty(shape, dtype=torch_dtype, device=self.device)  # type: ignore
+        self.pynccl_comm.broadcast(weight, src=self.client_rank)  # type: ignore
         self.pynccl_comm.group.barrier()
-        self.model_runner.model.load_weights(weights=[(name, weight)]) # type: ignore
+        self.model_runner.model.load_weights(weights=[(name, weight)])  # type: ignore
 
     def close_communicator(self) -> None:
         """
@@ -108,15 +109,18 @@ class WeightSyncWorkerExtension:
             self.pynccl_comm = None  # Ensure attribute is reset to None
             self.client_rank = None  # Ensure attribute is reset to None
 
+
 async def run_server(args: Namespace):
     sock_addr = (args.host or "0.0.0.0", args.port)
     sock = create_server_socket(sock_addr)
 
     set_ulimit()
+
     def signal_handler(*_) -> None:
         raise KeyboardInterrupt
+
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     def create_background_task(coro):
         """Create a background task and track it for cleanup"""
         task = asyncio.create_task(coro)
@@ -125,8 +129,12 @@ async def run_server(args: Namespace):
         return task
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
-    engine_args.worker_extension_cls = "verifiers.inference.vllm_server.WeightSyncWorkerExtension"
-    engine = AsyncLLMEngine.from_engine_args(engine_args, usage_context=UsageContext.OPENAI_API_SERVER)
+    engine_args.worker_extension_cls = (
+        "verifiers.inference.vllm_server.WeightSyncWorkerExtension"
+    )
+    engine = AsyncLLMEngine.from_engine_args(
+        engine_args, usage_context=UsageContext.OPENAI_API_SERVER
+    )
     app = build_app(args)
 
     @app.get("/health")
@@ -149,7 +157,9 @@ async def run_server(args: Namespace):
         host = data.get("host")
         port = data.get("port")
         world_size = data.get("world_size")
-        create_background_task(engine.collective_rpc("init_communicator", args=(host, port, world_size)))
+        create_background_task(
+            engine.collective_rpc("init_communicator", args=(host, port, world_size))
+        )
         return {"status": "ok"}
 
     @app.post("/update_named_param")
@@ -171,10 +181,12 @@ async def run_server(args: Namespace):
         dtype = data.get("dtype")
         shape = data.get("shape")
         shape_tuple = tuple(shape)
-        
+
         async def throttled_update():
             async with weight_update_semaphore:
-                await engine.collective_rpc("update_named_param", args=(name, dtype, shape_tuple))
+                await engine.collective_rpc(
+                    "update_named_param", args=(name, dtype, shape_tuple)
+                )
 
         # fire and forget with throttling
         create_background_task(throttled_update())
@@ -189,7 +201,7 @@ async def run_server(args: Namespace):
     @app.post("/get_num_background_tasks")
     async def get_num_background_tasks():
         return {"num_background_tasks": len(background_tasks)}
-    
+
     @app.post("/close_communicator")
     async def close_communicator(request: Request):
         # fire and forget
@@ -210,22 +222,26 @@ async def run_server(args: Namespace):
         ssl_cert_reqs=args.ssl_cert_reqs,
     )
     await shutdown_task
-    
+
     # Cancel and wait for background tasks
     for task in background_tasks:
         task.cancel()
     if background_tasks:
         await asyncio.gather(*background_tasks, return_exceptions=True)
-    
+
     sock.close()
 
+
 def main():
-    parser = FlexibleArgumentParser(description="vLLM OpenAI-compatible server with weight synchronization")
+    parser = FlexibleArgumentParser(
+        description="vLLM OpenAI-compatible server with weight synchronization"
+    )
     parser = make_arg_parser(parser)
     args = parser.parse_args() or Namespace()
     validate_parsed_serve_args(args)
     print(args)
     uvloop.run(run_server(args))
+
 
 if __name__ == "__main__":
     main()
