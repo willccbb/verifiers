@@ -50,7 +50,8 @@ vf_env = vf.ToolEnv(
     system_prompt=TOOL_PROMPT,
     few_shot=[],
     tools=[python],
-    max_steps=3
+    max_steps=3,
+    sampling_args={"extra_body": {"logprobs": True}}
 )
 print(vf_env.system_prompt)
 
