@@ -3,14 +3,14 @@ import verifiers as vf
 """
 Multi-GPU training (single node, 4 training + 4 inference)
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'willcb/Qwen2.5-7B-Math-Python-SFT' --tensor_parallel_size 4
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-4B' --data-parallel-size 6
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/math_train.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/math_train.py
 """
 
 vf_env = vf.load_environment(env_id="math_python")
 
-model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"
+model_name = "willcb/Qwen3-4B"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 run_name = "math-grpo_" + model_name.split("/")[-1].lower()
 

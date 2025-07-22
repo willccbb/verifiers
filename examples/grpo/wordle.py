@@ -4,10 +4,10 @@ import verifiers as vf
 
 """
 1.7b inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager --disable-log-requests
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager --disable-log-requests
 
 1.7b training:
-CUDA_VISIBLE_DEVICES=7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 examples/grpo/wordle.py --size 1.7B
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 1 examples/grpo/wordle.py --size 1.7B
 
 4b inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-4B-Wordle --data-parallel-size 6 --enforce-eager --disable-log-requests
@@ -41,7 +41,7 @@ def main(args):
         processing_class=tokenizer,
         env=vf_env,
         args=training_args,
-        #lora_config=vf.lora_defaults()
+        # lora_config=vf.lora_defaults()
     )
     trainer.train()
 

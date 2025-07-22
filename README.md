@@ -71,7 +71,7 @@ For developing contributions to the core repository, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
-uv sync --extra all && uv pip install flash-attn --no-build-isolation
+uv sync --all-extras && uv pip install flash-attn --no-build-isolation
 ```
 
 

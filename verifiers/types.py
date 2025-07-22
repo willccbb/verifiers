@@ -1,12 +1,28 @@
-from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    TypedDict,
+    Union,
+)
 
 from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_tool_param import (
+    ChatCompletionToolParam,  # noqa: F401
+)
 from openai.types.completion import Completion
+from openai.types.shared_params import (  # noqa: F401
+    FunctionDefinition,
+    FunctionParameters,
+)
 
 # typing aliases
 MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
-ChatMessageField = Literal["role", "content"]
+ChatMessageField = Literal["role", "content", "tool_calls"]
 ChatMessage = Dict[ChatMessageField, str]
 Message = Union[str, ChatMessage]
 Messages = Union[str, List[ChatMessage]]
@@ -14,6 +30,9 @@ Info = Dict[str, Any]
 State = Dict[str, Any]
 SamplingArgs = Dict[str, Any]
 RewardFunc = Callable[..., float]
+
+# oai tools
+JsonPrimitive = Literal["string", "number", "integer", "boolean", "array", "object"]
 
 
 class GenerateInputs(TypedDict):
