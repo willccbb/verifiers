@@ -1,6 +1,6 @@
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils import load_example_dataset
+from verifiers.utils.data_utils import load_example_dataset
 
 """
 Multi-GPU training (single node, 4 training + 4 inference)
