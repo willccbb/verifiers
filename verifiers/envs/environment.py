@@ -765,10 +765,10 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                     prompt_ids = prompt_ids[:max_seq_len]
                 completion_ids = completion_ids[: max_seq_len - len(prompt_ids)]
                 completion_mask = completion_mask[: max_seq_len - len(prompt_ids)]
+                completion_logprobs = completion_logprobs[
+                    : max_seq_len - len(prompt_ids)
+                ]
                 is_truncated = True
-                assert len(prompt_ids) + len(completion_ids) <= max_seq_len, (
-                    f"Prompt length: {len(prompt_ids)}, completion length: {len(completion_ids)}, max_seq_len: {max_seq_len}"
-                )
             if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
             assert len(prompt_ids) == len(prompt_mask), (
