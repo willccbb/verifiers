@@ -384,23 +384,28 @@ class Environment(ABC):
 
         executor = ThreadPoolExecutor(max_workers=self.max_workers)
 
+        close_loop_after = False
         try:
-            loop = asyncio.new_event_loop()
-            loop.set_default_executor(executor)
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-        except RuntimeError:
-            import nest_asyncio  # type: ignore
-
-            nest_asyncio.apply()
+            # This will succeed in a normal synchronous script.
             loop = asyncio.get_running_loop()
-            loop.set_default_executor(executor)
+
+        except RuntimeError:
+            # This path is taken in Jupyter notebooks or if no loop is set.
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            # We only close the loops we create ourselves.
+            close_loop_after = True
+
+        if loop.is_running():
+            import nest_asyncio  # type: ignore
+            nest_asyncio.apply(loop)
+
+        try:
             return loop.run_until_complete(coro)
         finally:
+            if close_loop_after:
+                loop.close()
+                asyncio.set_event_loop(None)
             # Critical: shutdown the executor to prevent thread leaks
             executor.shutdown(wait=False)
 
