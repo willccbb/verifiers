@@ -758,6 +758,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 prompt_ids, prompt_mask, completion_ids, completion_mask = (
                     self.process_completion_format(prompt, completion, processing_class)
                 )
+                completion_logprobs = [0] * len(completion_ids)
             is_truncated = False
             if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
                 if len(prompt_ids) > max_seq_len:
@@ -776,7 +777,6 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             assert len(completion_ids) == len(completion_mask), (
                 f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
             )
-            completion_logprobs = [0] * len(completion_ids)
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)

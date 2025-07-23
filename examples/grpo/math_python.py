@@ -12,7 +12,7 @@ vf_env = vf.load_environment(env_id="math_python")
 
 model_name = "willcb/Qwen3-4B"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
-run_name = "math-grpo_" + model_name.split("/")[-1].lower()
+run_name = "math-python_" + model_name.split("/")[-1].lower()
 
 training_args = vf.grpo_defaults(run_name=run_name)
 training_args.num_iterations = 2
