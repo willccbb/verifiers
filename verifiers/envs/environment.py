@@ -777,6 +777,11 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             assert len(completion_ids) == len(completion_mask), (
                 f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
             )
+            assert (
+                len(completion_mask) == len(completion_ids) == len(completion_logprobs)
+            ), (
+                f"completion mask: {len(completion_mask)}, completion ids: {len(completion_ids)}, completion logprobs: {len(completion_logprobs)}"
+            )
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
