@@ -153,7 +153,8 @@ class ToolEnv(MultiTurnEnv):
                      state: State,
                      **kwargs) -> Tuple[Message, State]:
         try:
-            parsed = self.parser.parse(messages[-1]['content'])
+            # Parse with top_level_only=True to avoid nested tool tags
+            parsed = self.parser.parse(messages[-1]['content'], top_level_only=True)
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, 'tool') and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)

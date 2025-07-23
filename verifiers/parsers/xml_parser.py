@@ -12,13 +12,13 @@ class XMLParser(Parser):
     def __init__(self, fields: List[Union[str, Tuple[str, ...]]], answer_field: str = "answer"):
         """
         Initialize the parser with field definitions.
-        
+
         Each field may be:
           - a string (e.g. "reasoning"): the XML tag is fixed.
           - a tuple of alternatives (e.g. ("code", "answer")): the first element is
             the canonical name used for formatting, and all elements are allowed tags
             when parsing.
-            
+
         The schema is assumed to have no duplicate names.
         """
         self._fields: List[Tuple[str, List[str]]] = []  # List of (canonical, [alternatives])
@@ -42,11 +42,11 @@ class XMLParser(Parser):
             seen.add(canonical)
             self._fields.append((canonical, alternatives))
 
-    def parse(self, text: str, strip: bool = True) -> Any:
+    def parse(self, text: str, strip: bool = True, top_level_only: bool = False) -> Any:
         """
         Parse the given XML string and return an object with attributes corresponding
         to all allowed tags in the schema.
-        
+
         For each field defined:
           - If it is a simple field (e.g. 'reasoning'), the output object will have
             an attribute 'reasoning' set to the text content (or None if missing).
@@ -55,18 +55,65 @@ class XMLParser(Parser):
             if the schema is ['reasoning', ('code', 'answer')], then both
             `result.code` and `result.answer` are always accessible. If a tag is not
             found in the XML, its corresponding attribute is set to None.
+
+        Args:
+            text: The XML text to parse
+            strip: Whether to strip whitespace from extracted content
+            top_level_only: If True, only match tags that are not nested inside other tags
         """
         results: Dict[str, Optional[str]] = {}
-        for canonical, alternatives in self._fields:
-            # For each allowed alternative tag, search independently.
-            for alt in alternatives:
-                # Regex pattern to capture the content between the tags.
-                pattern = rf"<{alt}>\s*(.*?)\s*</{alt}>"
-                match = re.search(pattern, text, re.DOTALL)
-                if match:
-                    results[alt] = match.group(1).strip() if strip else match.group(1)
-                else:
-                    results[alt] = None
+
+        if top_level_only:
+            # First, remove all content inside other XML tags to prevent nested matches
+            temp_text = text
+            # Get all field names we need to check for nesting
+            all_field_names = []
+            for _, alternatives in self._fields:
+                all_field_names.extend(alternatives)
+
+            # Remove content inside known tags (except the tag we're looking for)
+            for canonical, alternatives in self._fields:
+                for alt in alternatives:
+                    # Find all occurrences of the tag
+                    pattern = rf"<{alt}>\s*(.*?)\s*</{alt}>"
+                    matches = list(re.finditer(pattern, text, re.DOTALL))
+
+                    found_top_level = False
+                    for match in matches:
+                        # Check if this match is nested by seeing if there's an unclosed tag before it
+                        start_pos = match.start()
+                        text_before = text[:start_pos]
+
+                        # Count open and close tags in text before this match
+                        is_nested = False
+                        for field_name in all_field_names:
+                            if field_name != alt:  # Don't count the current tag
+                                open_count = text_before.count(f"<{field_name}>")
+                                close_count = text_before.count(f"</{field_name}>")
+                                if open_count > close_count:
+                                    is_nested = True
+                                    break
+
+                        if not is_nested:
+                            results[alt] = match.group(1).strip() if strip else match.group(1)
+                            found_top_level = True
+                            break  # Use the first top-level occurrence
+
+                    if not found_top_level:
+                        results[alt] = None
+        else:
+            # Original behavior - match any occurrence
+            for canonical, alternatives in self._fields:
+                # For each allowed alternative tag, search independently.
+                for alt in alternatives:
+                    # Regex pattern to capture the content between the tags.
+                    pattern = rf"<{alt}>\s*(.*?)\s*</{alt}>"
+                    match = re.search(pattern, text, re.DOTALL)
+                    if match:
+                        results[alt] = match.group(1).strip() if strip else match.group(1)
+                    else:
+                        results[alt] = None
+
         return SimpleNamespace(**results)
 
     def parse_answer(self, completion: Messages) -> str | None:
@@ -96,7 +143,7 @@ class XMLParser(Parser):
     def get_format_reward_func(self) -> Callable:
         """
         Return a reward function that checks if messages follow the expected format.
-        
+
         The function does not make assumptions about which fields should start/end the message
         or the specific order of fields. It checks that:
         - At least one field from the schema is present in each message
@@ -107,26 +154,26 @@ class XMLParser(Parser):
             model_messages = self.get_assistant_messages(completion)
             if not model_messages:
                 return 0.0
-            
+
             # Calculate format adherence for each message
             format_scores = []
             for msg in model_messages:
                 content = msg['content']
                 parsed = self.parse(content)
                 parsed_no_strip = self.parse(content, strip=False)
-                
+
                 # Check if the message has at least one valid field
                 has_any_field = False
                 fields_with_content = 0
                 total_fields = 0
-                
+
                 # Keep track of which expected fields are present
                 expected_field_count = len(self._fields)  # Total number of expected field sets
                 present_field_sets = set()  # Which field sets have at least one alternative present
-                
+
                 # Check proper spacing for fields
                 has_correct_spacing = True
-                
+
                 for i, (canonical, alternatives) in enumerate(self._fields):
                     field_set_present = False
                     for alt in alternatives:
@@ -135,23 +182,23 @@ class XMLParser(Parser):
                             fields_with_content += 1
                             total_fields += 1
                             field_set_present = True
-                            
+
                             # Check if field exists in non-stripped version too (proper spacing)
-                            if not (hasattr(parsed_no_strip, alt) and 
+                            if not (hasattr(parsed_no_strip, alt) and
                                     getattr(parsed_no_strip, alt) is not None):
                                 has_correct_spacing = False
                         elif content.count(f"<{alt}>") > 0 or content.count(f"</{alt}>") > 0:
                             # Tag exists but content wasn't properly parsed
                             total_fields += 1
                             field_set_present = True
-                    
+
                     # If any alternative from this field set was present, count it
                     if field_set_present:
                         present_field_sets.add(i)
-                
+
                 # Calculate format score components
                 format_score = 0.0
-                
+
                 # Check if any field from the first field set starts the message
                 starts_with_any_field = False
                 first_field_set = self._fields[0][1]  # Get alternatives for first field set
@@ -159,7 +206,7 @@ class XMLParser(Parser):
                     if content.strip().startswith(f"<{alt}>"):
                         starts_with_any_field = True
                         break
-                
+
                 # Check if any field from the last field set ends the message
                 ends_with_any_field = False
                 last_field_set = self._fields[-1][1]  # Get alternatives for last field set
@@ -167,43 +214,43 @@ class XMLParser(Parser):
                     if content.strip().endswith(f"</{alt}>"):
                         ends_with_any_field = True
                         break
-                
+
                 # Weight the score based on different criteria
                 if has_any_field:
                     # Calculate the proportion of expected field sets that are present
                     field_set_ratio = len(present_field_sets) / expected_field_count
                     format_score += 0.4 * field_set_ratio
-                
+
                 if has_correct_spacing:
                     format_score += 0.2
-                
+
                 if starts_with_any_field:
                     format_score += 0.2
-                    
+
                 if ends_with_any_field:
                     format_score += 0.2
-                
+
                 format_scores.append(format_score)
-            
+
             # Return average format adherence
             if not format_scores:
                 return 0.0
             return (sum(format_scores) / len(format_scores))
-        
+
         return format_reward_func
 
     def get_fields(self) -> List[str]:
         """Return a list of the canonical field names (in order)."""
         return [canonical for canonical, _ in self._fields]
-    
+
     def format(self, **kwargs) -> str:
         """
         Format the provided keyword arguments into an XML string.
-        
+
         For fields with alternatives (tuple), the canonical name (the first element)
         is used as the XML tag. The method looks for a provided value using any of the
         allowed names (preferring the canonical if present).
-        
+
         Example usage:
             parser = XMLParser(['reasoning', ('code', 'answer')])
             formatted_str = parser.format(reasoning="...", code="...")
