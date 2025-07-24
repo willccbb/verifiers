@@ -4,7 +4,6 @@ from datasets import Dataset
 from openai import OpenAI
 
 from verifiers import (
-    ChatMessage,
     Messages,
     MultiTurnEnv,
     RewardFunc,
@@ -58,8 +57,8 @@ class DoubleCheckEnv(MultiTurnEnv):
 
     def env_response(
         self, messages: Messages, state: State, **kwargs
-    ) -> Tuple[ChatMessage, State]:
-        return {"role": "user", "content": "Are you sure?"}, state
+    ) -> Tuple[Messages, State]:
+        return [{"role": "user", "content": "Are you sure?"}], state
 
 
 def load_environment(

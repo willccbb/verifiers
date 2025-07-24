@@ -1,11 +1,19 @@
 import verifiers as vf
 
 """
+# install
+vf-install reverse_text (-p /path/to/environments)
+
+# quick eval
+vf-eval reverse_text (-m model_name in endpoints.py)
+
 inference:
-CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT --enforce-eager
+CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT \
+    --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/reverse_text.py
+CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
+    --config-file configs/zero3.yaml examples/grpo/reverse_text.py
 """
 
 model_name = "willcb/Qwen2.5-0.5B-Reverse-SFT"

@@ -1,12 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "verifiers"
 authors = [
     {name = "William Brown", email = "williambrown97@gmail.com"},
 ]
-version = "0.1.1"
+dynamic = ["version"]  # Let hatchling handle version
 description = "Verifiers for reinforcement learning with LLMs"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.11,<3.13"
 keywords = ["reinforcement-learning", "llm", "rl", "grpo", "verifiable-environments", "multi-turn"]
 classifiers = [
@@ -105,16 +109,31 @@ envs = [
 
 
 [project.scripts]
-vf-vllm = "verifiers.inference.vllm_server:main"
 vf-eval = "verifiers.scripts.eval:main"
-vf-local = "verifiers.scripts.local:main"
+vf-init = "verifiers.scripts.init:main"
+vf-install = "verifiers.scripts.install:main"
+vf-vllm = "verifiers.inference.vllm_server:main"
 
-[tool.setuptools]
+# Hatchling configuration
+[tool.hatch.version]
+path = "verifiers/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/verifiers",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
+exclude = [
+    "/wandb",
+    "/scratch",
+    "/configs",
+    "/environments",
+]
+
+[tool.hatch.build.targets.wheel]
 packages = ["verifiers"]
-
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [

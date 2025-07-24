@@ -1,11 +1,18 @@
 import verifiers as vf
 
 """
-Multi-GPU training (single node, 4 training + 4 inference)
+# install
+vf-install wiki-search (-p /path/to/environments)
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT
+# quick eval
+vf-eval wiki-search (-m model_name in endpoints.py)
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml examples/grpo/wiki_search.py
+inference:
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT \
+    --data-parallel-size 6 --enforce-eager --disable-log-requests
+
+training:
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml examples/grpo/wiki_search.py
 """
 
 vf_env = vf.load_environment(env_id="wiki-search")

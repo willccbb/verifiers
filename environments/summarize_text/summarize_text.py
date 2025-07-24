@@ -13,14 +13,12 @@ def load_environment(**kwargs) -> vf.Environment:
 
     Summarize the given text in 3 sentences."""
 
-
     def sentence_reward_func(completion, **kwargs) -> float:
         """
         Count the number of sentences in the completion.
         """
         response = parser.parse_answer(completion) or ""
         return 1.0 if len(response.split(".")) == 3 else 0.0
-
 
     def lcs_reward_func(completion, answer, **kwargs) -> float:
         """
@@ -37,7 +35,6 @@ def load_environment(**kwargs) -> vf.Environment:
 
         response = parser.parse_answer(completion) or ""
         return lcs_ratio(response, answer)
-
 
     rubric = vf.Rubric(
         funcs=[

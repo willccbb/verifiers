@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -16,8 +17,8 @@ if str(current_dir) not in sys.path:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local-dir-name", "-d", type=str, default="local")
-    parser.add_argument("--env", "-e", type=str, default="gsm8k")
+    parser.add_argument("env", type=str, default="gsm8k")
+    parser.add_argument("--local-dir-name", "-d", type=str, default="")
     parser.add_argument("--model", "-m", type=str, default="gpt-4.1-mini")
     parser.add_argument("--api-key-var", "-k", type=str, default="OPENAI_API_KEY")
     parser.add_argument(
@@ -34,12 +35,18 @@ def main():
     parser.add_argument("--hf-hub-dataset-name", "-D", type=str, default="")
     args = parser.parse_args()
     try:
-        ENDPOINTS = importlib.import_module(
-            f"{args.local_dir_name}.endpoints"
-        ).ENDPOINTS
-    except ImportError:
+        endpoints_path = current_dir / "endpoints.py"
+        if endpoints_path.exists():
+            spec = importlib.util.spec_from_file_location("endpoints", endpoints_path)
+            assert spec and spec.loader
+            endpoints_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(endpoints_module)
+            ENDPOINTS = endpoints_module.ENDPOINTS
+        else:
+            raise ImportError(f"endpoints.py not found in {current_dir}")
+    except (ImportError, AttributeError):
         print(
-            f"No local endpoint registry found at {args.local_dir_name}/endpoints.py. \
+            f"No local endpoint registry found at {current_dir}/endpoints.py. \
 Please run `uv run vf-local` to create a local workspace, \
 or specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
         )

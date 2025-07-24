@@ -1,11 +1,19 @@
 import verifiers as vf
 
 """
-Multi-GPU training (single node, 4 training + 4 inference)
+# install
+vf-install math-python (-p /path/to/environments)
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-4B' --data-parallel-size 6
+# eval
+vf-eval math-python (-m model_name in endpoints.py)
 
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml verifiers/examples/math_train.py
+# inference
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-4B' \
+    --data-parallel-size 6 --enforce-eager --disable-log-requests
+
+# training
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
+    examples/grpo/math_python.py
 """
 
 vf_env = vf.load_environment(env_id="math_python")

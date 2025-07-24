@@ -1,11 +1,19 @@
 import verifiers as vf
 
 """
+# install
+vf-install math_group (-p /path/to/environments)
+
+# quick eval
+vf-eval math_group (-m model_name in endpoints.py)
+
 inference:
-CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-0.6B
+CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-0.6B \
+    --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 --config-file configs/zero3.yaml verifiers/examples/gsm8k.py
+CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
+    --config-file configs/zero3.yaml examples/grpo/math_group.py
 """
 
 vf_env = vf.load_environment(env_id="math_group")

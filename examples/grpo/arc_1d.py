@@ -1,11 +1,20 @@
 import verifiers as vf
 
 """
+# install
+vf-install reasoning-gym (-p /path/to/environments)
+
+# quick eval
+vf-eval reasoning-gym (-m model_name in endpoints.py)
+
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT --tensor-parallel-size 4 --max-batch-size 128
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT \
+    --tensor-parallel-size 2 --data-parallel-size 2 \
+    --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 4 verifiers/examples/arc_1d.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
+    --num-processes 4 examples/grpo/arc_1d.py
 """
 
 size = "14B"

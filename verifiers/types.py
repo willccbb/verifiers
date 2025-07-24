@@ -4,6 +4,7 @@ from typing import (
     Dict,
     List,
     Literal,
+    NotRequired,
     Optional,
     TypedDict,
     Union,
@@ -25,8 +26,15 @@ from openai.types.shared_params import (  # noqa: F401
 # typing aliases
 MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
-ChatMessageField = Literal["role", "content", "tool_calls", "tool_call_id"]
-ChatMessage = Dict[ChatMessageField, str | List[ChatCompletionMessageToolCall]]
+
+
+class ChatMessage(TypedDict):
+    role: str
+    content: str
+    tool_calls: NotRequired[List[ChatCompletionMessageToolCall]]
+    tool_call_id: NotRequired[str]
+
+
 Message = Union[str, ChatMessage]
 Messages = Union[str, List[ChatMessage]]
 Info = Dict[str, Any]

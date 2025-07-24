@@ -48,7 +48,6 @@ def load_environment(
     num_train_examples: int = 2000,
     num_eval_examples: int = 20,
     use_think: bool = True,
-    **kwargs,
 ):
     if use_think:
         system_prompt = THINK_GUESS_SYSTEM_PROMPT
@@ -71,6 +70,5 @@ def load_environment(
         parser=parser,
         rubric=rubric,
         feedback_fn=wordle_feedback_fn,
-        **kwargs,
     )
     return vf_env

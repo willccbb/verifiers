@@ -3,6 +3,12 @@ import argparse
 import verifiers as vf
 
 """
+# install
+vf-install wordle (-p /path/to/environments)
+
+# quick eval
+vf-eval wordle -m (model_name in endpoints.py)
+
 1.7b inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-1.7B-Wordle --data-parallel-size 7 --enforce-eager --disable-log-requests
 

@@ -1,11 +1,19 @@
 import verifiers as vf
 
 """
+# install
+vf-install sentence-repeater (-p /path/to/environments)
+
+# quick eval
+vf-eval sentence-repeater (-m model_name in endpoints.py)
+
 inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-1.5B-Instruct --data-parallel-size 6 --enforce-eager --disable-log-requests
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-1.5B-Instruct \
+    --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml --num-processes 2 examples/grpo/sentence_repeater.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
+    --num-processes 2 examples/grpo/sentence_repeater.py
 """
 
 model_name = "Qwen/Qwen2.5-1.5B-Instruct"
