@@ -664,7 +664,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 responses_idx += 1
             else:
                 zipped.append((turn, None))
-        assert len(responses) == 0, "Responses not fully consumed"
+        assert len(responses) == responses_idx, "Responses not fully consumed"
         assert len(zipped) == len(completion), "Length mismatch"
         prompt_ids: list[int] = processing_class.apply_chat_template(
             conversation=prompt,  # type: ignore
