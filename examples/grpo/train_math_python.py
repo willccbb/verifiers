@@ -12,8 +12,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-4B' \
     --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 # training
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 2 examples/grpo/train_math_python.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
+    --config-file configs/zero3.yaml examples/grpo/train_math_python.py
 """
 
 vf_env = vf.load_environment(env_id="math_python")
