@@ -12,8 +12,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT
     --data-parallel-size 6 --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
-    examples/grpo/train_wiki_search.py
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
+    --config-file configs/zero3.yaml examples/grpo/train_wiki_search.py
 """
 
 vf_env = vf.load_environment(env_id="wiki-search")

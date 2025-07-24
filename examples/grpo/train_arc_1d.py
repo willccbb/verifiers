@@ -13,8 +13,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT \
     --enforce-eager --disable-log-requests
 
 training:
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 4 examples/grpo/train_arc_1d.py
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --num-processes 4 \
+    --config-file configs/zero3.yaml examples/grpo/train_arc_1d.py
 """
 
 size = "14B"
