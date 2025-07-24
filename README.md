@@ -120,7 +120,7 @@ from openai import OpenAI
 client = OpenAI(base_url="https://api.deepseek.com", api_key=os.getenv('DEEPSEEK_API_KEY'))
 
 # evaluation
-results = vf_env.evaluate(client, model="deepseek-chat", num_samples=100)
+results = vf_env.evaluate(client, model="deepseek-chat", num_examples=100)
 print(results['rewards_avg'])
 
 # datasets
