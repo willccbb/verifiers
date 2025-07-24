@@ -7,7 +7,6 @@ from datasets import Dataset, load_dataset
 
 import verifiers as vf
 from verifiers.types import (
-    Message,
     Messages,
     State,
 )
@@ -81,12 +80,13 @@ class SentenceRepeaterEnv(vf.MultiTurnEnv):
 
     def env_response(
         self, messages: Messages, state: State, **kwargs
-    ) -> Tuple[Message, State]:
-        next_message: Message = {
-            "role": "user",
-            "content": state["info"]["questions"][state["turn"]],
-        }
-        return next_message, state
+    ) -> Tuple[Messages, State]:
+        return [
+            {
+                "role": "user",
+                "content": state["info"]["questions"][state["turn"]],
+            }
+        ], state
 
 
 def load_environment(**kwargs) -> vf.Environment:

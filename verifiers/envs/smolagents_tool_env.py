@@ -4,12 +4,11 @@ from typing import Any, Dict, List, Tuple
 from datasets import Dataset
 
 from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.envs.tool_env import DEFAULT_TOOL_PROMPT_TEMPLATE
 from verifiers.parsers.smolagents_parser import SmolagentsParser
 from verifiers.rubrics.smolagents_tool_rubric import (
     SmolagentsToolRubric,  # type: ignore
 )
-from verifiers.types import Message, Messages, RewardFunc, State
+from verifiers.types import Messages, RewardFunc, State
 
 
 class SmolagentsToolEnv(MultiTurnEnv):
@@ -18,7 +17,7 @@ class SmolagentsToolEnv(MultiTurnEnv):
         dataset: Dataset | None = None,
         eval_dataset: Dataset | None = None,
         tools: List[Any] = [],
-        system_prompt: str = DEFAULT_TOOL_PROMPT_TEMPLATE,
+        system_prompt: str = "",
         few_shot: List[Dict[str, str]] = [],
         mask_env_response: bool = True,
         max_steps: int = 10,
@@ -92,7 +91,7 @@ class SmolagentsToolEnv(MultiTurnEnv):
             if step_count > self.max_steps:
                 return True
 
-            parsed = self.llm_parser.parse(messages[-1]["content"])
+            parsed = self.llm_parser.parse(messages[-1]["content"])  # type: ignore
             # Check if we got a valid answer field (not just None from failed parsing)
             return hasattr(parsed, "answer") and parsed.answer is not None
         except Exception:
@@ -133,26 +132,32 @@ class SmolagentsToolEnv(MultiTurnEnv):
 
     def env_response(
         self, messages: Messages, state: State, **kwargs: Any
-    ) -> Tuple[Message, State]:
+    ) -> Tuple[Messages, State]:
         assert isinstance(messages, list)
         try:
-            parsed = self.llm_parser.parse(messages[-1]["content"])
+            parsed = self.llm_parser.parse(messages[-1]["content"])  # type: ignore
             # Check if we got a valid tool field (not just None from failed parsing)
             if hasattr(parsed, "tool") and parsed.tool is not None:
                 result = self.call_tool(parsed.tool)
                 if len(result.strip()) > 0:
-                    return {
-                        "role": "user",
-                        "content": self.env_parser.format(result=result),
-                    }, {}
+                    return [
+                        {
+                            "role": "user",
+                            "content": self.env_parser.format(result=result),
+                        }
+                    ], {}
                 else:
-                    return {
-                        "role": "user",
-                        "content": "Error: Tool execution returned empty output.",
-                    }, {}
+                    return [
+                        {
+                            "role": "user",
+                            "content": "Error: Tool execution returned empty output.",
+                        }
+                    ], {}
         except Exception:
             pass
-        return {
-            "role": "user",
-            "content": "Error: Tool command not found or invalid XML format. Please ensure correct formatting.",
-        }, {}
+        return [
+            {
+                "role": "user",
+                "content": "Error: Tool command not found or invalid XML format. Please ensure correct formatting.",
+            }
+        ], {}

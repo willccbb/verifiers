@@ -17,8 +17,6 @@ from verifiers.envs.multiturn_env import MultiTurnEnv  # noqa
 from verifiers.parsers.xml_parser import XMLParser  # noqa
 from verifiers.rubrics.rubric import Rubric  # noqa
 from verifiers.types import (  # noqa
-    ChatMessage,
-    Message,
     Messages,
     State,
 )
@@ -72,7 +70,7 @@ class TextArenaEnv(MultiTurnEnv):
 
     def env_response(
         self, messages: Messages, state: State, **kwargs: Any
-    ) -> Tuple[Message, State]:
+    ) -> Tuple[Messages, State]:
         # load env
         if "ta_env" not in state:
             ta_env = deepcopy(self.ta_env)
@@ -89,8 +87,7 @@ class TextArenaEnv(MultiTurnEnv):
         state["is_finished"] = is_finished
         _, observation = ta_env.get_observation()
         feedback = self.feedback_fn(observation)
-        env_message: ChatMessage = {"role": "user", "content": str(feedback)}
-        return env_message, state
+        return [{"role": "user", "content": str(feedback)}], state
 
     def ta_to_hf(self) -> Tuple[Dataset, Dataset | None]:
         dataset_rows = []
