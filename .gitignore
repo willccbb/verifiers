@@ -32,6 +32,7 @@ logs/
 
 # development
 local/
+scratch/
 .idea/
 .vscode/
 *.swp
@@ -41,4 +42,3 @@ local/
 verifiers/envs/multibranch_env.py
 wip/
 old/
-scratch/

@@ -12,6 +12,7 @@ from verifiers.rubrics.judge_rubric import JudgeRubric
 WIKI_DIR = "notebooks/data/wiki"
 CHROMA_DB_DIR = "notebooks/.chroma_db"
 
+
 def load_environment(
     judge_model: str = "gpt-4.1-mini",
     judge_base_url: str = "https://api.openai.com/v1",
@@ -21,10 +22,11 @@ def load_environment(
     embed_api_key_var: str = "OPENAI_API_KEY",
     wiki_dir: str = WIKI_DIR,
     chroma_db_dir: str = CHROMA_DB_DIR,
-    **kwargs,
 ) -> vf.Environment:
     openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-        api_key=os.getenv(embed_api_key_var, "EMPTY"), model_name=embed_model, base_url=embed_base_url
+        api_key=os.getenv(embed_api_key_var, "EMPTY"),
+        model_name=embed_model,
+        base_url=embed_base_url,
     )
     db_client = chromadb.PersistentClient(path=chroma_db_dir)
     collection = db_client.get_collection("wiki_titles", embedding_function=openai_ef)  # type: ignore
@@ -223,7 +225,9 @@ def load_environment(
         dataset=dataset, system_prompt=system_prompt, tools=tools, max_turns=10
     )
 
-    judge_client = OpenAI(base_url=judge_base_url, api_key=os.getenv(judge_api_key_var, "EMPTY"))
+    judge_client = OpenAI(
+        base_url=judge_base_url, api_key=os.getenv(judge_api_key_var, "EMPTY")
+    )
     judge_model = judge_model
     judge_rubric = JudgeRubric(
         judge_client=judge_client, judge_model=judge_model, parser=vf_env.parser

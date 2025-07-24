@@ -10,7 +10,6 @@ from verifiers.types import (
     ChatMessage,
     Completion,
     Info,
-    Message,
     Messages,
     MessageType,
     SamplingArgs,
@@ -33,9 +32,9 @@ class MultiTurnEnv(Environment):
     @abstractmethod
     def env_response(
         self, messages: Messages, state: State, **kwargs
-    ) -> Tuple[Message, State]:
+    ) -> Tuple[Messages, State]:
         """
-        Generate a response from the environment (message, state).
+        Generate a response from the environment (messages, state).
         """
         pass
 
@@ -75,9 +74,10 @@ class MultiTurnEnv(Environment):
                 is_completed = True
                 break
             response = await self.get_model_response(
-                prompt=rollout,
                 client=client,
                 model=model,
+                prompt=rollout,
+                oai_tools=info.get("oai_tools", None),
                 sampling_args=sampling_args,
                 message_type=self.message_type,
             )
@@ -91,6 +91,10 @@ class MultiTurnEnv(Environment):
                     "role": "assistant",
                     "content": response_text,
                 }
+                if response.choices[0].message.tool_calls:
+                    response_message["tool_calls"] = response.choices[
+                        0
+                    ].message.tool_calls  # type: ignore
                 rollout.append(response_message)
                 completion.append(response_message)
             else:
@@ -107,17 +111,17 @@ class MultiTurnEnv(Environment):
             ):
                 is_completed = True
             else:
-                env_msg, state = self.env_response(rollout, state, **kwargs)
+                env_msgs, state = self.env_response(rollout, state, **kwargs)
                 if self.message_type == "chat":
-                    assert isinstance(env_msg, dict)
+                    assert isinstance(env_msgs, list)
                     assert isinstance(rollout, list)
                     assert isinstance(completion, list)
-                    rollout += [env_msg]
-                    completion += [env_msg]
+                    rollout += env_msgs
+                    completion += env_msgs
                 else:
-                    assert isinstance(env_msg, str)
+                    assert isinstance(env_msgs, str)
                     assert isinstance(rollout, str)
                     assert isinstance(completion, str)
-                    rollout += env_msg
-                    completion += env_msg
+                    rollout += env_msgs
+                    completion += env_msgs
         return completion, state

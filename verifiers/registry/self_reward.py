@@ -10,7 +10,6 @@ def load_environment(
     model_name: str,
     base_url: str = "http://0.0.0.0:8000/v1",
     api_key_var: str = "JUDGE_API_KEY",
-    **kwargs,
 ):
     judge_prompt = "Q: {question}\nA: {answer}\nGiven: {response}\nRespond with a score between 0.0 and 1.0."
     rubric = vf.JudgeRubric(

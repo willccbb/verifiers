@@ -175,7 +175,10 @@ def _sympy_parse(expr: str):
     py_expr = expr.replace("^", "**")
     return sympy_parser.parse_expr(
         py_expr,
-        transformations=(sympy_parser.standard_transformations + (sympy_parser.implicit_multiplication_application,)),
+        transformations=(
+            sympy_parser.standard_transformations
+            + (sympy_parser.implicit_multiplication_application,)
+        ),
     )
 
 
@@ -443,7 +446,8 @@ def grade_answer_sympy(given_answer: str, ground_truth: str) -> bool:
     given_elems = split_tuple(given_normalized)
 
     if len(ground_truth_elems) > 1 and (
-        ground_truth_normalized[0] != given_normalized[0] or ground_truth_normalized[-1] != given_normalized[-1]
+        ground_truth_normalized[0] != given_normalized[0]
+        or ground_truth_normalized[-1] != given_normalized[-1]
     ):
         is_correct = False
     elif len(ground_truth_elems) != len(given_elems):
@@ -481,7 +485,7 @@ def extract_answer(passage: str) -> str:
     return None
 
 
-def grade_answer_verl(solution_str, ground_truth):
+def grade_answer(solution_str: str, ground_truth: str) -> bool:
     if not ground_truth:
         return False
     if "\\boxed" in ground_truth:
@@ -489,4 +493,6 @@ def grade_answer_verl(solution_str, ground_truth):
     given_answer = extract_answer(solution_str)
     if given_answer is None:
         return False
-    return grade_answer_mathd(given_answer, ground_truth) or grade_answer_sympy(given_answer, ground_truth)
+    return grade_answer_mathd(given_answer, ground_truth) or grade_answer_sympy(
+        given_answer, ground_truth
+    )

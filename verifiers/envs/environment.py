@@ -148,7 +148,7 @@ class Environment(ABC):
                 }
             )
 
-    def get_dataset(self, n: int = -1, seed: int | None = None, **kwargs) -> Dataset:
+    def get_dataset(self, n: int = -1, seed: int | None = None) -> Dataset:
         if self.dataset is None:
             raise ValueError("dataset is not set")
         if seed is not None:
@@ -157,31 +157,30 @@ class Environment(ABC):
             return self.dataset.select(range(n))
         return self.dataset
 
-    def get_eval_dataset(
-        self, n: int = -1, seed: int | None = None, **kwargs
-    ) -> Dataset | None:
+    def get_eval_dataset(self, n: int = -1, seed: int | None = None) -> Dataset | None:
         if self.eval_dataset is None:
             self.logger.warning(
                 "eval_dataset is not set, falling back to train dataset"
             )
-            return self.get_dataset(n, seed, **kwargs)
+            return self.get_dataset(n, seed)
         if seed is not None:
             self.eval_dataset = self.eval_dataset.shuffle(seed=seed)
         if n > 0:
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
-    def get_reward_funcs(self, **kwargs) -> List[RewardFunc]:
+    def get_reward_funcs(self) -> List[RewardFunc]:
         return self.rubric.get_reward_funcs()
 
-    def get_reward_weights(self, **kwargs) -> List[float]:
+    def get_reward_weights(self) -> List[float]:
         return self.rubric.get_reward_weights()
 
     async def get_model_response(
         self,
-        prompt: Messages,
         client: AsyncOpenAI,
         model: str,
+        prompt: Messages,
+        oai_tools: List[ChatCompletionToolParam] | None = None,
         sampling_args: SamplingArgs = {},
         message_type: MessageType | None = None,
         **kwargs,
@@ -198,11 +197,11 @@ class Environment(ABC):
 
             if message_type == "chat":
                 assert isinstance(prompt, list)
-                if self.oai_tools:
+                if oai_tools:
                     response = await client.chat.completions.create(
                         model=model,
                         messages=prompt,  # type: ignore
-                        tools=self.oai_tools,
+                        tools=oai_tools,
                         **sampling_args,
                     )
                 else:
@@ -213,6 +212,10 @@ class Environment(ABC):
                     )
                 return response
             elif message_type == "completion":
+                if oai_tools:
+                    raise ValueError(
+                        "oai_tools are not supported for completion tasks."
+                    )
                 assert isinstance(prompt, str)
                 response = await client.completions.create(
                     model=model, prompt=prompt, **sampling_args
@@ -343,6 +346,9 @@ class Environment(ABC):
             results["task"] = ["default"] * len(results["prompt"])
         if "info" not in results:
             results["info"] = [{}] * len(results["prompt"])
+        if self.oai_tools and "oai_tools" not in results["info"][0]:
+            for i, info in enumerate(results["info"]):
+                info["oai_tools"] = self.oai_tools
 
         rollouts = await self.run_rollouts(
             prompts=results["prompt"],

@@ -13,13 +13,14 @@ class Parser:
     - `get_final_answer` returns the last message's content (or text if string)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, extract_fn: Callable[[str], str] = lambda x: x, **kwargs):
         self.logger = logging.getLogger(f"verifiers.parsers.{self.__class__.__name__}")
+        self.extract_fn = extract_fn
         for key, value in kwargs.items():
             setattr(self, key, value)
 
     def parse(self, text: str) -> Any:
-        return text
+        return self.extract_fn(text)
 
     def get_assistant_messages(
         self, completion: List[ChatMessage]
@@ -43,7 +44,7 @@ class Parser:
         if isinstance(completion, str):
             return self.parse(completion)
         else:
-            return self.parse(completion[-1]["content"])
+            return self.parse(completion[-1]["content"])  # type: ignore
 
     def get_format_reward_func(self) -> Callable:
         """

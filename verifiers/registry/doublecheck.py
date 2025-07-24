@@ -10,9 +10,19 @@ from verifiers import (
     RewardFunc,
     State,
 )
-from verifiers.prompts import SIMPLE_PROMPT
 from verifiers.rubrics.math_rubric import MathRubric
 from verifiers.utils.data_utils import load_example_dataset
+
+SIMPLE_PROMPT = """
+Respond in the following format, using careful step-by-step reasoning.
+
+<reasoning>
+...
+</reasoning>
+<answer>
+...
+</answer>
+"""
 
 
 class DoubleCheckEnv(MultiTurnEnv):

@@ -1,39 +1,8 @@
+from math_verify import parse, verify
+
 import verifiers as vf
 from verifiers.tools import python
-from verifiers.utils.data_utils import load_example_dataset
-
-TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags in each message, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
-
-You have access to the following tools to help solve problems:
-
-{tool_descriptions}
-
-Tools can be called by writing a JSON command inside <tool> tags with:
-- "name": the name of the tool to use
-- "args": the arguments for the tool
-
-Example usage:
-<tool>
-{{"name": "python", "args": {{"code": "import sympy\nx = sympy.symbols('x')\nprint(sympy.solve(x**2 - 4, x))"}}}}
-</tool>
-
-After concluding your message with a tool call,
-you will then see the tool's output inside <result> tags as a new message. \
-You may call tools multiple times if needed. \
-Tool state does not persist between calls. \
-Always use tools to solve problems whenever possible, rather than using your own knowledge.
-
-The <answer>...</answer> tags should contain only your final answer as a numeric expression.
-
-Example:
-<think>
-Let's submit the answer.
-</think>
-<answer>
-\\frac{{1}}{{2}}
-</answer>
-"""
+from verifiers.utils.data_utils import extract_boxed_answer, load_example_dataset
 
 
 def load_environment(
@@ -43,13 +12,50 @@ def load_environment(
     **kwargs,
 ):
     dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
+    system_prompt = """\
+In every turn, think step by step inside <think>...</think>.
+Give your final answer inside \\boxed{{}}."""
+
+    parser = vf.Parser(extract_fn=extract_boxed_answer)
+
+    def correct_answer_reward_func(parser, completion, answer) -> float:
+        completion_answer = parser.parse_answer(completion)
+        if verify(parse(completion_answer), parse(answer)):
+            return 1.0
+        else:
+            return 0.0
+
+    def num_turns(parser, completion) -> float:
+        num_assistant_messages = len(parser.get_assistant_messages(completion))
+        return float(num_assistant_messages)
+
+    def num_tool_calls(parser, completion) -> float:
+        num_tool_calls = len(parser.get_tool_messages(completion))
+        return float(num_tool_calls)
+
+    def num_errors(parser, completion) -> float:
+        num_errors = sum(
+            [
+                1.0
+                for msg in parser.get_tool_messages(completion)
+                if "error" in msg["content"].lower()
+            ]
+        )
+        return num_errors
+
+    rubric = vf.Rubric(
+        funcs=[correct_answer_reward_func, num_turns, num_tool_calls, num_errors],
+        weights=[1.0, 0.0, 0.0, -0.1],
+        parser=parser,
+    )
 
     vf_env = vf.ToolEnv(
         dataset=dataset,
-        system_prompt=TOOL_PROMPT,
-        few_shot=[],
+        system_prompt=system_prompt,
+        parser=parser,
+        rubric=rubric,
         tools=[python],
-        max_steps=3,
+        max_turns=3,
         **kwargs,
     )
 

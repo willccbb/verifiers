@@ -11,7 +11,6 @@ def load_environment(
     judge_model: str = "gpt-4.1-mini",
     judge_base_url: str | None = None,
     judge_api_key_var: str | None = None,
-    **kwargs,
 ) -> vf.Environment:
     """
     Adapted from: https://github.com/openai/simple-evals/blob/main/simpleqa_eval.py

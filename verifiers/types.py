@@ -10,6 +10,9 @@ from typing import (
 )
 
 from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+)
 from openai.types.chat.chat_completion_tool_param import (
     ChatCompletionToolParam,  # noqa: F401
 )
@@ -22,8 +25,8 @@ from openai.types.shared_params import (  # noqa: F401
 # typing aliases
 MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
-ChatMessageField = Literal["role", "content", "tool_calls"]
-ChatMessage = Dict[ChatMessageField, str]
+ChatMessageField = Literal["role", "content", "tool_calls", "tool_call_id"]
+ChatMessage = Dict[ChatMessageField, str | List[ChatCompletionMessageToolCall]]
 Message = Union[str, ChatMessage]
 Messages = Union[str, List[ChatMessage]]
 Info = Dict[str, Any]
