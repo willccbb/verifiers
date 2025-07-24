@@ -176,8 +176,8 @@ class YourMultiTurnEnv(MultiTurnEnv):
   def is_completed(self, messages: list[dict], state: dict, **kwargs: Any) -> bool:
     # return whether or not rollout is completed
 
-  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[dict, dict]:
-    # return environment response + updated state for a message-dict sequence
+  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[list[dict], dict]:
+    # return environment responses + updated state for a message-dict sequence
 
 class YourCustomEnv(Environment):
 	...
