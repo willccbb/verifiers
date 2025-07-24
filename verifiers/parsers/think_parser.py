@@ -1,15 +1,11 @@
-from typing import List, Callable
+from typing import Callable, List
 
-from verifiers import (
-    ChatMessage,
-    Parser,
-)
+from verifiers.parsers.parser import Parser
+from verifiers.types import ChatMessage
 
 
 class ThinkParser(Parser):
-    def __init__(self,
-                 extract_fn: Callable[[str], str] = lambda x: x,
-                 **kwargs):
+    def __init__(self, extract_fn: Callable[[str], str] = lambda x: x, **kwargs):
         super().__init__(**kwargs)
         self.extract_fn = extract_fn
 
@@ -26,12 +22,13 @@ class ThinkParser(Parser):
         </think>
         ...
         """
+
         def follows_format(text: str) -> float:
             if (
-                text.strip().startswith("<think>") and 
-                text.count("<think>") == 1 and
-                text.count("</think>") == 1 and
-                len(text.split("</think>")[-1]) > 0
+                text.strip().startswith("<think>")
+                and text.count("<think>") == 1
+                and text.count("</think>") == 1
+                and len(text.split("</think>")[-1]) > 0
             ):
                 return 1.0
             return 0.0
@@ -39,4 +36,5 @@ class ThinkParser(Parser):
         def format_reward_func(completion: List[ChatMessage], **kwargs) -> float:
             messages = self.get_assistant_messages(completion)
             return sum(follows_format(m["content"]) for m in messages) / len(messages)
+
         return format_reward_func

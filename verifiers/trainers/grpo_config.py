@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 import transformers
 from packaging import version
-from transformers import TrainingArguments # type: ignore
+from transformers import TrainingArguments  # type: ignore
 
 
 @dataclass
@@ -22,11 +22,13 @@ class GRPOConfig(TrainingArguments):
     """
 
     if version.parse(transformers.__version__) <= version.parse("4.50.3"):
-        from transformers.training_args import _VALID_DICT_FIELDS # type: ignore    
+        from transformers.training_args import _VALID_DICT_FIELDS  # type: ignore
 
         _VALID_DICT_FIELDS.append("model_init_kwargs")
     else:
-        _VALID_DICT_FIELDS = TrainingArguments._VALID_DICT_FIELDS + ["model_init_kwargs"]
+        _VALID_DICT_FIELDS = TrainingArguments._VALID_DICT_FIELDS + [
+            "model_init_kwargs"
+        ]
 
     # Parameters that control the model and reference model
     model_init_kwargs: Optional[Union[dict, str]] = field(
@@ -103,19 +105,17 @@ class GRPOConfig(TrainingArguments):
     )
     max_tokens: Optional[int] = field(
         default=None,
-        metadata={
-            "help": "Maximum number of tokens to generate per turn."
-        },
+        metadata={"help": "Maximum number of tokens to generate per turn."},
     )
     max_seq_len: Optional[int] = field(
         default=2048,
-        metadata={
-            "help": "Maximum number of tokens to generate per turn."
-        },
+        metadata={"help": "Maximum number of tokens to generate per turn."},
     )
     temperature: float = field(
         default=1.0,
-        metadata={"help": "Temperature for sampling. The higher the temperature, the more random the completions."},
+        metadata={
+            "help": "Temperature for sampling. The higher the temperature, the more random the completions."
+        },
     )
     top_p: float = field(
         default=1.0,
@@ -148,19 +148,17 @@ class GRPOConfig(TrainingArguments):
     )
     presence_penalty: float = field(
         default=0.0,
-        metadata={
-            "help": "Presence penalty (default 0.0)"
-        }, 
+        metadata={"help": "Presence penalty (default 0.0)"},
     )
     frequency_penalty: float = field(
         default=0.0,
-        metadata={
-            "help": "Frequency penalty (default 0.0)"
-        }, 
+        metadata={"help": "Frequency penalty (default 0.0)"},
     )
     max_data_workers: int = field(
         default=8,
-        metadata={"help": "Maximum number of processes to use for filtering the dataset."},
+        metadata={
+            "help": "Maximum number of processes to use for filtering the dataset."
+        },
     )
     max_concurrent: int = field(
         default=1024,
@@ -191,7 +189,9 @@ class GRPOConfig(TrainingArguments):
 
     vllm_guided_decoding_regex: Optional[str] = field(
         default=None,
-        metadata={"help": "Regex for vLLM guided decoding. If `None` (default), guided decoding is disabled."},
+        metadata={
+            "help": "Regex for vLLM guided decoding. If `None` (default), guided decoding is disabled."
+        },
     )
 
     # Parameters that control the vLLM server
@@ -227,7 +227,9 @@ class GRPOConfig(TrainingArguments):
     )
     num_iterations: int = field(
         default=1,
-        metadata={"help": "Number of iterations per batch (denoted as μ in the algorithm)."},
+        metadata={
+            "help": "Number of iterations per batch (denoted as μ in the algorithm)."
+        },
     )
     epsilon: float = field(
         default=0.2,
@@ -247,7 +249,7 @@ class GRPOConfig(TrainingArguments):
         },
     )
     scale_rewards: bool = field(
-        default=True,
+        default=False,
         metadata={
             "help": "Whether to scale the rewards by dividing them by their standard deviation. If `True` (default), "
             "the rewards are normalized by the standard deviation, ensuring they have unit variance. If `False`, no "
@@ -256,7 +258,7 @@ class GRPOConfig(TrainingArguments):
         },
     )
     loss_type: str = field(
-        default="bnpo",
+        default="dr_grpo",
         metadata={
             "help": "Specifies the loss formulation to use. Supported values are `grpo`, `bnpo`, and `dr_grpo`. "
             "`'grpo'`: Aggregates token-level losses by normalizing over sequence length. Not recommended due to "
@@ -288,9 +290,7 @@ class GRPOConfig(TrainingArguments):
     )
     zero_truncated_completions: bool = field(
         default=False,
-        metadata={
-            "help": "Whether to give zero reward to truncated completions."
-        },
+        metadata={"help": "Whether to give zero reward to truncated completions."},
     )
     sync_ref_model: bool = field(
         default=True,
@@ -324,7 +324,9 @@ class GRPOConfig(TrainingArguments):
     )
     num_completions_to_print: Optional[int] = field(
         default=None,
-        metadata={"help": "Number of completions to print with `rich`. If `None`, all completions are logged."},
+        metadata={
+            "help": "Number of completions to print with `rich`. If `None`, all completions are logged."
+        },
     )
     wandb_log_unique_prompts: Optional[bool] = field(
         default=False,
@@ -339,7 +341,10 @@ class GRPOConfig(TrainingArguments):
 
         num_processes = self.world_size
         # The current default effective batch size
-        if self.generation_batch_size is not None and self.steps_per_generation is not None:
+        if (
+            self.generation_batch_size is not None
+            and self.steps_per_generation is not None
+        ):
             raise ValueError(
                 "'generation_batch_size' and 'steps_per_generation' can not be both configured at the same time"
             )
@@ -348,15 +353,26 @@ class GRPOConfig(TrainingArguments):
             self.steps_per_generation = self.gradient_accumulation_steps
 
         if self.generation_batch_size is None:
-            self.generation_batch_size = self.per_device_train_batch_size * num_processes * self.steps_per_generation
+            self.generation_batch_size = (
+                self.per_device_train_batch_size
+                * num_processes
+                * self.steps_per_generation
+            )
 
-        if self.generation_batch_size % self.per_device_train_batch_size * num_processes != 0:
+        if (
+            self.generation_batch_size
+            % self.per_device_train_batch_size
+            * num_processes
+            != 0
+        ):
             raise ValueError(
                 f"generation_batch_size ({self.generation_batch_size}) must be divisible by the global batch size "
                 f"({self.per_device_train_batch_size * num_processes})."
             )
 
-        self.steps_per_generation = self.generation_batch_size // (self.per_device_train_batch_size * num_processes)
+        self.steps_per_generation = self.generation_batch_size // (
+            self.per_device_train_batch_size * num_processes
+        )
 
         # Check if the effective batch size can be divided by the number of generations
         if self.num_generations < 2:
@@ -365,7 +381,9 @@ class GRPOConfig(TrainingArguments):
                 f"{self.num_generations}, which is less than the minimum required."
             )
         possible_values = [
-            n_gen for n_gen in range(2, self.generation_batch_size + 1) if (self.generation_batch_size) % n_gen == 0
+            n_gen
+            for n_gen in range(2, self.generation_batch_size + 1)
+            if (self.generation_batch_size) % n_gen == 0
         ]
 
         if self.num_generations not in possible_values:
@@ -378,7 +396,9 @@ class GRPOConfig(TrainingArguments):
         if self.eval_strategy != "no":
             global_eval_batch_size = self.per_device_eval_batch_size * num_processes
             possible_values = [
-                n_gen for n_gen in range(2, global_eval_batch_size + 1) if (global_eval_batch_size) % n_gen == 0
+                n_gen
+                for n_gen in range(2, global_eval_batch_size + 1)
+                if (global_eval_batch_size) % n_gen == 0
             ]
             if self.num_generations not in possible_values:
                 raise ValueError(

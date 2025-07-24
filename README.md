@@ -31,29 +31,19 @@ RL environments and algorithms should be modular, reusable, and hackable.
 	- `ReasoningGymEnv` -- direct training for any [reasoning-gym](https://github.com/open-thought/reasoning-gym/tree/main/reasoning_gym) task.
 	- `Environment` abstract class for implementing whatever rollout logic you can imagine (go nuts!)
 
-Basic usage for a GRPO training script with 4 GPUs (2 inference + 2 training):
+Basic usage for a GRPO training script with 4 GPUs (3 inference + 1 training):
 
 ```bash
 # launch inference server
-CUDA_VISIBLE_DEVICES=0,1 vf-vllm --model 'Qwen/Qwen2.5-1.5B-Instruct' --tensor-parallel-size 2
+CUDA_VISIBLE_DEVICES=0,1,2 vf-vllm --model 'Qwen/Qwen2.5-1.5B-Instruct' --data-parallel-size 3
 
 # launch training script; copy zero3.yaml or set values globally with `accelerate config`
-CUDA_VISIBLE_DEVICES=2,3 accelerate launch --num-processes 2 --config-file configs/zero3.yaml train.py
+CUDA_VISIBLE_DEVICES=3 accelerate launch --num-processes 1 --config-file configs/zero3.yaml train.py
 ```
 
 See [GRPO Rules of Thumb](#grpo-rules-of-thumb) for further discussion of hyperparameters and best practices; the easiest way to reduce memory requirements is by reducing `per_device_train_batch_size` and increasing `gradient_accumulation_steps` accordingly.
 
-### Citation
 
-If you use this code in your research, please cite:
-
-```bibtex
-@article{brown2025verifiers,
-  title={Verifiers: Reinforcement Learning with LLMs in Verifiable Environments},
-  author={Brown, William},
-  year={2025}
-}
-```
 
 ## Getting Started
 
@@ -67,9 +57,7 @@ uv add 'verifiers[all]' && uv pip install flash-attn==2.7.4.post1 --no-build-iso
 
 To use the latest `main` branch, do:
 ```bash
-git clone https://github.com/willccbb/verifiers.git
-cd verifiers
-uv sync --extra all && uv pip install flash-attn --no-build-isolation
+uv add 'verifiers[all]' @ git+https://github.com/willccbb/verifiers.git && uv pip install flash-attn --no-build-isolation
 ```
 
 For CPU development (API-only, no training), just do:
@@ -77,6 +65,15 @@ For CPU development (API-only, no training), just do:
 uv add verifiers
 ```
 and install additional tool + environment dependencies (e.g. `textarena`, `reasoning-gym`, `vllm`) as needed.
+
+
+For developing contributions to the core repository, do:
+```bash
+git clone https://github.com/willccbb/verifiers.git
+cd verifiers
+uv sync --all-extras && uv pip install flash-attn --no-build-isolation
+```
+
 
 **Troubleshooting:**
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
@@ -179,8 +176,8 @@ class YourMultiTurnEnv(MultiTurnEnv):
   def is_completed(self, messages: list[dict], state: dict, **kwargs: Any) -> bool:
     # return whether or not rollout is completed
 
-  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[dict, dict]:
-    # return environment response + updated state for a message-dict sequence
+  def env_response(self, messages: list[dict], state: dict, **kwargs: Any) -> tuple[list[dict], dict]:
+    # return environment responses + updated state for a message-dict sequence
 
 class YourCustomEnv(Environment):
 	...
@@ -217,6 +214,22 @@ class YourCustomEnv(Environment):
 - The *best* way to increase diversity is to ensure that your tasks are of an appropriate difficulty for your model (not too easy, not too hard)
 - See Hugging Face's [open-r1](https://huggingface.co/spaces/open-r1/README/discussions/20) logbook for lots of discussion, tips, and experimental findings
 
+### Development Guidelines
+
+Verifiers is intented to be a lightweight set of reusable components for developing, evaluating, and training with novel RL environments. We recommend that you **install** the repo either from 
+
+### Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@article{brown2025verifiers,
+  title={Verifiers: Reinforcement Learning with LLMs in Verifiable Environments},
+  author={Brown, William},
+  year={2025}
+}
+```
+
 
 ### Release Notes - v0.1.0 
 
@@ -244,10 +257,3 @@ Not included, but planned for later releases:
 - Tokenizer endpoint exposed for better token-level + turn-level mechanics (edge case handling, token-level rewards)
 - More flexible abstractions for dynamic batch construction + rollout reuse
 - FSDP (via prime-rl) 
-
-
-
-
-
-
-

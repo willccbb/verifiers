@@ -11,6 +11,7 @@ CLAUDE.md
 .cursor/
 
 # artifacts
+core.* 
 .coverage
 dist/
 build/
@@ -30,13 +31,14 @@ outputs/
 logs/
 
 # development
+local/
+scratch/
 .idea/
 .vscode/
 *.swp
 .DS_Store
 
 # WIPs
+verifiers/envs/multibranch_env.py
 wip/
 old/
-scripts/
-notebooks/

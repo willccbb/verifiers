@@ -1,6 +1,8 @@
+from peft import LoraConfig
+
 from .grpo_config import GRPOConfig
 from .grpo_trainer import GRPOTrainer
-from peft import LoraConfig
+
 
 def grpo_defaults(run_name: str) -> GRPOConfig:
     return GRPOConfig(
@@ -11,10 +13,9 @@ def grpo_defaults(run_name: str) -> GRPOConfig:
         warmup_steps=10,
         max_steps=500,
         bf16=True,
-        max_grad_norm=0.001,
+        max_grad_norm=0.01,
         num_iterations=1,
-        max_prompt_length=1024,
-        max_completion_length=2048,
+        max_seq_len=4096,
         per_device_train_batch_size=8,
         num_generations=8,
         gradient_accumulation_steps=4,
@@ -28,12 +29,14 @@ def grpo_defaults(run_name: str) -> GRPOConfig:
         report_to="wandb",
     )
 
-def lora_defaults(r = 8, alpha = 16) -> LoraConfig:
+
+def lora_defaults(r=8, alpha=16) -> LoraConfig:
     return LoraConfig(
         r=r,
         lora_alpha=alpha,
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
         task_type="CAUSAL_LM",
     )
+
 
 __all__ = ["GRPOConfig", "GRPOTrainer", "grpo_defaults", "lora_defaults"]

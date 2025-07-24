@@ -352,6 +352,40 @@ class GRPOTrainer(Trainer):
 
         eval_dataset = env.get_eval_dataset()
 
+        if "prompt" not in train_dataset.column_names:
+            raise ValueError("Train dataset must contain a 'prompt' column")
+        if "answer" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"answer": ""},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "answer" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"answer": ""},
+                num_proc=self.max_data_workers,
+            )
+        if "info" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"info": {}},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "info" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"info": {}},
+                num_proc=self.max_data_workers,
+            )
+
+        if "task" not in train_dataset.column_names:
+            train_dataset = train_dataset.map(
+                lambda x: {"task": "default"},
+                num_proc=self.max_data_workers,
+            )
+        if eval_dataset is not None and "task" not in eval_dataset.column_names:
+            eval_dataset = eval_dataset.map(
+                lambda x: {"task": "default"},
+                num_proc=self.max_data_workers,
+            )
+
         # Filter out prompts that are too long if max_prompt_length is set
         if self.max_prompt_length is not None:
             self.logger.info(
@@ -1215,7 +1249,7 @@ class GRPOTrainer(Trainer):
             ).sum() / completion_mask.sum().clamp(min=1.0)
         elif self.loss_type == "dr_grpo":
             loss = (per_token_loss * completion_mask).sum() / (
-                per_token_loss.size(0) * self.max_completion_length
+                per_token_loss.size(0) * self.max_seq_len
             )  # type: ignore
         else:
             raise ValueError(f"Unknown loss type: {self.loss_type}")
@@ -1266,8 +1300,16 @@ class GRPOTrainer(Trainer):
 
         self.logger.info("Running evaluation using environment's evaluate method")
 
-        # Use async generator's evaluate method to run in the same event loop
-        eval_results = self.async_generator.evaluate(num_samples=-1)
+        # Only the main process computes evaluation to avoid duplicate work
+        if self.accelerator.is_main_process:
+            eval_results = self.async_generator.evaluate(num_samples=-1)
+        else:
+            eval_results = {}
+
+        # Broadcast the results from rank 0 to all other ranks
+        broadcast_list = [eval_results]
+        broadcast_object_list(broadcast_list, from_process=0)
+        eval_results = broadcast_list[0]
 
         # Process results to compute metrics
         metrics = {}
