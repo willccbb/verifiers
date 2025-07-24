@@ -14,7 +14,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT \
 
 training:
 CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 4 examples/grpo/arc_1d.py
+    --num-processes 4 examples/grpo/train_arc_1d.py
 """
 
 size = "14B"

@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-0.6B \
 
 training:
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
-    --config-file configs/zero3.yaml examples/grpo/math_group.py
+    --config-file configs/zero3.yaml examples/grpo/train_math_group.py
 """
 
 vf_env = vf.load_environment(env_id="math_group")

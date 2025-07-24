@@ -1,8 +1,37 @@
-# Verifiers: Reinforcement Learning with LLMs in Verifiable Environments
+<div align="center">
+
+<p align="center">
+  <h1>Verifiers</h1>
+</p>
+
+<p>
+The Library for LLM RL Environments.
+</p>
+
+</div>
 
 ## Overview
 
-`verifiers` is a set of tools and abstractions for training LLMs with reinforcement learning in **verifiable multi-turn environments** via Group-Relative Policy Optimization. Our implementation of GRPO builds upon the base `transformers` Trainer, and is optimized for efficient async multi-turn inference and training with off-policy overlapping. In addition, `verifiers` includes support for synthetic data generation, SFT warmup on filtered rollouts, and offline evaluation with API clients.
+Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for multi-node FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
+
+## Setup
+
+For local (CPU) development and evaluation with API models, do:
+```bash
+uv add verifiers
+```
+
+To use the latest `main` branch, do:
+```bash
+uv add verifiers @ git+https://github.com/willccbb/verifiers.git
+```
+
+To use with `prime-rl`, see [here](https://github.com/PrimeIntellect-ai/prime-rl).
+
+
+
+---
+# OLD
 
 **Core principles**:
 RL environments and algorithms should be modular, reusable, and hackable.

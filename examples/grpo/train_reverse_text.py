@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen2.5-0.5B-Reverse-SFT \
 
 training:
 CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
-    --config-file configs/zero3.yaml examples/grpo/reverse_text.py
+    --config-file configs/zero3.yaml examples/grpo/train_reverse_text.py
 """
 
 model_name = "willcb/Qwen2.5-0.5B-Reverse-SFT"

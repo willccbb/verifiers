@@ -13,7 +13,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-1.5B-Instruct \
 
 training:
 CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 2 examples/grpo/sentence_repeater.py
+    --num-processes 2 examples/grpo/train_sentence_repeater.py
 """
 
 model_name = "Qwen/Qwen2.5-1.5B-Instruct"
