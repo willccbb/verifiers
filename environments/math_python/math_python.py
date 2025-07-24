@@ -1,8 +1,8 @@
 from math_verify import parse, verify
 
 import verifiers as vf
-from verifiers.tools import python
 from verifiers.utils.data_utils import extract_boxed_answer, load_example_dataset
+from verifiers.utils.tools import python
 
 
 def load_environment(

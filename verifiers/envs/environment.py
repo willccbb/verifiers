@@ -656,11 +656,12 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         Process chat format conversations using incremental prefixes.
         """
         responses = state["responses"]
+        responses_idx = 0
         zipped = []
         for turn in completion:
             if turn["role"] == "assistant":
-                # tuple = turn + popped first response
-                zipped.append((turn, responses.pop(0)))
+                zipped.append((turn, responses[responses_idx]))
+                responses_idx += 1
             else:
                 zipped.append((turn, None))
         assert len(responses) == 0, "Responses not fully consumed"
