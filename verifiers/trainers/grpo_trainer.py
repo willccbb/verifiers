@@ -1293,6 +1293,7 @@ class GRPOTrainer(Trainer):
             return completion
         for msg in completion:
             if "tool_calls" in msg:
+                msg.pop("tool_calls")
                 tool_calls = []
                 msg["tool_calls"] = []
                 for tc in msg["tool_calls"]:
