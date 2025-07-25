@@ -1293,7 +1293,6 @@ class GRPOTrainer(Trainer):
             return completion
         for msg in completion:
             if "tool_calls" in msg:
-                msg.pop("tool_calls")
                 tool_calls = []
                 msg["tool_calls"] = []
                 for tc in msg["tool_calls"]:
@@ -1303,7 +1302,10 @@ class GRPOTrainer(Trainer):
                             "args": tc.get("function", {}).get("arguments", {}),
                         }
                     )
-                msg["tool_calls"] = tool_calls
+                msg["content"] += str({"tool_calls": tool_calls})
+                msg.pop("tool_calls")
+            if "tool_call_id" in msg:
+                msg.pop("tool_call_id")
         return completion
 
     def evaluate(
