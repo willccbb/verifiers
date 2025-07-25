@@ -76,8 +76,6 @@ def main():
             f"{args.env.replace('-', '_')}.py already exists at {environment_file}, skipping..."
         )
 
-    return local_dir
-
 
 if __name__ == "__main__":
     main()
