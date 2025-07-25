@@ -1285,6 +1285,26 @@ class GRPOTrainer(Trainer):
         )  # type: ignore
         return loss
 
+    def _sanitize_tool_calls(
+        self,
+        completion: list[dict[str, Any]] | str,
+    ) -> list[dict[str, Any]] | str:
+        if isinstance(completion, str):
+            return completion
+        for msg in completion:
+            if "tool_calls" in msg:
+                tool_calls = []
+                msg["tool_calls"] = []
+                for tc in msg["tool_calls"]:
+                    tool_calls.append(
+                        {
+                            "name": tc.get("function", {}).get("name", ""),
+                            "args": tc.get("function", {}).get("arguments", {}),
+                        }
+                    )
+                msg["tool_calls"] = tool_calls
+        return completion
+
     def evaluate(
         self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval", **kwargs
     ):
@@ -1330,6 +1350,7 @@ class GRPOTrainer(Trainer):
                     metrics[f"eval_rewards/{key[7:]}"] = reward_values.mean().item()
 
         # Compute completion length statistics
+        assert isinstance(self.processing_class, PreTrainedTokenizerBase)
         if "completion" in eval_results:
             completions = eval_results["completion"]
             if isinstance(completions[0], str):
@@ -1390,31 +1411,10 @@ class GRPOTrainer(Trainer):
             ):
                 import pandas as pd
 
-                def sanitize_tool_calls(
-                    completion: list[dict[str, Any]] | str,
-                ) -> list[dict[str, Any]] | str:
-                    if isinstance(completion, str):
-                        return completion
-                    for msg in completion:
-                        if "tool_calls" in msg:
-                            tool_calls = []
-                            msg["tool_calls"] = []
-                            for tc in msg["tool_calls"]:
-                                tool_calls.append(
-                                    {
-                                        "name": tc.get("function", {}).get("name", ""),
-                                        "args": tc.get("function", {}).get(
-                                            "arguments", {}
-                                        ),
-                                    }
-                                )
-                            msg["tool_calls"] = tool_calls
-                    return completion
-
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
                     "prompt": prompts,
-                    "completion": [sanitize_tool_calls(c) for c in completions],
+                    "completion": [self._sanitize_tool_calls(c) for c in completions],
                 }
                 for k, v in reward_dict.items():
                     table_data[k] = v
@@ -1466,7 +1466,10 @@ class GRPOTrainer(Trainer):
                     "step": [str(self.state.global_step)]
                     * len(self._textual_logs["prompt"]),
                     "prompt": list(self._textual_logs["prompt"]),
-                    "completion": list(self._textual_logs["completion"]),
+                    "completion": [
+                        self._sanitize_tool_calls(c)
+                        for c in self._textual_logs["completion"]
+                    ],
                     **{k: list(v) for k, v in self._textual_logs["rewards"].items()},
                 }
                 if len(table["prompt"]) > 0:
