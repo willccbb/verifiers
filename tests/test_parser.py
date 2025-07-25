@@ -1,6 +1,5 @@
 """Tests for the base Parser class."""
 
-import pytest
 from verifiers import Parser
 
 
@@ -10,7 +9,7 @@ class TestParser:
     def test_parser_initialization(self, basic_parser):
         """Test that Parser initializes correctly."""
         assert isinstance(basic_parser, Parser)
-        assert hasattr(basic_parser, 'logger')
+        assert hasattr(basic_parser, "logger")
 
     def test_parser_with_kwargs(self):
         """Test that Parser accepts arbitrary kwargs."""
@@ -30,7 +29,7 @@ class TestParser:
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there"},
             {"role": "user", "content": "How are you?"},
-            {"role": "assistant", "content": "I'm doing well"}
+            {"role": "assistant", "content": "I'm doing well"},
         ]
         assistant_messages = basic_parser.get_assistant_messages(completion)
         assert len(assistant_messages) == 2
@@ -47,7 +46,7 @@ class TestParser:
         """Test parse_answer with completion list."""
         completion = [
             {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": "The answer is 4"}
+            {"role": "assistant", "content": "The answer is 4"},
         ]
         result = basic_parser.parse_answer(completion)
         assert result == "The answer is 4"

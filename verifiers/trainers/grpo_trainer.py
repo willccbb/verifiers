@@ -560,9 +560,10 @@ class GRPOTrainer(Trainer):
         if self.sync_ref_model:
             self.add_callback(
                 SyncRefModelCallback(
-                    ref_model=self.ref_model, accelerator=self.accelerator
+                    ref_model=self.ref_model,  # type: ignore
+                    accelerator=self.accelerator,
                 )
-            )  # type: ignore
+            )
 
         # Environment
         self.env = env
@@ -1100,7 +1101,7 @@ class GRPOTrainer(Trainer):
 
             input_ids = pad(
                 input_ids_list,
-                padding_value=self.processing_class.pad_token_id,
+                padding_value=self.processing_class.pad_token_id,  # type: ignore
                 padding_side="right",
             )  # type: ignore
             attention_mask = pad(attention_mask_list, padding_side="right")  # type: ignore
@@ -1175,7 +1176,7 @@ class GRPOTrainer(Trainer):
 
         return advantages
 
-    def compute_loss(
+    def compute_loss(  # type: ignore
         self,  # type: ignore
         model: PreTrainedModel,
         inputs: Dict[str, torch.Tensor],
@@ -1236,8 +1237,8 @@ class GRPOTrainer(Trainer):
             per_token_loss = per_token_loss + self.beta * per_token_kl
             mean_kl = (per_token_kl * completion_mask).sum() / completion_mask.sum()
             self._metrics[mode]["kl"].append(
-                self.accelerator.gather_for_metrics(mean_kl).nanmean().item()
-            )  # type: ignore
+                self.accelerator.gather_for_metrics(mean_kl).nanmean().item()  # type: ignore
+            )
         if self.loss_type == "grpo":
             loss = (
                 (per_token_loss * completion_mask).sum(-1)
@@ -1267,22 +1268,22 @@ class GRPOTrainer(Trainer):
 
         gathered_low_clip = self.accelerator.gather_for_metrics(low_clip)
         self._metrics[mode]["clip_ratio/low_mean"].append(
-            gathered_low_clip.nanmean().item()
-        )  # type: ignore
+            gathered_low_clip.nanmean().item()  # type: ignore
+        )
         self._metrics[mode]["clip_ratio/low_min"].append(
-            nanmin(gathered_low_clip).item()
-        )  # type: ignore
+            nanmin(gathered_low_clip).item()  # type: ignore
+        )
         gathered_high_clip = self.accelerator.gather_for_metrics(high_clip)
         self._metrics[mode]["clip_ratio/high_mean"].append(
-            gathered_high_clip.nanmean().item()
-        )  # type: ignore
+            gathered_high_clip.nanmean().item()  # type: ignore
+        )
         self._metrics[mode]["clip_ratio/high_max"].append(
-            nanmax(gathered_high_clip).item()
-        )  # type: ignore
+            nanmax(gathered_high_clip).item()  # type: ignore
+        )
         gathered_clip_ratio = self.accelerator.gather_for_metrics(clip_ratio)
         self._metrics[mode]["clip_ratio/region_mean"].append(
-            gathered_clip_ratio.nanmean().item()
-        )  # type: ignore
+            gathered_clip_ratio.nanmean().item()  # type: ignore
+        )
         return loss
 
     def _sanitize_tool_calls(
@@ -1575,10 +1576,10 @@ class GRPOTrainer(Trainer):
         term_lengths = []
         for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
             has_eos = any(
-                token == self.processing_class.eos_token_id
+                token == self.processing_class.eos_token_id  # type: ignore
                 for token, mask in zip(comp_ids, comp_mask)
                 if mask
-            )  # type: ignore
+            )
             if has_eos:
                 term_lengths.append(sum(comp_mask))
 
