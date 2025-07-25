@@ -123,6 +123,7 @@ class TestRubric:
         
         result = await rubric.call_reward_func(
             func=comprehensive_func,
+            parser=Parser(),
             prompt="test prompt",
             completion="test completion",
             answer="test answer",
@@ -145,6 +146,7 @@ class TestRubric:
         
         result = await rubric.call_reward_func(
             func=simple_func,
+            parser=Parser(),
             prompt="irrelevant",
             completion="same",
             answer="same",
@@ -165,6 +167,7 @@ class TestRubric:
         
         result = await rubric.call_reward_func(
             func=kwargs_func,
+            parser=Parser(),
             prompt="test",
             completion="test",
             answer="test",
@@ -173,8 +176,8 @@ class TestRubric:
             info={}
         )
         
-        # Should receive prompt, answer, state, task, info (completion used directly)
-        assert result == 5
+        # Should receive parser, prompt, answer, state, task, info (completion used directly)
+        assert result == 6
 
     @pytest.mark.asyncio
     async def test_call_reward_func_error_handling(self):
@@ -186,6 +189,7 @@ class TestRubric:
         
         result = await rubric.call_reward_func(
             func=error_func,
+            parser=Parser(),
             prompt="test",
             completion="test",
             answer="test",

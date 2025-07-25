@@ -71,13 +71,14 @@ class MockAsyncOpenAI:
         self.chat.completions.create = AsyncMock(side_effect=self._handle_chat_completion)
         self.completions.create = AsyncMock(side_effect=self._handle_text_completion)
     
-    def add_chat_response(self, messages, response, finish_reason="stop"):
+    def add_chat_response(self, messages, response, finish_reason="stop", tool_calls=None):
         """Add a mapped response for specific messages."""
         # Convert messages to a hashable key
         key = self._messages_to_key(messages)
         self.chat_completions[key] = {
             "content": response,
-            "finish_reason": finish_reason
+            "finish_reason": finish_reason,
+            "tool_calls": tool_calls
         }
     
     def add_text_response(self, prompt, response, finish_reason="stop"):
@@ -103,7 +104,8 @@ class MockAsyncOpenAI:
         else:
             response_data = {
                 "content": self.default_chat_response,
-                "finish_reason": "stop"
+                "finish_reason": "stop",
+                "tool_calls": None
             }
         
         # Create mock response that mimics ChatCompletion
@@ -119,6 +121,7 @@ class MockAsyncOpenAI:
         # Set the attributes
         mock_message.content = response_data["content"]
         mock_message.role = "assistant"
+        mock_message.tool_calls = response_data.get("tool_calls", None)
         mock_choice.message = mock_message
         mock_choice.finish_reason = response_data["finish_reason"]
         mock_choice.index = 0
@@ -260,11 +263,11 @@ class SimpleMultiTurnEnv(MultiTurnEnv):
         if self.completion_condition == "answer":
             # Encourage completion after a few turns
             if self.env_response_count >= 2:
-                return {"role": "user", "content": "Please finish with DONE"}, state
+                return [{"role": "user", "content": "Please finish with DONE"}], state
             else:
-                return {"role": "user", "content": f"Continue (turn {self.env_response_count})"}, state
+                return [{"role": "user", "content": f"Continue (turn {self.env_response_count})"}], state
         else:
-            return {"role": "user", "content": f"Environment response {self.env_response_count}"}, state
+            return [{"role": "user", "content": f"Environment response {self.env_response_count}"}], state
 
 
 @pytest.fixture

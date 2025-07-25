@@ -280,7 +280,7 @@ class TestMultiTurnEnv:
             
             def env_response(self, messages, state, **kwargs):
                 state["turn_count"] = state.get("turn_count", 0) + 1
-                return {"role": "user", "content": f"Turn {state['turn_count']}"}, state
+                return [{"role": "user", "content": f"Turn {state['turn_count']}"}], state
         
         env = StatefulMultiTurnEnv(
             client=mock_openai_client,

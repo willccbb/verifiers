@@ -61,9 +61,10 @@ class TestSingleTurnEnv:
         
         response, new_state = mock_singleturn_env.env_response(messages, state)
         
-        # Should return minimal response
-        assert response["role"] == "user"
-        assert response["content"] == ""
+        # Should return minimal response (env_response returns a list of messages)
+        assert len(response) == 1
+        assert response[0]["role"] == "user"
+        assert response[0]["content"] == ""
         assert new_state == state
 
     @pytest.mark.asyncio
