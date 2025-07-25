@@ -1392,7 +1392,7 @@ class GRPOTrainer(Trainer):
 
                 def sanitize_tool_calls(
                     completion: list[dict[str, Any]] | str,
-                ) -> list[dict[str, Any]]:
+                ) -> list[dict[str, Any]] | str:
                     if isinstance(completion, str):
                         return completion
                     for msg in completion:
