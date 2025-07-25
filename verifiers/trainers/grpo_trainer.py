@@ -1390,10 +1390,31 @@ class GRPOTrainer(Trainer):
             ):
                 import pandas as pd
 
+                def sanitize_tool_calls(
+                    completion: list[dict[str, Any]] | str,
+                ) -> list[dict[str, Any]]:
+                    if isinstance(completion, str):
+                        return completion
+                    for msg in completion:
+                        if "tool_calls" in msg:
+                            tool_calls = []
+                            msg["tool_calls"] = []
+                            for tc in msg["tool_calls"]:
+                                tool_calls.append(
+                                    {
+                                        "name": tc.get("function", {}).get("name", ""),
+                                        "args": tc.get("function", {}).get(
+                                            "arguments", {}
+                                        ),
+                                    }
+                                )
+                            msg["tool_calls"] = tool_calls
+                    return completion
+
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
                     "prompt": prompts,
-                    "completion": completions,
+                    "completion": [sanitize_tool_calls(c) for c in completions],
                 }
                 for k, v in reward_dict.items():
                     table_data[k] = v
