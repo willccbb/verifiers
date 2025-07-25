@@ -38,7 +38,13 @@ def load_environment(**kwargs) -> vf.Environment:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("env", type=str, help="The environment id to init")
-    parser.add_argument("--path", "-p", type=str, default="./environments")
+    parser.add_argument(
+        "--path",
+        "-p",
+        type=str,
+        default="./environments",
+        help="Path to environments directory (default: ./environments)",
+    )
     args = parser.parse_args()
 
     # make environment parent directory if it doesn't exist

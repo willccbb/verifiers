@@ -25,10 +25,36 @@ def main():
         help="Path to environments directory (default: ./environments)",
         default="./environments",
     )
+    parser.add_argument(
+        "-r",
+        "--from-repo",
+        action="store_true",
+        help="Install from the Verifiers repo (default: False)",
+        default=False,
+    )
+    parser.add_argument(
+        "-b",
+        "--branch",
+        type=str,
+        help="Branch to install from if --from-repo is True (default: main)",
+        default="main",
+    )
     args = parser.parse_args()
 
-    env_path = Path(args.path) / args.env.replace("-", "_")
-    subprocess.run(["uv", "pip", "install", "-e", env_path])
+    if args.from_repo:
+        env_path = Path(args.path) / args.env.replace("-", "_")
+        subprocess.run(["uv", "pip", "install", "-e", env_path])
+    else:
+        env_name = args.env.replace("-", "_")
+        env_folder = env_name.replace("_", "-")
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{args.branch}#subdirectory=environments/{env_folder}",
+            ]
+        )
 
 
 if __name__ == "__main__":
