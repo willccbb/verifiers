@@ -1,40 +1,41 @@
 # Overview
 
-Verifiers is a flexible framework for reinforcement learning with large language models (LLMs). It provides a modular architecture for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+Verifiers is a library of modular components for creating RL environments and training LLM agents. It provides a modular architecture for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
 
 ## Core Concepts
 
-The framework is built around three fundamental primitives that work together:
+The framework is built around modular components that work together:
 
 ### 1. Environment: Task Orchestration
 
-Environments manage the complete interaction flow between models, datasets, and evaluation. **Most users should start with `SingleTurnEnv` or `MultiTurnEnv`**:
+Environments are installable Python modules which expose a `load_environment` function for instantiation. They manage the complete interaction flow between models, datasets, and evaluation. **Most users should start with environment modules or `SingleTurnEnv`**:
 
 ```python
 import verifiers as vf
-from typing import List, Dict, Any
-from datasets import Dataset
+from openai import OpenAI
 
-# SingleTurnEnv: One-shot Q&A tasks (most common)
+# Load an environment module (recommended)
+vf_env = vf.load_environment("math-python", dataset_name="math", num_train_examples=1000)
+
+# Or create directly for simple cases
+dataset = vf.load_example_dataset("gsm8k", split="train")
 vf_env = vf.SingleTurnEnv(
-    dataset=dataset,  # Dataset with 'question' and 'answer' columns
+    dataset=dataset,
     system_prompt="Solve the problem step by step.",
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended: use "chat" for most cases
+    parser=vf.ThinkParser(),
+    rubric=vf.Rubric(funcs=[correct_answer_func])
 )
 
-# MultiTurnEnv: Interactive conversations
-class MyMultiTurnEnv(vf.MultiTurnEnv):
-    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> bool:
-        # Define when conversation should end
-        # state["responses"] contains full LLM response objects with token_ids, logprobs, etc.
-        return len(state['responses']) >= 5
-    
-    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> tuple[Dict[str, str], Dict[str, Any]]:
-        # Define environment's response logic
-        return {"role": "user", "content": "Continue..."}, state
+# Evaluate with any OpenAI-compatible client
+client = OpenAI()
+results = vf_env.evaluate(client=client, model="gpt-4.1-mini", num_examples=10)
 ```
+
+**Environment modules** provide complete, reusable patterns:
+- Pre-configured datasets, parsers, and rubrics
+- Task-specific system prompts and reward functions
+- Dependencies specified in `pyproject.toml`
+- Examples: `math-python`, `wordle`, `gsm8k`
 
 **SingleTurnEnv** is perfect for:
 - Question-answer tasks
@@ -54,7 +55,6 @@ Parsers extract structured information from model outputs. The base `Parser` cla
 
 ```python
 import verifiers as vf
-from typing import Any, List, Dict
 
 # Base parser (returns text as-is)
 parser = vf.Parser()
@@ -62,7 +62,7 @@ parser = vf.Parser()
 # ThinkParser extracts content after </think> tags
 parser = vf.ThinkParser()
 
-# XMLParser extracts structured fields (recommended for most use cases)
+# XMLParser extracts structured fields (recommended for multi-field output)
 parser = vf.XMLParser(fields=["reasoning", "answer"])
 ```
 
@@ -92,36 +92,61 @@ Rubrics combine multiple reward functions to evaluate model outputs. The base `R
 
 ```python
 import verifiers as vf
-from typing import List, Dict, Union, Callable
 
-# Basic rubric with one reward function
-def correct_answer(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
+# Basic rubric with one reward function  
+def correct_answer(parser, completion, answer, **kwargs) -> float:
     response = parser.parse_answer(completion) or ''
     return 1.0 if response.strip() == answer.strip() else 0.0
 
 rubric = vf.Rubric(
     funcs=[correct_answer],
-    weights=[1.0]
+    weights=[1.0],
+    parser=parser
 )
 ```
 
 **Multi-criteria evaluation** combines different aspects:
 ```python
-def correctness_reward(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
+def correctness_reward(parser, completion, answer, **kwargs) -> float:
     response = parser.parse_answer(completion) or ''
     return 1.0 if response.strip() == answer.strip() else 0.0
 
-def format_reward(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
+def format_reward(parser, completion, **kwargs) -> float:
     # Check if response follows expected format
     return parser.get_format_reward_func()(completion)
 
 rubric = vf.Rubric(
     funcs=[correctness_reward, format_reward],
-    weights=[0.8, 0.2]  # Correctness weighted higher
+    weights=[0.8, 0.2],  # Correctness weighted higher
+    parser=parser
 )
 ```
 
 **For nontrivial environments, users will want to write their own rubrics** to define task-specific evaluation criteria.
+
+## Environment Loading Pattern
+
+The primary way to use environments is through installable modules:
+
+```python
+import verifiers as vf
+
+# Load environment modules with configuration
+vf_env = vf.load_environment("math-python", dataset_name="math", num_train_examples=5000)
+vf_env = vf.load_environment("wordle", use_think=True, num_train_examples=2000)
+vf_env = vf.load_environment("gsm8k", split="test")
+
+# Quick evaluation
+from openai import OpenAI
+client = OpenAI()
+results = vf_env.evaluate(client=client, model="gpt-4.1-mini", num_examples=10)
+```
+
+Environment modules encapsulate:
+- Dataset loading and preprocessing
+- Task-appropriate parsers and rubrics
+- System prompts and sampling configuration
+- Dependencies and setup requirements
 
 ## Data Types and Formats
 
@@ -131,7 +156,6 @@ Datasets should have either `answer` (str) or `info` (dict) columns:
 
 ```python
 from datasets import Dataset
-from typing import List, Dict, Any
 
 # Option 1: Simple format with answer column
 dataset = Dataset.from_list([
@@ -148,16 +172,12 @@ dataset = Dataset.from_list([
             "difficulty": "easy",
             "category": "arithmetic"
         }
-    },
-    {
-        "question": "What is the capital of France?",
-        "info": {
-            "answer": "Paris",
-            "difficulty": "easy", 
-            "category": "geography"
-        }
     }
 ])
+
+# Built-in datasets
+dataset = vf.load_example_dataset("gsm8k", split="train")
+dataset = vf.load_example_dataset("math", "train", n=1000)
 ```
 
 ### Message Types: Chat vs Completion
@@ -183,16 +203,14 @@ message_type = "completion"
 The `state` object contains rollout information and accumulates LLM responses:
 
 ```python
-from typing import Dict, Any, List
-
 # State structure
 state: Dict[str, Any] = {
-    "prompt": List[Dict[str, str]],  # Original prompt
+    "prompt": List[Dict[str, str]],      # Original prompt
     "completion": List[Dict[str, str]],  # Model's response
-    "answer": str,  # Ground truth answer
-    "task": str,  # Task identifier
-    "info": Dict[str, Any],  # Additional metadata
-    "responses": List[Any],  # Full LLM response objects with token_ids, logprobs, etc.
+    "answer": str,                        # Ground truth answer
+    "task": str,                         # Task identifier
+    "info": Dict[str, Any],              # Additional metadata
+    "responses": List[Any],              # Full LLM response objects with token_ids, logprobs, etc.
 }
 ```
 
@@ -207,10 +225,8 @@ The `state["responses"]` list accumulates the complete LLM response objects, whi
 Pass vLLM-specific arguments through the `sampling_args` dict:
 
 ```python
-from typing import Dict, Any
-
 # vLLM-specific sampling arguments
-sampling_args: Dict[str, Any] = {
+sampling_args = {
     "temperature": 0.7,
     "top_p": 0.9,
     "max_tokens": 2048,
@@ -223,17 +239,10 @@ sampling_args: Dict[str, Any] = {
 }
 
 # Use in environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    sampling_args=sampling_args
-)
+vf_env = vf.SingleTurnEnv(dataset=dataset, sampling_args=sampling_args)
 
 # Or pass during evaluation
-results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    sampling_args=sampling_args
-)
+results = vf_env.evaluate(client=client, model="gpt-4", sampling_args=sampling_args)
 ```
 
 This allows access to fine-grained information like token IDs and logprobs in environment and reward functions.
@@ -260,19 +269,17 @@ Build complex behaviors from simple components:
 
 ## Key Design Principles
 
-### 1. Start Simple
-Most environments provide sensible defaults:
+### 1. Environment-First Design
+Most users should start by loading environment modules:
 
 ```python
-# Simple - environment chooses defaults
-vf_env = vf.SingleTurnEnv(dataset=dataset)
+# Load reusable environment patterns
+vf_env = vf.load_environment("math-python")  # Math with Python tools
+vf_env = vf.load_environment("wordle")       # Interactive games
+vf_env = vf.load_environment("gsm8k")        # Simple Q&A
 
-# Custom - specify your own components
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    parser=vf.ThinkParser(),
-    rubric=custom_rubric
-)
+# Create directly only for simple or custom cases
+vf_env = vf.SingleTurnEnv(dataset=dataset, parser=parser, rubric=rubric)
 ```
 
 ### 2. Multi-Criteria Evaluation
@@ -286,13 +293,16 @@ rubric = vf.Rubric(funcs=[
 ], weights=[0.7, 0.2, 0.1])
 ```
 
-### 3. Incremental Complexity
-Start with basic environments and add complexity as needed:
+### 3. OpenAI-Compatible Integration
+Verifiers can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client:
 
-1. Begin with `SingleTurnEnv` for Q&A tasks
-2. Use `MultiTurnEnv` for interactive tasks
-3. Write custom parsers for specific output formats
-4. Write custom rubrics for task-specific evaluation
+```python
+from openai import OpenAI
+
+# Any OpenAI-compatible client works
+client = OpenAI(base_url="https://your-endpoint.com/v1", api_key="your-key")
+results = vf_env.evaluate(client=client, model="your-model", num_examples=100)
+```
 
 ## Quick Start Example
 
@@ -300,51 +310,47 @@ Here's a complete working example:
 
 ```python
 import verifiers as vf
-from typing import Union, List, Dict
-from datasets import Dataset
+from openai import OpenAI
 
-# 1. Load dataset
-dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
+# 1. Load or create environment
+vf_env = vf.load_environment("gsm8k")  # Pre-configured GSM8K environment
+# OR create custom:
+# dataset = vf.load_example_dataset("gsm8k", split="train")
+# parser = vf.ThinkParser()
+# rubric = vf.Rubric(funcs=[correct_answer_func, parser.get_format_reward_func()])
+# vf_env = vf.SingleTurnEnv(dataset=dataset, parser=parser, rubric=rubric)
 
-# 2. Setup parser and rubric
-parser = vf.ThinkParser()
-
-def correct_answer(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response.strip() == answer.strip() else 0.0
-
-rubric = vf.Rubric(
-    funcs=[correct_answer, parser.get_format_reward_func()],
-    weights=[0.8, 0.2]
-)
-
-# 3. Create environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Think step-by-step inside <think>...</think> tags, then give your answer.",
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended format
-)
-
-# 4. Evaluate the environment
+# 2. Evaluate the environment
+client = OpenAI()
 results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=10
+    client=client,
+    model="gpt-4.1-mini",
+    num_examples=10,
+    rollouts_per_example=3
 )
 print(f"Results: {results}")
+
+# 3. Generate training data
+training_data = vf_env.generate(
+    client=client,
+    model="gpt-4.1-mini", 
+    n_samples=1000
+)
+
+# 4. Save results
+vf_env.make_dataset(training_data, push_to_hub=True, hub_name="my-training-data")
 ```
 
 ## Environment Types
 
 Different environment types are designed for different tasks:
 
-- **SingleTurnEnv**: One-shot Q&A tasks (most common)
+- **Environment Modules**: Pre-configured, installable packages (recommended)
+- **SingleTurnEnv**: One-shot Q&A tasks (most common direct usage)
 - **MultiTurnEnv**: Interactive conversations and multi-step reasoning
 - **ToolEnv**: Tasks requiring external tools (calculators, code execution)
-- **TextArenaEnv**: Game-based environments
-- **Custom Environments**: Write your own by extending `Environment` or `MultiTurnEnv`
+- **EnvGroup**: Composition of multiple environments
+- **Custom Environments**: Write your own by extending `MultiTurnEnv`
 
 ## Training and Evaluation
 
@@ -353,20 +359,20 @@ Environments are not just for training - they're also powerful evaluation tools:
 ```python
 # Evaluate a model
 results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
+    client=client,
+    model="gpt-4.1-mini",
     num_examples=100
 )
 
 # Generate training data
 results = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
+    client=client,
+    model="gpt-4.1-mini",
     n_samples=1000
 )
 ```
 
 The framework supports various training approaches:
-- **GRPO Trainer**: Reinforcement learning with the environment
-- **Verifiers**: Async FSDP environment training
+- **PRIME-RL (Recommended)**: Large-scale FSDP training with native verifiers support
+- **GRPOTrainer**: Included trainer for LoRA and smaller setups
 - **Custom Training**: Use environments as reward functions in your own training loops

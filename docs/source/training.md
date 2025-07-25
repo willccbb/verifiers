@@ -8,15 +8,16 @@ Environments are not just for training - they're excellent evaluation tools:
 
 ```python
 import verifiers as vf
+from openai import OpenAI
 
-# Create environment
-dataset = vf.load_example_dataset("gsm8k", split="train")
-vf_env = vf.SingleTurnEnv(dataset=dataset)
+# Create or load environment
+vf_env = vf.load_environment("math-python", dataset_name="math", num_train_examples=1000)
 
 # Evaluate model performance
+client = OpenAI()
 results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
+    client=client,
+    model="gpt-4.1-mini",
     num_examples=100,
     rollouts_per_example=3
 )
@@ -26,22 +27,43 @@ print(f"Correct answers: {sum(1 for r in results['rewards'] if r > 0.8)}")
 
 # Generate training data
 results = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
+    client=client,
+    model="gpt-4.1-mini",
     n_samples=1000
 )
+
+# Save results for future use
+vf_env.make_dataset(results, push_to_hub=True, hub_name="my-training-data")
 ```
 
-## Training with GRPO
+## Training Approaches
 
-For users who want to train models, the framework integrates with Group Relative Policy Optimization (GRPO). Here's the basic pattern:
+### PRIME-RL (Recommended)
+
+**Unless you require LoRA support, we now generally recommend** that you use the `prime-rl` trainer, which natively supports Environments created using `verifiers`, is more optimized for performance and scalability via FSDP, includes a broader set of configuration options and user experience features, and has more exhaustively battle-tested defaults.
+
+```python
+# Example prime-rl integration (see prime-rl docs for complete setup)
+import verifiers as vf
+
+# Create environment
+vf_env = vf.load_environment("math-python")
+
+# prime-rl natively supports verifiers environments
+# See https://github.com/PrimeIntellect-ai/prime-rl for usage instructions
+```
+
+Both `prime-rl` and the included `GRPOTrainer` support asynchronous rollouts, and use a one-step off-policy delay by default for overlapping training and inference.
+
+### GRPOTrainer (For LoRA and Smaller Setups)
+
+The included trainer (`vf.GRPOTrainer`) supports running GRPO-style RL training via Accelerate/DeepSpeed, and uses vLLM for inference. It supports both full-parameter finetuning and LoRA, and is optimized for efficiently training dense transformer models on 2-16 GPUs.
 
 ```python
 import verifiers as vf
 
 # 1. Create environment
-dataset = vf.load_example_dataset("gsm8k", split="train")
-vf_env = vf.SingleTurnEnv(dataset=dataset)
+vf_env = vf.load_environment("math-python")
 
 # 2. Load model
 model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
@@ -59,15 +81,48 @@ trainer = vf.GRPOTrainer(
 trainer.train()
 ```
 
-## GRPO: Group Relative Policy Optimization
+## Infrastructure Setup
 
-GRPO is a reinforcement learning algorithm designed specifically for LLMs that:
-- Learns from relative comparisons within groups
-- Reduces reward hacking through comparative evaluation
-- Provides stable training dynamics
-- Works with any differentiable model
+### vLLM Inference Server
 
-## Training Configuration
+For training, set up a vLLM server for generation:
+
+```bash
+# Start vLLM inference server
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model Qwen/Qwen2.5-7B-Instruct \
+    --data-parallel-size 4 --enforce-eager --disable-log-requests \
+    --host 0.0.0.0 --port 8000
+```
+
+### Multi-GPU Training Example
+
+Example infrastructure pattern for larger models:
+
+```bash
+# Start vLLM inference server (4 GPUs for generation)
+CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' \
+    --tensor-parallel-size 4 --max-model-len 8192 --dtype bfloat16 \
+    --gpu-memory-utilization 0.9 --enable-prefix-caching \
+    --host 0.0.0.0 --port 8000
+
+# Run training on separate GPUs (4 GPUs for training)
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
+    --num-processes 4 your_training_script.py
+```
+
+### Troubleshooting
+
+- Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`)
+- You should have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM)
+- If using high max concurrency, increase the number of allowed open sockets (e.g. `ulimit -n 4096`)
+- On some setups, inter-GPU communication can hang or crash during vLLM weight syncing. This can usually be alleviated by setting (or unsetting) `NCCL_P2P_DISABLE=1` in your environment
+- If problems persist, please open an issue
+
+### Resource Requirements
+
+`GRPOTrainer` is optimized for setups with at least 2 GPUs, scaling up to multiple nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be rented for <$1/hr.
+
+## GRPO Configuration (GRPOTrainer)
 
 ### Using Defaults
 
@@ -138,37 +193,99 @@ trainer = vf.GRPOTrainer(
 )
 ```
 
-## Infrastructure Setup
+## Environment-Specific Examples
 
-### Single GPU Training
+### Math Training
 
 ```python
-# Simple single GPU training
+import verifiers as vf
+
+# Load environment
+vf_env = vf.load_environment("math-python", dataset_name="math", num_train_examples=5000)
+
+# Train with GRPOTrainer
 model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="single-gpu-experiment")
+args = vf.grpo_defaults(run_name="math-training")
 trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
 trainer.train()
 ```
 
-### Multi-GPU Training
+### Tool-Augmented Training
 
-The examples use this infrastructure pattern:
+```python
+import verifiers as vf
 
-```bash
-# Start vLLM inference server (4 GPUs for generation)
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' \
-    --tensor-parallel-size 4 --max-model-len 8192 --dtype bfloat16 \
-    --gpu-memory-utilization 0.9 --enable-prefix-caching \
-    --host 0.0.0.0 --port 8000
+# Create tool environment
+vf_env = vf.load_environment("math-python")  # Already includes Python tools
 
-# Run training on separate GPUs (4 GPUs for training)
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 4 your_training_script.py
+# Train with tools
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
+args = vf.grpo_defaults(run_name="tool-training")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
 ```
 
-### ZeRO Configuration
+### Game Environment Training
 
-The examples use DeepSpeed ZeRO-3. Create `configs/zero3.yaml`:
+```python
+import verifiers as vf
+
+# Load game environment
+vf_env = vf.load_environment("wordle", use_think=True, num_train_examples=2000)
+
+# Train on games
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+args = vf.grpo_defaults(run_name="wordle-training")
+trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
+trainer.train()
+```
+
+## Alternative Training Approaches
+
+### Using Environments as Reward Functions
+
+You can use environments as reward functions in your own training loops:
+
+```python
+# Generate training data with rewards
+results = vf_env.generate(
+    client=client,
+    model="gpt-4.1-mini",
+    n_samples=1000
+)
+
+# Process for training
+processed = vf_env.process_env_results(
+    prompts=results['prompts'],
+    completions=results['completions'],
+    states=results['states'],
+    rewards=results['rewards'],
+    processing_class=tokenizer
+)
+
+# Use in your own training loop
+for batch in processed:
+    # Your custom training logic here
+    pass
+```
+
+### OpenAI-Compatible Client Integration
+
+Verifiers can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client:
+
+```python
+from openai import OpenAI
+
+# Any OpenAI-compatible client works
+client = OpenAI(base_url="https://your-endpoint.com/v1", api_key="your-key")
+
+# Use with environments
+results = vf_env.evaluate(client=client, model="your-model", num_examples=100)
+```
+
+## ZeRO Configuration
+
+For multi-GPU training with GRPOTrainer, create `configs/zero3.yaml`:
 
 ```yaml
 compute_environment: LOCAL_MACHINE
@@ -196,105 +313,6 @@ deepspeed_config:
   zero_stage: 3
 ```
 
-## Environment-Specific Examples
-
-### Math Training
-
-```python
-import verifiers as vf
-
-dataset = vf.load_example_dataset("gsm8k", split="train")
-eval_dataset = vf.load_example_dataset("gsm8k", split="test")
-
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-Then, give your final numerical answer inside \\boxed{{...}}.
-"""
-
-parser = vf.ThinkParser(extract_fn=vf.extract_boxed_answer)
-
-def correct_answer_reward_func(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response == answer else 0.0
-
-rubric = vf.Rubric(funcs=[
-    correct_answer_reward_func,
-    parser.get_format_reward_func()
-], weights=[1.0, 0.2])
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    eval_dataset=eval_dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-)
-
-# Train
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="gsm8k-training")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
-
-### Tool-Augmented Training
-
-```python
-import verifiers as vf
-from verifiers.tools import python
-
-# Create tool environment
-vf_env = vf.ToolEnv(
-    dataset=dataset,
-    tools=[python],
-    max_steps=3
-)
-
-# Train with tools
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
-args = vf.grpo_defaults(run_name="tool-training")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
-
-## Alternative Training Approaches
-
-### Using Environments as Reward Functions
-
-You can use environments as reward functions in your own training loops:
-
-```python
-# Generate training data with rewards
-results = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
-    n_samples=1000
-)
-
-# Process for training
-processed = vf_env.process_env_results(
-    prompts=results['prompts'],
-    completions=results['completions'],
-    states=results['states'],
-    rewards=results['rewards'],
-    processing_class=tokenizer
-)
-
-# Use in your own training loop
-for batch in processed:
-    # Your custom training logic here
-    pass
-```
-
-### Verifiers for Async FSDP Training
-
-The framework also supports async FSDP environment training through the verifiers package:
-
-```python
-# This is supported by prime-rl for async FSDP environment training
-# See the verifiers package for more details
-```
-
 ## Best Practices
 
 ### 1. Start with Evaluation
@@ -303,23 +321,17 @@ Before training, thoroughly evaluate your environment:
 ```python
 # Test environment with a few examples
 results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
+    client=client,
+    model="gpt-4.1-mini",
     num_examples=10
 )
 print(f"Average reward: {sum(results['rewards']) / len(results['rewards'])}")
 ```
 
-### 2. Use Appropriate Model Sizes
-Start with smaller models for experimentation:
-
-```python
-# Start small
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-
-# Scale up when ready
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
-```
+### 2. Use Appropriate Infrastructure
+- **For large-scale training**: Use prime-rl with FSDP
+- **For LoRA or smaller setups**: Use GRPOTrainer
+- **For evaluation only**: Any OpenAI-compatible client
 
 ### 3. Monitor Training
 Use evaluation datasets and logging:
@@ -339,14 +351,22 @@ For large-scale training, use proper infrastructure:
 # Use vLLM for efficient generation
 vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' --tensor-parallel-size 4
 
-# Use DeepSpeed for efficient training
+# Use DeepSpeed for efficient training (with GRPOTrainer)
 accelerate launch --config-file configs/zero3.yaml training_script.py
 ```
+
+## TODO Sections
+
+TODO: Add documentation for:
+- SFT warmup patterns for improving small-model training efficiency
+- RL + GRPO best practices 
+- Hardware considerations for different model sizes
+- Integration patterns with different RL frameworks
 
 ## Key Gotchas
 
 1. **Environment Testing**: Always test your environment before training
 2. **Reward Scaling**: Ensure rewards are in reasonable ranges (typically 0-1)
 3. **Format Rewards**: Always include format compliance in your rubric
-4. **Infrastructure**: Use appropriate infrastructure for your model size
+4. **Infrastructure Choice**: Use prime-rl for large-scale training, GRPOTrainer for LoRA/smaller setups
 5. **Evaluation**: Regular evaluation helps catch training issues early

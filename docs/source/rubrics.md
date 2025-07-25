@@ -1,454 +1,470 @@
 # Rubrics
 
-Rubrics are the evaluation heart of the verifiers framework. They combine multiple reward functions to assess model outputs from different perspectives, enabling nuanced evaluation beyond simple correctness.
+Rubrics define multi-criteria evaluation for model outputs. They combine multiple reward functions with weights to create comprehensive scoring systems. **For nontrivial environments, users will want to write their own rubrics** to define task-specific evaluation criteria.
 
-## Rubric Architecture
+## Rubric Hierarchy
 
 ```
 Rubric (base class)
-├── ToolRubric      # Evaluates tool usage and execution
-├── JudgeRubric     # LLM-based evaluation
-├── MathRubric      # Mathematical verification (deprecated)
-├── SmolaToolRubric # Smolagents-specific evaluation
-└── RubricGroup     # Combines multiple rubrics
-```
-
-## Core Concepts
-
-### Reward Functions
-
-A reward function evaluates one aspect of model output:
-
-```python
-from typing import Union, List, Dict, Any, Optional
-
-def correctness_reward(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
-    """Check if the answer matches expected."""
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer == answer else 0.0
-
-def reasoning_quality(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-    """Evaluate reasoning clarity and depth."""
-    parsed = parser.parse(completion)
-    steps = parsed.reasoning.count('\n') + 1
-    return min(steps / 5.0, 1.0)  # Up to 5 steps = full score
-```
-
-### Function Signatures
-
-Reward functions can accept any subset of these parameters:
-- `prompt`: Union[str, List[Dict[str, str]]] - The input prompt
-- `completion`: Union[str, List[Dict[str, str]]] - Model's response (string or messages)
-- `answer`: str - Ground truth answer
-- `state`: Dict[str, Any] - Environment state dictionary
-- `task`: str - Task type identifier
-- `**kwargs`: Additional parameters
-
-The framework inspects function signatures and passes only requested parameters:
-
-```python
-from typing import Union, List, Dict, Any
-
-# Minimal signature
-def simple_check(completion: Union[str, List[Dict[str, str]]]) -> float:
-    return 1.0 if "sorry" not in completion.lower() else 0.0
-
-# Full signature  
-def complex_check(
-    prompt: Union[str, List[Dict[str, str]]], 
-    completion: Union[str, List[Dict[str, str]]], 
-    answer: str, 
-    state: Dict[str, Any], 
-    task: str
-) -> float:
-    # Access all available information
-    return evaluate_with_context(prompt, completion, answer, state, task)
-```
-
-### Weighted Aggregation
-
-Rubrics combine multiple rewards with weights:
-
-```python
-from typing import List, Callable
-
-rubric = Rubric(
-    funcs=[correctness, reasoning_quality, format_check],  # List[Callable]
-    weights=[0.7, 0.2, 0.1]  # List[float] - Correctness is most important
-)
-
-# Final reward = 0.7 * correctness + 0.2 * reasoning + 0.1 * format
+├── JudgeRubric     # LLM-judge based evaluation
+├── ToolRubric      # Tool usage tracking
+├── RubricGroup     # Composition of multiple rubrics
+└── Custom Rubrics  # Task-specific evaluation
 ```
 
 ## Basic Rubric Usage
 
-### Creating a Simple Rubric
+The base `Rubric` class combines multiple reward functions:
 
 ```python
-from verifiers.rubrics import Rubric
-from verifiers.parsers import XMLParser
-from typing import Union, List, Dict
+import verifiers as vf
 
-parser = XMLParser(["reasoning", "answer"])
+def correct_answer_func(parser, completion, answer, **kwargs) -> float:
+    """Check if the parsed answer matches the expected answer."""
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
 
-def correct_answer(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer.strip() == answer.strip() else 0.0
+def format_reward_func(parser, completion, **kwargs) -> float:
+    """Check if the completion follows expected format."""
+    return parser.get_format_reward_func()(completion)
 
-def has_reasoning(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-    parsed = parser.parse(completion)
-    return 1.0 if len(parsed.reasoning) > 20 else 0.0
+# Create rubric with multiple criteria
+rubric = vf.Rubric(
+    funcs=[correct_answer_func, format_reward_func],
+    weights=[0.8, 0.2],  # Correctness weighted higher than format
+    parser=parser
+)
 
-rubric = Rubric(
-    funcs=[correct_answer, has_reasoning],
-    weights=[0.8, 0.2],
+# Use in environment
+vf_env = vf.SingleTurnEnv(
+    dataset=dataset,
+    parser=parser,
+    rubric=rubric
+)
+```
+
+## Multi-Criteria Evaluation
+
+Real-world tasks benefit from multiple evaluation criteria:
+
+```python
+import verifiers as vf
+
+def correctness_reward(parser, completion, answer, **kwargs) -> float:
+    """Primary correctness measure."""
+    response = parser.parse_answer(completion) or ''
+    return 1.0 if response.strip() == answer.strip() else 0.0
+
+def reasoning_quality_reward(parser, completion, **kwargs) -> float:
+    """Evaluate quality of reasoning steps."""
+    if hasattr(parser, 'parse') and hasattr(parser.parse(completion), 'reasoning'):
+        reasoning = parser.parse(completion).reasoning or ''
+        # Simple heuristic: longer reasoning with steps gets higher score
+        if 'step' in reasoning.lower() and len(reasoning) > 50:
+            return 1.0
+        elif len(reasoning) > 20:
+            return 0.5
+    return 0.0
+
+def confidence_penalty(parser, completion, **kwargs) -> float:
+    """Penalize overconfident wrong answers."""
+    response = parser.parse_answer(completion) or ''
+    if 'definitely' in response.lower() or 'certainly' in response.lower():
+        # If overconfident but wrong, apply penalty
+        is_correct = response.strip() == kwargs.get('answer', '').strip()
+        return 0.0 if not is_correct else 1.0
+    return 1.0  # No penalty for appropriate confidence
+
+# Combine multiple criteria
+rubric = vf.Rubric(
+    funcs=[
+        correctness_reward,      # Primary objective
+        reasoning_quality_reward, # Reasoning process
+        confidence_penalty,      # Calibration
+        parser.get_format_reward_func()  # Format compliance
+    ],
+    weights=[1.0, 0.3, -0.2, 0.2],  # Note: negative weight for penalty
     parser=parser
 )
 ```
 
-### Scoring Single Outputs
-
-```python
-from typing import Dict
-
-# Synchronous scoring
-score_dict: Dict[str, float] = rubric.score_rollout_sync(
-    prompt="What is 2+2?",
-    completion="<reasoning>2+2=4</reasoning><answer>4</answer>",
-    answer="4",
-    state={}
-)
-
-print(score_dict)
-# {'correct_answer': 1.0, 'has_reasoning': 0.4, 'reward': 0.88}
-```
-
-### Batch Scoring
-
-```python
-from typing import List, Dict
-
-# Score multiple outputs efficiently
-prompts: List[str] = ["What is 2+2?", "What is 3+3?"]
-completions: List[str] = ["<answer>4</answer>", "<answer>6</answer>"]
-answers: List[str] = ["4", "6"]
-states: List[Dict[str, Any]] = [{}, {}]
-
-scores: Dict[str, List[float]] = rubric.score_rollouts(prompts, completions, answers, states)
-print(scores)
-# {'correct_answer': [1.0, 1.0], 'has_reasoning': [0.0, 0.0], 'reward': [0.8, 0.8]}
-```
-
-## Custom Rubric Implementation
-
-**For nontrivial environments, users will want to write their own rubrics** to define task-specific evaluation criteria:
-
-```python
-from verifiers.rubrics import Rubric
-from typing import Union, List, Dict, Any
-import re
-
-class MathRubric(Rubric):
-    """Custom rubric for mathematical reasoning tasks."""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-    def correctness_reward(self, completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
-        """Check if the final answer is correct."""
-        parsed = self.parser.parse(completion)
-        return 1.0 if parsed.answer.strip() == answer.strip() else 0.0
-    
-    def reasoning_steps_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Reward for showing step-by-step reasoning."""
-        parsed = self.parser.parse(completion)
-        steps = parsed.reasoning.count('\n') + 1
-        return min(steps / 5.0, 1.0)  # Up to 5 steps = full score
-    
-    def mathematical_accuracy_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Check for mathematical errors in reasoning."""
-        parsed = self.parser.parse(completion)
-        reasoning = parsed.reasoning.lower()
-        
-        # Check for common math errors
-        errors = 0
-        if '2+2=5' in reasoning:
-            errors += 1
-        if 'divide by zero' in reasoning:
-            errors += 1
-            
-        return max(0.0, 1.0 - errors * 0.5)  # -0.5 per error
-    
-    def format_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Reward for proper formatting."""
-        return self.parser.get_format_reward_func()(completion)
-
-# Use the custom rubric
-math_rubric = MathRubric(
-    funcs=[
-        MathRubric.correctness_reward,
-        MathRubric.reasoning_steps_reward,
-        MathRubric.mathematical_accuracy_reward,
-        MathRubric.format_reward
-    ],
-    weights=[0.5, 0.2, 0.2, 0.1],
-    parser=XMLParser(["reasoning", "answer"])
-)
-```
-
-## Accessing State Information
-
-Reward functions can access detailed state information, including token-level data:
-
-```python
-from typing import Dict, Any, List, Union
-
-def token_aware_reward(
-    completion: Union[str, List[Dict[str, str]]], 
-    state: Dict[str, Any], 
-    **kwargs
-) -> float:
-    """Reward function that uses token-level information."""
-    
-    # Access token information from state
-    if state.get("responses"):
-        last_response = state["responses"][-1]
-        
-        # Check if we have token-level data
-        if hasattr(last_response, 'choices') and last_response.choices:
-            choice = last_response.choices[0]
-            
-            # Access logprobs if available
-            if hasattr(choice, 'logprobs') and choice.logprobs:
-                logprobs = choice.logprobs.content
-                token_ids = choice.logprobs.token_ids
-                
-                # Calculate average log probability
-                if logprobs:
-                    avg_logprob = sum(logprob.logprob for logprob in logprobs) / len(logprobs)
-                    return max(0.0, min(1.0, (avg_logprob + 5.0) / 5.0))  # Normalize to [0,1]
-    
-    # Fallback to basic reward
-    return 1.0 if "correct" in completion.lower() else 0.0
-```
-
-## Specialized Rubrics
-
-### ToolRubric: Evaluating Tool Use
-
-ToolRubric evaluates both correctness and proper tool usage:
-
-```python
-from verifiers.rubrics import ToolRubric
-from verifiers.tools import calculator
-from typing import List, Callable
-
-tool_rubric = ToolRubric(
-    tools=[calculator],  # List[Callable]
-    weights=[0.5, 0.3, 0.2]  # List[float] - correct_answer, tool_execution, format
-)
-
-# Automatically includes:
-# - correct_answer_reward_func: Task-specific correctness
-# - tool_execution_reward_func: Successful tool calls
-# - format_reward_func: Proper XML formatting
-# - Per-tool rewards: calculator_reward, calculator_count, calculator_attempt
-```
-
-Tool-specific rewards:
-- `{tool}_reward`: 1.0 if tool used successfully, 0.0 otherwise
-- `{tool}_count`: Number of successful tool uses
-- `{tool}_attempt`: Number of tool use attempts
+## Built-in Rubric Types
 
 ### JudgeRubric: LLM-Based Evaluation
 
-Use another LLM to evaluate responses:
+Use LLM judges for complex evaluation:
 
 ```python
-from verifiers.rubrics import JudgeRubric
-from verifiers.parsers import XMLParser
-from typing import List
+from openai import OpenAI
 
-judge_rubric = JudgeRubric(
-    judge_models=["gpt-4"],  # List[str]
-    client=openai_client,
-    template="""Evaluate this response for clarity and correctness.
+judge_rubric = vf.JudgeRubric(
+    judge_client=OpenAI(),
+    judge_model="gpt-4.1-mini",
+    judge_prompt="""Given a question and two responses, determine which is better.
 
-Question: {prompt}
-Answer: {completion}
-Expected: {answer}
+Question: {question}
+Response: {response}
+Ground Truth: {answer}
 
-Score from 0-10:""",
-    parser=XMLParser(["score", "feedback"])
+Rate the response on a scale of 0-1 for correctness.""",
+    parallelize_scoring=False  # For API rate limits
 )
+
+# Use in combination with other rewards
+combined_rubric = vf.RubricGroup([
+    main_rubric,
+    judge_rubric
+])
 ```
 
-### RubricGroup: Combining Rubrics
+### ToolRubric: Tool Usage Tracking
 
-Aggregate multiple rubrics for comprehensive evaluation:
+Track and reward tool usage patterns:
 
 ```python
-from typing import List
+from verifiers.utils.tools import python, calculator
 
+tool_rubric = vf.ToolRubric(tools=[python, calculator])
+
+# This automatically creates reward functions for:
+# - total_tool_calls: Total number of tool invocations
+# - python_tool_calls: Number of python tool calls
+# - calculator_tool_calls: Number of calculator tool calls
+
+# Combine with task-specific rubric
+combined_rubric = vf.RubricGroup([
+    task_rubric,    # Task correctness
+    tool_rubric     # Tool usage metrics (weights set to 0.0 by default)
+])
+```
+
+### RubricGroup: Composition
+
+Combine multiple rubrics for complex evaluation:
+
+```python
 # Create specialized rubrics
-format_rubric = Rubric(
-    funcs=[parser.get_format_reward_func()],
-    weights=[1.0]
-)
+math_rubric = vf.Rubric(funcs=[math_correctness_func], weights=[1.0])
+format_rubric = vf.Rubric(funcs=[format_compliance_func], weights=[1.0])  
+tool_rubric = vf.ToolRubric(tools=[python])
 
-content_rubric = Rubric(
-    funcs=[correct_answer, reasoning_quality],
-    weights=[0.7, 0.3]
-)
+# Compose into group
+combined_rubric = vf.RubricGroup([
+    math_rubric,
+    format_rubric,
+    tool_rubric
+])
 
-style_rubric = Rubric(
-    funcs=[clarity_check, conciseness_check],
-    weights=[0.5, 0.5]
-)
-
-# Combine them
-combined = RubricGroup([content_rubric, format_rubric, style_rubric])  # List[Rubric]
-
-# Scores are aggregated across all rubrics
-scores: Dict[str, List[float]] = combined.score_rollouts(prompts, completions, answers, states)
+# The group aggregates all reward functions from constituent rubrics
 ```
 
-## Rubric Integration with Environments
+## Custom Rubric Patterns
 
-Rubrics work seamlessly with environments for both evaluation and training:
-
-```python
-from typing import Dict, Any
-
-# Create environment with custom rubric
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    parser=parser,
-    rubric=custom_rubric
-)
-
-# Evaluate model performance
-results: Dict[str, Any] = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=100
-)
-
-# Generate training data with rewards
-results: Dict[str, Any] = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
-    n_samples=1000
-)
-```
-
-## Advanced Rubric Patterns
-
-### 1. Context-Aware Evaluation
+### Domain-Specific Rubric
 
 ```python
-from typing import Dict, Any, Union, List
+import verifiers as vf
 
-def context_aware_reward(
-    completion: Union[str, List[Dict[str, str]]], 
-    prompt: Union[str, List[Dict[str, str]]], 
-    state: Dict[str, Any], 
-    **kwargs
-) -> float:
-    """Evaluate based on conversation context."""
-    # Check if this is a follow-up question
-    if "previous" in state:
-        # Require reference to previous answer
-        if state["previous"] not in completion:
-            return 0.5  # Partial credit
-    return 1.0
-```
-
-### 2. Multi-Stage Evaluation
-
-```python
-from typing import Union, List, Dict
-
-class MultiStageRubric(Rubric):
-    """Rubric that evaluates different stages of reasoning."""
+class MathRubric(vf.Rubric):
+    """Specialized rubric for mathematical reasoning."""
     
-    def planning_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Evaluate planning phase."""
-        # Extract planning from completion
-        return evaluate_planning(completion)
+    def __init__(self, parser=None, **kwargs):
+        super().__init__(parser=parser, **kwargs)
+        
+        # Add math-specific reward functions
+        self.add_reward_func(self.correct_answer_reward_func, weight=1.0)
+        self.add_reward_func(self.step_by_step_reward_func, weight=0.3)
+        self.add_reward_func(self.calculation_accuracy_func, weight=0.2)
+        self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
     
-    def execution_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Evaluate execution phase."""
-        # Extract execution from completion
-        return evaluate_execution(completion)
+    def correct_answer_reward_func(self, parser, completion, answer, **kwargs) -> float:
+        """Check mathematical correctness."""
+        try:
+            from math_verify import parse, verify
+            response = parser.parse_answer(completion) or ''
+            return 1.0 if verify(parse(response), parse(answer)) else 0.0
+        except:
+            # Fallback to string matching
+            response = parser.parse_answer(completion) or ''
+            return 1.0 if response.strip() == answer.strip() else 0.0
     
-    def verification_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Evaluate verification phase."""
-        # Extract verification from completion
-        return evaluate_verification(completion)
+    def step_by_step_reward_func(self, parser, completion, **kwargs) -> float:
+        """Reward step-by-step reasoning."""
+        text = completion if isinstance(completion, str) else completion[-1]['content']
+        
+        # Count reasoning steps
+        step_indicators = ['step', 'first', 'second', 'next', 'then', 'therefore']
+        step_count = sum(1 for indicator in step_indicators if indicator in text.lower())
+        
+        return min(1.0, step_count / 3.0)  # Normalize to max 1.0
+    
+    def calculation_accuracy_func(self, parser, completion, **kwargs) -> float:
+        """Check intermediate calculations."""
+        text = completion if isinstance(completion, str) else completion[-1]['content']
+        
+        # Simple heuristic: look for basic arithmetic
+        import re
+        calculations = re.findall(r'(\d+\s*[+\-*/]\s*\d+\s*=\s*\d+)', text)
+        
+        correct_calculations = 0
+        for calc in calculations:
+            try:
+                left, right = calc.split('=')
+                if eval(left.strip()) == int(right.strip()):
+                    correct_calculations += 1
+            except:
+                continue
+        
+        return 1.0 if not calculations else correct_calculations / len(calculations)
 ```
 
-### 3. Adaptive Rewards
+### Contextual Reward Functions
 
 ```python
-from typing import List, Union, Dict
+def difficulty_adjusted_reward(parser, completion, answer, info=None, **kwargs) -> float:
+    """Adjust rewards based on problem difficulty."""
+    base_correctness = 1.0 if parser.parse_answer(completion) == answer else 0.0
+    
+    if info and 'difficulty' in info:
+        difficulty = info['difficulty'].lower()
+        if difficulty == 'easy':
+            return base_correctness
+        elif difficulty == 'medium':
+            return base_correctness * 1.2  # Bonus for harder problems
+        elif difficulty == 'hard':
+            return base_correctness * 1.5
+    
+    return base_correctness
 
-class AdaptiveRubric(Rubric):
-    """Rubric that adapts based on model performance."""
+def length_penalty_reward(parser, completion, **kwargs) -> float:
+    """Penalize overly verbose responses."""
+    text = completion if isinstance(completion, str) else completion[-1]['content']
+    length = len(text.split())
+    
+    if length < 10:
+        return 0.5  # Too short
+    elif length < 100:
+        return 1.0  # Good length
+    elif length < 200:
+        return 0.8  # Getting long
+    else:
+        return 0.5  # Too verbose
+```
+
+### Rubric with State Tracking
+
+```python
+class ProgressiveRubric(vf.Rubric):
+    """Rubric that tracks improvement over time."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.performance_history: List[float] = []
+        self.score_history = []
     
-    def adaptive_reward(self, completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-        """Adjust reward based on historical performance."""
-        base_reward = self.base_reward_func(completion, **kwargs)
+    def compute_rewards(self, prompt, completion, answer, task, info, state, **kwargs):
+        """Override to track score history."""
+        rewards = super().compute_rewards(prompt, completion, answer, task, info, state, **kwargs)
         
-        # Adjust based on recent performance
-        if len(self.performance_history) > 10:
-            avg_performance = sum(self.performance_history[-10:]) / 10
-            if avg_performance < 0.5:
-                # Increase reward for struggling models
-                return min(1.0, base_reward * 1.2)
+        # Track total score
+        total_score = sum(r * w for r, w in zip(rewards, self.get_reward_weights()))
+        self.score_history.append(total_score)
         
-        return base_reward
+        # Add improvement bonus
+        if len(self.score_history) > 1:
+            improvement = self.score_history[-1] - self.score_history[-2]
+            if improvement > 0:
+                rewards.append(improvement * 0.1)  # Small improvement bonus
+            else:
+                rewards.append(0.0)
+            
+        return rewards
 ```
 
-## Message Format Handling
+## Reward Function Patterns
 
-Rubrics handle both chat and completion formats:
+### Common Reward Function Signatures
+
+All reward functions should follow this pattern:
 
 ```python
-from typing import Union, List, Dict
-
-def format_agnostic_reward(completion: Union[str, List[Dict[str, str]]], **kwargs) -> float:
-    """Reward function that works with both formats."""
-    
-    if isinstance(completion, str):
-        # Completion format - direct string
-        return evaluate_string(completion)
-    else:
-        # Chat format - extract content from messages
-        content = " ".join(msg["content"] for msg in completion if msg["role"] == "assistant")
-        return evaluate_string(content)
+def reward_function(
+    parser,      # Parser instance
+    completion,  # Model completion (str or List[Dict])
+    answer=None, # Ground truth answer
+    prompt=None, # Original prompt
+    info=None,   # Additional info from dataset
+    state=None,  # Rollout state
+    task=None,   # Task identifier
+    **kwargs     # Additional arguments
+) -> float:
+    """Return a float reward value."""
+    pass
 ```
 
-## Key Gotchas
+### Error-Safe Reward Functions
 
-1. **Parser Integration**: Always include format rewards from your parser
-2. **Weight Balancing**: Ensure weights sum to reasonable values (typically 1.0)
-3. **Error Handling**: Reward functions should handle parsing failures gracefully
-4. **Performance**: Keep reward functions efficient for batch processing
-5. **Custom Rubrics**: For complex tasks, write custom rubrics rather than trying to force built-in ones
-6. **Type Hints**: Use proper type hints for better code clarity and IDE support
-7. **State Access**: Use state information carefully - it accumulates across the entire rollout
+```python
+def safe_reward_function(parser, completion, answer, **kwargs) -> float:
+    """Reward function with comprehensive error handling."""
+    try:
+        # Main reward logic
+        response = parser.parse_answer(completion)
+        if response is None:
+            return 0.0
+        
+        # Compute reward
+        return 1.0 if response.strip() == answer.strip() else 0.0
+        
+    except AttributeError:
+        # Parser doesn't have parse_answer
+        return 0.0
+    except Exception as e:
+        # Log error but don't crash
+        print(f"Reward function error: {e}")
+        return 0.0
+```
+
+### Partial Credit Patterns
+
+```python
+def partial_credit_math(parser, completion, answer, **kwargs) -> float:
+    """Give partial credit for math problems."""
+    response = parser.parse_answer(completion) or ''
+    
+    if response.strip() == answer.strip():
+        return 1.0  # Full credit
+    
+    # Check if final numerical answer is close
+    try:
+        import re
+        response_nums = re.findall(r'-?\d+\.?\d*', response)
+        answer_nums = re.findall(r'-?\d+\.?\d*', answer)
+        
+        if response_nums and answer_nums:
+            resp_val = float(response_nums[-1])
+            ans_val = float(answer_nums[-1])
+            
+            # Partial credit for close answers
+            if abs(resp_val - ans_val) < 0.01:
+                return 0.8
+            elif abs(resp_val - ans_val) < 0.1:
+                return 0.5
+            elif abs(resp_val - ans_val) < 1.0:
+                return 0.2
+    except:
+        pass
+    
+    return 0.0
+```
+
+## Integration with Environments
+
+### Environment Module Integration
+
+```python
+# In environment module (e.g., math_environment.py)
+import verifiers as vf
+
+def load_environment(use_judge=False, **kwargs):
+    dataset = vf.load_example_dataset("math", split="train")
+    parser = vf.XMLParser(fields=["reasoning", "answer"])
+    
+    # Create base rubric
+    rubric = vf.Rubric(
+        funcs=[correct_answer_func, parser.get_format_reward_func()],
+        weights=[1.0, 0.2],
+        parser=parser
+    )
+    
+    # Optionally add judge evaluation
+    if use_judge:
+        judge_rubric = vf.JudgeRubric(judge_model="gpt-4.1-mini")
+        rubric = vf.RubricGroup([rubric, judge_rubric])
+    
+    return vf.SingleTurnEnv(
+        dataset=dataset,
+        parser=parser,
+        rubric=rubric,
+        **kwargs
+    )
+
+# Usage
+vf_env = vf.load_environment("math", use_judge=True)
+```
+
+### Dynamic Rubric Selection
+
+```python
+def get_rubric_for_task(task_type: str, parser):
+    """Select appropriate rubric based on task."""
+    if task_type == "math":
+        return MathRubric(parser=parser)
+    elif task_type == "code":
+        return CodeRubric(parser=parser)
+    elif task_type == "reasoning":
+        return ReasoningRubric(parser=parser)
+    else:
+        return vf.Rubric(
+            funcs=[basic_correctness_func, parser.get_format_reward_func()],
+            weights=[1.0, 0.2],
+            parser=parser
+        )
+```
 
 ## Best Practices
 
-1. **Start Simple**: Begin with basic correctness and format rewards
-2. **Add Complexity**: Gradually add more sophisticated evaluation criteria
-3. **Test Thoroughly**: Test rubrics with various input types
-4. **Document Intent**: Clearly document what each reward function evaluates
-5. **Monitor Performance**: Track how different reward components affect training
-6. **Use Type Hints**: Include proper type hints for better code clarity
-7. **Handle Errors**: Gracefully handle parsing failures and malformed input
+1. **Always Include Format Rewards**: Use `parser.get_format_reward_func()` to ensure proper formatting
+2. **Weight Appropriately**: Primary task objectives should have the highest weights
+3. **Handle Errors Gracefully**: Reward functions should never crash the evaluation
+4. **Use Partial Credit**: Consider giving partial credit for partially correct answers
+5. **Normalize Rewards**: Keep reward values in reasonable ranges (typically 0-1)
+6. **Test Thoroughly**: Test rubrics with various model outputs before training
+7. **Document Criteria**: Clearly document what each reward function measures
+
+## Debugging Rubrics
+
+```python
+def debug_rubric_evaluation():
+    """Debug rubric evaluation with sample data."""
+    rubric = vf.Rubric(
+        funcs=[correctness_func, format_func],
+        weights=[1.0, 0.2],
+        parser=parser
+    )
+    
+    # Test with sample completion
+    sample_completion = "<reasoning>2+2=4</reasoning><answer>4</answer>"
+    sample_answer = "4"
+    
+    # Get individual rewards
+    rewards = rubric.compute_rewards(
+        prompt="What is 2+2?",
+        completion=sample_completion,
+        answer=sample_answer,
+        task="math",
+        info={},
+        state={}
+    )
+    
+    # Print breakdown
+    func_names = rubric.get_reward_func_names()
+    weights = rubric.get_reward_weights()
+    
+    print("Reward Breakdown:")
+    for name, reward, weight in zip(func_names, rewards, weights):
+        print(f"  {name}: {reward:.3f} (weight: {weight})")
+    
+    total = sum(r * w for r, w in zip(rewards, weights))
+    print(f"Total: {total:.3f}")
+
+debug_rubric_evaluation()
+```
+
+## TODO Sections
+
+TODO: Add documentation for:
+- Advanced rubric patterns for different domains
+- Best practices for multi-task rubric design
+- Integration patterns with different training frameworks
+- Performance optimization for rubric evaluation at scale
+- Rubric design patterns for self-supervised learning scenarios
