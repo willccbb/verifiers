@@ -34,7 +34,6 @@ dependencies = [
 all = [
     "ruff",
     "pre-commit",
-    "setuptools",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
@@ -67,11 +66,13 @@ all = [
 dev = [
     "ruff",
     "pre-commit",
-    "setuptools",
     "requests",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "nest-asyncio>=1.6.0",
+    "ipykernel",
+    "ipywidgets",
     "sphinx",
     "myst-parser",
     "sphinx-rtd-theme"
@@ -81,6 +82,7 @@ train = [
     "torch>=2.7.0",
     "transformers",
     "accelerate>=1.4.0",
+    "requests",
     "peft",
     "wandb",
     "rich",
@@ -90,21 +92,11 @@ train = [
     "deepspeed",
 ]
 
-jupyter = [
-    "nest-asyncio>=1.6.0",
-    "ipykernel",
-    "ipywidgets",
-]
-
 envs = [
     "math-verify>=0.8.0",
     "requests",
     "duckduckgo-search",
     "brave-search",
-    "reasoning-gym",
-    "smolagents>=1.15.0",
-    "textarena",
-    "nltk"
 ]
 
 
