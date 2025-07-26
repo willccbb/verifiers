@@ -767,11 +767,14 @@ class GRPOTrainer(Trainer):
         is_generating = is_generating_list[0]
 
         # All processes wait if generation is happening
+        waits = 0
         while is_generating:
             time.sleep(0.5)
-            self.logger.info(
-                "Waiting for background batch generation to complete before weight syncing."
-            )
+            waits += 1
+            if waits % 10 == 0:
+                self.logger.info(
+                    "Waiting for background batch generation to complete before weight syncing."
+                )
 
             # Check again and broadcast
             if self.accelerator.is_main_process:
