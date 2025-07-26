@@ -4,16 +4,18 @@ from typing import (
     Dict,
     List,
     Literal,
-    NotRequired,
     Optional,
-    TypedDict,
     Union,
 )
 
 from openai.types.chat.chat_completion import ChatCompletion
-from openai.types.chat.chat_completion_message_tool_call import (
-    ChatCompletionMessageToolCall,
+from openai.types.chat.chat_completion_message_param import (
+    ChatCompletionMessageParam as ChatMessage,
 )
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,  # noqa: F401
+)
+from openai.types.chat.chat_completion_role import ChatCompletionRole  # noqa: F401
 from openai.types.chat.chat_completion_tool_param import (
     ChatCompletionToolParam,  # noqa: F401
 )
@@ -22,17 +24,11 @@ from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
 )
+from pydantic import BaseModel
 
 # typing aliases
 MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
-
-
-class ChatMessage(TypedDict):
-    role: str
-    content: str
-    tool_calls: NotRequired[List[ChatCompletionMessageToolCall]]
-    tool_call_id: NotRequired[str]
 
 
 Message = Union[str, ChatMessage]
@@ -46,21 +42,25 @@ RewardFunc = Callable[..., float]
 JsonPrimitive = Literal["string", "number", "integer", "boolean", "array", "object"]
 
 
-class GenerateInputs(TypedDict):
+class GenerateInputs(BaseModel):
+    """Pydantic model for generation inputs."""
+
     prompt: List[Messages]
-    answer: Optional[List[str]]
-    info: Optional[List[Dict]]
-    task: Optional[List[str]]
-    completion: Optional[List[Messages]]
+    answer: Optional[List[str]] = None
+    info: Optional[List[Dict]] = None
+    task: Optional[List[str]] = None
+    completion: Optional[List[Messages]] = None
 
 
 GenerateOutputs = Dict[str, Any]
 
 
-class ProcessedOutputs(TypedDict):
-    prompt_ids: List[int]
-    prompt_mask: List[int]
-    completion_ids: List[int]
-    completion_mask: List[int]
-    completion_logprobs: List[float]
+class ProcessedOutputs(BaseModel):
+    """Pydantic model for processed outputs."""
+
+    prompt_ids: List[List[int]]
+    prompt_mask: List[List[int]]
+    completion_ids: List[List[int]]
+    completion_mask: List[List[int]]
+    completion_logprobs: List[List[float]]
     rewards: List[float]

@@ -4,14 +4,15 @@ import queue
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel, Field
+
 from verifiers import GenerateOutputs
+from verifiers.types import ProcessedOutputs
 
 
-@dataclass
-class BatchRequest:
+class BatchRequest(BaseModel):
     """Request for batch generation"""
 
     batch_id: int
@@ -24,20 +25,19 @@ class BatchRequest:
     max_concurrent: int
 
 
-@dataclass
-class BatchResult:
+class BatchResult(BaseModel):
     """Result from batch generation"""
 
     batch_id: int
-    processed_results: Dict[str, Any]
+    processed_results: ProcessedOutputs
     generation_time: float = 0.0
-    all_reward_dict: Dict[str, List[float]] = field(
+    all_reward_dict: Dict[str, List[float]] = Field(
         default_factory=dict
     )  # All reward scores
-    completions: List[Any] = field(
+    completions: List[Any] = Field(
         default_factory=list
     )  # Store completions for logging
-    prompts: List[Any] = field(default_factory=list)  # Store prompts for logging
+    prompts: List[Any] = Field(default_factory=list)  # Store prompts for logging
 
 
 class AsyncBatchGenerator:

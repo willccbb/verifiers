@@ -1042,20 +1042,14 @@ class GRPOTrainer(Trainer):
 
                 # Package raw data for broadcast (not tensors yet)
                 broadcast_data = {
-                    "prompt_ids": processed_results["prompt_ids"],
-                    "prompt_mask": processed_results["prompt_mask"],
-                    "completion_ids": processed_results["completion_ids"],
-                    "completion_mask": processed_results["completion_mask"],
-                    "rewards": processed_results["rewards"],
-                    "all_reward_dict": batch_result.all_reward_dict
-                    if hasattr(batch_result, "all_reward_dict")
-                    else {"reward": processed_results["rewards"]},
-                    "completions": batch_result.completions
-                    if hasattr(batch_result, "completions")
-                    else [],
-                    "prompts": batch_result.prompts
-                    if hasattr(batch_result, "prompts")
-                    else [],
+                    "prompt_ids": processed_results.prompt_ids,
+                    "prompt_mask": processed_results.prompt_mask,
+                    "completion_ids": processed_results.completion_ids,
+                    "completion_mask": processed_results.completion_mask,
+                    "rewards": processed_results.rewards,
+                    "all_reward_dict": batch_result.all_reward_dict,
+                    "completions": batch_result.completions,
+                    "prompts": batch_result.prompts,
                 }
             else:
                 broadcast_data = None
@@ -1348,13 +1342,25 @@ class GRPOTrainer(Trainer):
             metrics["eval_reward_std"] = rewards.std().item()
 
         # Log individual reward function scores
+        non_reward_metric_keys = [
+            "reward",
+            "prompt",
+            "completion",
+            "info",
+            "answer",
+            "state",
+            "task",
+        ]
         for key in eval_results:
-            if key != "reward":
+            if key not in non_reward_metric_keys:
                 reward_values = eval_results[key]
                 if isinstance(reward_values, list):
-                    metrics[f"eval_rewards/{key[7:]}"] = float(np.mean(reward_values))
+                    metrics[f"eval_rewards/{key}"] = float(np.mean(reward_values))
                 else:
-                    metrics[f"eval_rewards/{key[7:]}"] = reward_values.mean().item()
+                    try:
+                        metrics[f"eval_rewards/{key}"] = reward_values.mean().item()
+                    except Exception:
+                        continue
 
         # Compute completion length statistics
         assert isinstance(self.processing_class, PreTrainedTokenizerBase)

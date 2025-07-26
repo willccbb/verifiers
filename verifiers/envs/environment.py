@@ -605,14 +605,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 all_rewards.append(0.0)
             else:
                 all_rewards.append(reward)
-        return {
-            "prompt_ids": all_prompt_ids,
-            "prompt_mask": all_prompt_masks,
-            "completion_ids": all_completion_ids,
-            "completion_mask": all_completion_masks,
-            "completion_logprobs": all_completion_logprobs,
-            "rewards": all_rewards,
-        }
+        return ProcessedOutputs(
+            prompt_ids=all_prompt_ids,
+            prompt_mask=all_prompt_masks,
+            completion_ids=all_completion_ids,
+            completion_mask=all_completion_masks,
+            completion_logprobs=all_completion_logprobs,
+            rewards=all_rewards,
+        )
 
     def parse_chat_completion_logprobs(
         self, chat_completion: ChatCompletion
@@ -815,14 +815,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 all_rewards.append(0)
             else:
                 all_rewards.append(reward)
-        return {
-            "prompt_ids": all_prompt_ids,
-            "prompt_mask": all_prompt_masks,
-            "completion_ids": all_completion_ids,
-            "completion_mask": all_completion_masks,
-            "completion_logprobs": all_completion_logprobs,
-            "rewards": all_rewards,
-        }
+        return ProcessedOutputs(
+            prompt_ids=all_prompt_ids,
+            prompt_mask=all_prompt_masks,
+            completion_ids=all_completion_ids,
+            completion_mask=all_completion_masks,
+            completion_logprobs=all_completion_logprobs,
+            rewards=all_rewards,
+        )
 
     # Evaluation and dataset generation
     def evaluate(
