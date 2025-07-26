@@ -18,7 +18,7 @@ Verifiers is a library of modular components for creating RL environments and tr
 
 For local (CPU) development and evaluation with API models, do:
 ```bash
-uv add verifiers
+uv add verifiers # uv add 'verifiers[dev]' for Jupyter + testing support
 ```
 
 For training on GPUs with `vf.GRPOTrainer`, do:
@@ -176,8 +176,6 @@ If your application requires more fine-grained control than is allowed by `Multi
 
 ## Training
 
-### PRIME-RL
-Unless you require LoRA support, **we now generally recommend** that you use the `prime-rl` trainer, which natively supports Environments created using `verifiers`, is more optimized for performance and scalability via FSDP, includes a broader set of configuration options and user experience features, and has more exhaustively battle-tested defaults. Both trainers support asynchronous rollouts, and use a one-step off-policy delay by default for overlapping training and inference. See the `prime-rl` [docs](https://github.com/PrimeIntellect-ai/prime-rl) for usage instructions.
 
 ### GRPOTrainer
 
@@ -208,7 +206,8 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 1 \
 ### Resource Requirements
 `GRPOTrainer` is optimized for setups with at least 2 GPUs, scaling up to multiple nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be [rented](https://app.primeintellect.ai/dashboard/create-cluster?image=ubuntu_22_cuda_12) for <$1/hr.
 
-
+### PRIME-RL
+If you do not require LoRA support, you may want to use the `prime-rl` trainer, which natively supports Environments created using `verifiers`, is more optimized for performance and scalability via FSDP, includes a broader set of configuration options and user experience features, and has more battle-tested defaults. Both trainers support asynchronous rollouts, and use a one-step off-policy delay by default for overlapping training and inference. See the `prime-rl` [docs](https://github.com/PrimeIntellect-ai/prime-rl) for usage instructions.
 
 ## Further Documentation
 
