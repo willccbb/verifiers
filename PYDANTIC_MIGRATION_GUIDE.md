@@ -92,6 +92,31 @@ msg: ChatMessage = {
 # This remains exactly as before
 ```
 
+## How to Use ProcessedOutputs
+
+When calling methods that return `ProcessedOutputs`:
+
+```python
+# Method returns ProcessedOutputs instance
+results = env.process_completions_vllm(...)
+
+# Option 1: Direct attribute access (recommended)
+prompt_ids = results.prompt_ids
+rewards = results.rewards
+
+# Option 2: Convert to dict if needed for compatibility
+results_dict = results.model_dump()
+prompt_ids = results_dict["prompt_ids"]
+
+# Option 3: Pass individual fields
+some_function(
+    prompt_ids=results.prompt_ids,
+    rewards=results.rewards
+)
+```
+
+For detailed usage patterns, see `PYDANTIC_USAGE_GUIDE.md`.
+
 ## Code Changes Made
 
 1. **verifiers/types.py**: 
@@ -102,6 +127,10 @@ msg: ChatMessage = {
 2. **verifiers/envs/environment.py**:
    - Updated `process_completions()` to return `ProcessedOutputs` instance instead of dict
    - Updated `process_completions_vllm()` to return `ProcessedOutputs` instance instead of dict
+
+3. **verifiers/trainers/async_batch_generator.py**:
+   - Updated to call `.model_dump()` on ProcessedOutputs before storing in BatchResult
+   - This maintains compatibility with downstream code expecting dictionaries
 
 ## Next Steps for Full Migration
 
