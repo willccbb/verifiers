@@ -1,6 +1,7 @@
 import argparse
 import importlib
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,10 +24,9 @@ def main():
     parser.add_argument(
         "--env-args",
         "-a",
-        nargs="*",
-        type=str,
-        default=[],
-        help="Environment module arguments as key=value pairs",
+        type=json.loads,
+        default={},
+        help='Environment module arguments as JSON object (e.g., \'{"key": "value", "num": 42}\')',
     )
     parser.add_argument(
         "--endpoints-path",
@@ -116,6 +116,7 @@ def main():
         help="Name of dataset to save to Hugging Face Hub",
     )
     args = parser.parse_args()
+
     try:
         endpoints_path = Path(args.endpoints_path)
         if endpoints_path.exists():

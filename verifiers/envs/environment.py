@@ -399,29 +399,28 @@ class Environment(ABC):
             **kwargs,
         )
 
-        executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        is_jupyter = False
+        # check if we're in existing event loop (e.g. Jupyter)
         try:
-            loop = asyncio.new_event_loop()
-            loop.set_default_executor(executor)
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-        except RuntimeError:
+            loop = asyncio.get_running_loop()
             import nest_asyncio  # type: ignore
 
             nest_asyncio.apply()
-            is_jupyter = True
-            loop = asyncio.get_running_loop()
+            return loop.run_until_complete(coro)
+        except RuntimeError:
+            pass
+
+        # script case: create new loop and executor
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        loop = asyncio.new_event_loop()
+        try:
             loop.set_default_executor(executor)
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(coro)
         finally:
-            # Critical: shutdown the executor to prevent thread leaks
-            if not is_jupyter:
-                executor.shutdown(wait=False)
+            loop.close()
+            asyncio.set_event_loop(None)
+            # shutdown the executor to prevent thread leaks
+            executor.shutdown(wait=False)
 
     def process_chat_format(
         self,
