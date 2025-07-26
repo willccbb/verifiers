@@ -92,9 +92,9 @@ class MultiTurnEnv(Environment):
                     "content": response_text,
                 }
                 if response.choices[0].message.tool_calls:
-                    response_message["tool_calls"] = response.choices[
+                    response_message["tool_calls"] = response.choices[  # type: ignore
                         0
-                    ].message.tool_calls  # type: ignore
+                    ].message.tool_calls
                 rollout.append(response_message)
                 completion.append(response_message)
             else:

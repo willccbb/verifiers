@@ -309,7 +309,7 @@ class Environment(ABC):
 
     async def a_generate(
         self,
-        inputs: GenerateInputs | Dataset,
+        inputs: GenerateInputs | Dataset | dict,
         client: AsyncOpenAI | None = None,
         model: str | None = None,
         sampling_args: SamplingArgs = {},
@@ -320,6 +320,8 @@ class Environment(ABC):
         """
         Generate completions and rewards for a given set of inputs.
         """
+        if isinstance(inputs, GenerateInputs):
+            inputs = inputs.model_dump()
         # use class-level client and model if not provided
         if client is None:
             assert self.client is not None
