@@ -1,26 +1,21 @@
-# Development Guide
+# Development & Testing
 
 This guide covers development setup, testing, and contributing to the verifiers package.
 
-## Development Setup
+## Setup
 
 ### Prerequisites
-
 - Python 3.11 or 3.12
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/verifiers.git
+# Clone and install for development
+git clone https://github.com/willccbb/verifiers.git
 cd verifiers
-
-# Install in development mode with all dependencies
 uv sync --all-extras
-
-# Or install just test dependencies
-uv add --optional tests
+uv run pre-commit install
 ```
 
 ## Project Structure
@@ -31,16 +26,14 @@ verifiers/
 │   ├── envs/           # Environment classes
 │   ├── parsers/        # Parser classes  
 │   ├── rubrics/        # Rubric classes
-│   ├── tools/          # Tool implementations
-│   └── utils/          # Utility functions
+│   └── utils/          # Utilities
+├── environments/       # Installable environment modules
+├── examples/           # Usage examples
 ├── tests/              # Test suite
-├── docs/               # Documentation
-└── pyproject.toml      # Project configuration
+└── docs/               # Documentation
 ```
 
-## Testing
-
-### Quick Commands
+## Running Tests
 
 ```bash
 # Run all tests
@@ -49,274 +42,179 @@ uv run pytest tests/
 # Run with coverage
 uv run pytest tests/ --cov=verifiers --cov-report=html
 
-# Run specific test category
+# Run specific test file
 uv run pytest tests/test_parsers.py
-uv run pytest tests/test_rubrics.py  
-uv run pytest tests/test_environments.py
 
-# Run with verbose output
-uv run pytest tests/ -v
+# Stop on first failure with verbose output
+uv run pytest tests/ -xvs
+
+# Run tests matching a pattern
+uv run pytest tests/ -k "xml_parser"
 ```
 
-### Test Runner Script
+The test suite includes 130+ tests covering parsers, rubrics, and environments with 90%+ coverage.
 
-```bash
-# Use the convenience script
-python tests/run_tests.py all      # All tests with coverage
-python tests/run_tests.py quick    # Quick run without coverage
-python tests/run_tests.py parsers  # Just parser tests
+## Writing Tests
+
+### Test Structure
+
+```python
+class TestFeature:
+    """Test the feature functionality."""
+    
+    def test_basic_functionality(self):
+        """Test normal operation."""
+        # Arrange
+        feature = Feature()
+        
+        # Act
+        result = feature.process("input")
+        
+        # Assert
+        assert result == "expected"
+    
+    def test_error_handling(self):
+        """Test error cases."""
+        with pytest.raises(ValueError):
+            Feature().process(invalid_input)
 ```
 
-### Coverage Goals
+### Using Mocks
 
-- Maintain **90%+ line coverage**
-- **100% coverage** of public APIs
-- Cover edge cases and error conditions
-
-## Code Style
-
-### Rules (from CLAUDE.md)
-
-- Follow existing code conventions
-- Check imports and dependencies before using libraries
-- Maintain security best practices  
-- No comments unless requested
-- Comments should reflect global behavior and be "timeless"
-- Never reference old vs. new code state in comments
-
-### Linting
-
-```bash
-# Check for linting tools in the project
-uv run ruff check verifiers/
-uv run mypy verifiers/
-```
-
-## Testing Guidelines
-
-### Writing Tests
-
-1. **Descriptive test names**
-   ```python
-   def test_xml_parser_with_missing_fields(self):
-   ```
-
-2. **Test both success and failure cases**
-   ```python
-   def test_valid_input(self):
-       # Test normal operation
-   
-   def test_invalid_input_raises_error(self):
-       # Test error handling
-   ```
-
-3. **Use fixtures effectively**
-   ```python
-   def test_with_mock_client(mock_client):
-       # Use provided fixtures
-   ```
-
-4. **Organize with test classes**
-   ```python
-   class TestXMLParser:
-       """Test XML parsing functionality."""
-   ```
-
-### Test Categories
-
-- **Unit tests** - Test individual methods
-- **Integration tests** - Test component interactions  
-- **Edge case tests** - Test boundary conditions
-- **Async tests** - Test asynchronous operations
-
-### Mock Usage
-
-The test suite provides comprehensive mocks:
+The test suite provides mock OpenAI clients:
 
 ```python
 from tests.mock_openai_client import MockOpenAIClient
 
-# Basic mock client
-client = MockOpenAIClient()
-
-# Math-specific responses
-client = create_mock_math_client()
-
-# Tool-specific responses  
-client = create_mock_tool_client()
+def test_with_mock(mock_client):
+    env = vf.SingleTurnEnv(client=mock_client)
+    # Test without real API calls
 ```
 
-## CI/CD
+### Guidelines
 
-### GitHub Actions
-
-Tests run automatically on:
-- Pull requests
-- Pushes to main branch
-- Scheduled runs
-
-### Local CI Simulation
-
-```bash
-# Run the same checks as CI
-uv run pytest tests/ --cov=verifiers --cov-report=xml
-```
-
-## Documentation
-
-### Building Docs
-
-```bash
-cd docs/
-make html
-```
-
-### Documentation Files
-
-- `docs/source/index.md` - Main documentation
-- `docs/source/testing.md` - Testing guide
-- `docs/source/development.md` - This file
-- `tests/README.md` - Detailed test documentation
+1. **Test both success and failure cases**
+2. **Use descriptive test names** that explain what's being tested
+3. **Leverage existing fixtures** from `conftest.py`
+4. **Group related tests** in test classes
+5. **Keep tests fast** - use mocks instead of real API calls
 
 ## Contributing
 
 ### Workflow
 
-1. **Fork and clone** the repository
-2. **Create a branch** for your feature/fix
-3. **Install dependencies** with `uv add --optional tests`
-4. **Make your changes** following code style guidelines
-5. **Add tests** for new functionality
-6. **Run tests** to ensure everything passes
-7. **Update documentation** if needed
-8. **Submit a pull request**
+1. **Fork** the repository
+2. **Create a feature branch**: `git checkout -b feature-name`
+3. **Make changes** following existing patterns
+4. **Add tests** for new functionality
+5. **Run tests**: `uv run pytest tests/`
+6. **Update docs** if adding/changing public APIs
+7. **Submit PR** with clear description
 
-### Pull Request Checklist
+### Code Style
 
-- [ ] Tests pass: `uv run pytest tests/`
-- [ ] Coverage maintained: Check coverage report
-- [ ] Code follows style guidelines
-- [ ] Documentation updated if needed
+- Follow existing conventions in the codebase
+- Use type hints for function parameters and returns
+- Write docstrings for public functions/classes
+- Keep functions focused and modular
+
+### PR Checklist
+
+- [ ] Tests pass locally
+- [ ] Added tests for new functionality
+- [ ] Updated documentation if needed
 - [ ] No breaking changes (or clearly documented)
 
-### Review Process
+## Common Issues
 
-- All tests must pass
-- Maintain or improve code coverage
-- Follow existing patterns and conventions
-- Clear commit messages and PR description
-
-## Debugging
-
-### Test Debugging
-
-```bash
-# Stop on first failure
-uv run pytest tests/ -x
-
-# Enter debugger on failure
-uv run pytest tests/ --pdb
-
-# Verbose output
-uv run pytest tests/ -vvv
-
-# Run specific failing test
-uv run pytest tests/test_file.py::TestClass::test_method -v
-```
-
-### Common Issues
-
-#### Import Errors
+### Import Errors
 ```bash
 # Ensure package is installed in development mode
 uv pip install -e .
 ```
 
-#### Test Dependencies
+### Async Test Issues
 ```bash
-# Install all test dependencies
-uv add --optional tests
-```
-
-#### Async Issues
-```bash
-# If async tests fail, ensure nest-asyncio is available
+# May need nest-asyncio for some environments
 uv add nest-asyncio
 ```
 
-## Release Process
-
-### Version Bumping
-
-Update version in `pyproject.toml`:
-
-```toml
-[project]
-version = "0.2.0"
+### Test Failures
+```bash
+# Debug specific test
+uv run pytest tests/test_file.py::test_name -vvs --pdb
 ```
 
-### Building
+## Environment Development
+
+### Creating a New Environment Module
 
 ```bash
-# Build distribution packages
-uv build
+# Initialize template
+vf-init my-environment
 
-# Check build contents
-tar -tzf dist/verifiers-*.tar.gz
+# Install locally for testing
+vf-install my-environment
+
+# Test your environment
+vf-eval my-environment -m gpt-4.1-mini -n 5
 ```
 
-### Publishing
+### Environment Module Structure
+
+```python
+# my_environment.py
+import verifiers as vf
+
+def load_environment(**kwargs):
+    """Load the environment."""
+    dataset = vf.load_example_dataset("dataset_name")
+    parser = vf.XMLParser(fields=["reasoning", "answer"])
+    
+    def reward_func(parser, completion, answer, **kwargs):
+        return 1.0 if parser.parse_answer(completion) == answer else 0.0
+    
+    rubric = vf.Rubric(
+        funcs=[reward_func, parser.get_format_reward_func()],
+        weights=[1.0, 0.2],
+        parser=parser
+    )
+    
+    return vf.SingleTurnEnv(
+        dataset=dataset,
+        parser=parser,
+        rubric=rubric,
+        **kwargs
+    )
+```
+
+## Quick Reference
+
+### Essential Commands
 
 ```bash
-# Upload to PyPI (maintainers only)
-uv publish
+# Development setup
+uv sync --all-extras
+
+# Run tests
+uv run pytest tests/                    # All tests
+uv run pytest tests/ -xvs              # Debug mode
+uv run pytest tests/ --cov=verifiers   # With coverage
+
+# Environment tools
+vf-init new-env                        # Create environment
+vf-install new-env                     # Install environment
+vf-eval new-env                        # Test environment
+
+# Documentation
+cd docs && make html                   # Build docs
 ```
 
-## Performance
+### Project Guidelines
 
-### Test Performance
+- **Environments**: Installable modules with `load_environment()` function
+- **Parsers**: Extract structured data from model outputs
+- **Rubrics**: Define multi-criteria evaluation functions
+- **Tests**: Comprehensive coverage with mocks for external dependencies
 
-The test suite is optimized for speed:
-- Uses mocks instead of real API calls
-- Parallel execution where possible
-- Efficient fixtures and setup
-
-Typical benchmark:
-- Full test suite: ~1-2 seconds
-- Individual test file: ~0.1-0.3 seconds
-
-### Profiling
-
-```bash
-# Profile test execution
-uv run pytest tests/ --profile
-
-# Profile specific functionality
-python -m cProfile -o profile.stats script.py
-```
-
-## Troubleshooting
-
-### Common Development Issues
-
-1. **Tests fail after changes**
-   - Run tests individually to isolate issues
-   - Check for import or dependency problems
-   - Verify mock behavior matches expectations
-
-2. **Coverage drops**
-   - Check which lines are not covered
-   - Add tests for missing branches
-   - Verify test fixtures are working
-
-3. **CI failures**
-   - Run same commands locally
-   - Check for environment-specific issues
-   - Verify all dependencies are specified
-
-### Getting Help
-
-- Check existing issues and documentation
-- Review test output carefully
-- Use debugging tools: `--pdb`, `-vvv`, `-x`
-- Ask questions in issues or discussions
+For more details, see the full documentation at [readthedocs](https://verifiers.readthedocs.io).

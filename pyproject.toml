@@ -37,9 +37,6 @@ all = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
-    "sphinx",
-    "myst-parser",
-    "sphinx-rtd-theme",
     "requests",
     "torch>=2.7.0",
     "transformers",
@@ -55,12 +52,6 @@ all = [
     "ipykernel",
     "ipywidgets",
     "math-verify>=0.8.0",
-    "duckduckgo-search",
-    "brave-search",
-    "reasoning-gym",
-    "smolagents>=1.15.0",
-    "textarena",
-    "nltk"
 ]
 
 dev = [
@@ -73,6 +64,9 @@ dev = [
     "nest-asyncio>=1.6.0",
     "ipykernel",
     "ipywidgets",
+]
+
+docs = [
     "sphinx",
     "myst-parser",
     "sphinx-rtd-theme"

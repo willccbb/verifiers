@@ -1,465 +1,390 @@
 # Environments
 
-Environments are the orchestration layer of the verifiers framework. They manage the complete lifecycle of LLM interactions, from dataset processing through rollout generation to reward calculation.
+This guide covers how to create, develop, and use environments in Verifiers.
 
-## Environment Hierarchy
+## Creating a New Environment
 
-```
-Environment (base class)
-├── MultiTurnEnv      # Interactive conversations (base for most environments)
-│   └── SingleTurnEnv # One-shot Q&A tasks (most common entry point)
-├── ToolEnv           # Tool-augmented reasoning  
-├── SmolaToolEnv      # SmolaAgents integration
-├── DoubleCheckEnv    # Multi-stage verification
-├── TextArenaEnv      # Game environments
-└── ReasoningGymEnv   # Reasoning benchmarks
+The recommended approach is to create an environment module - a self-contained package that can be installed and reused.
+
+### Initialize from Template
+
+```bash
+vf-init my-math-env
 ```
 
-## Getting Started: SingleTurnEnv
+This creates:
+```
+environments/my_math_env/
+├── my_math_env.py      # Main implementation
+├── pyproject.toml      # Dependencies and metadata
+└── README.md           # Documentation
+```
 
-**Most users should start with `SingleTurnEnv`** for one-shot question-answer tasks. It's the simplest and most common environment type:
+### Basic Environment Structure
+
+Every environment module must export a `load_environment` function:
 
 ```python
+# my_math_env.py
 import verifiers as vf
-from typing import List, Dict, Any, Union
-from datasets import Dataset
 
-# Load a dataset
-dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
-
-# Create a simple environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Solve the problem step by step.",
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended: use "chat" for most cases
-)
-
-# Evaluate the environment
-results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=10
-)
-```
-
-**SingleTurnEnv is perfect for:**
-- Math problems and reasoning tasks
-- Classification and categorization
-- Translation tasks
-- Any task with clear input-output structure
-
-## MultiTurnEnv: Interactive Conversations
-
-`MultiTurnEnv` is the base class for interactive environments where the model and environment can have multiple exchanges:
-
-```python
-import verifiers as vf
-from typing import List, Dict, Any, Union
-
-class MyMultiTurnEnv(vf.MultiTurnEnv):
-    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> bool:
-        """Define when the conversation should end."""
-        # End after 5 exchanges
-        # state["responses"] contains full LLM response objects with token_ids, logprobs, etc.
-        return len(state['responses']) >= 5
+def load_environment(**kwargs):
+    """Load and configure the environment."""
+    # 1. Load dataset
+    dataset = vf.load_example_dataset("gsm8k", split="train")
     
-    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> tuple[Dict[str, str], Dict[str, Any]]:
-        """Define how the environment responds to the model."""
-        # Simple echo response
-        last_message = messages[-1]['content']
-        return {"role": "user", "content": f"You said: {last_message}"}, state
-
-# Use the custom environment
-vf_env = MyMultiTurnEnv(
-    dataset=dataset,
-    system_prompt="Have a conversation with the user.",
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended format
-)
+    # 2. Configure parser
+    parser = vf.ThinkParser()
+    
+    # 3. Define reward functions
+    def correct_answer(completion, answer, **kwargs):
+        response = parser.parse_answer(completion) or ''
+        return 1.0 if response.strip() == answer.strip() else 0.0
+    
+    # 4. Create rubric
+    rubric = vf.Rubric(
+        funcs=[correct_answer, parser.get_format_reward_func()],
+        weights=[1.0, 0.2]
+    )
+    
+    # 5. Return configured environment
+    return vf.SingleTurnEnv(
+        dataset=dataset,
+        system_prompt="Think step-by-step, then give your answer.",
+        parser=parser,
+        rubric=rubric,
+        **kwargs  # Pass through additional arguments
+    )
 ```
 
-**MultiTurnEnv is ideal for:**
-- Interactive conversations
-- Multi-step reasoning tasks
-- Tool-augmented workflows
-- Games and simulations
+### Adding Dependencies
 
-## Core Environment Features
+Specify environment-specific dependencies in `pyproject.toml`:
 
-### Dataset Management
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-Every environment handles datasets uniformly. Datasets should have either `answer` (str) or `info` (dict) columns:
+[project]
+name = "my_math_env"
+version = "0.1.0"
+dependencies = [
+    "verifiers",
+    "sympy",  # For symbolic math
+]
+```
+
+## Development Workflow
+
+### 1. Install Your Environment
+
+During development, install your environment locally:
+
+```bash
+vf-install my-math-env
+```
+
+This installs the module and its dependencies in your Python environment.
+
+### 2. Test Your Environment
+
+Use the CLI to quickly test:
+
+```bash
+vf-eval my-math-env -m gpt-4.1-mini -n 5
+```
+
+Or test programmatically:
 
 ```python
 import verifiers as vf
-from datasets import Dataset
-from typing import List, Dict, Any
+from openai import OpenAI
 
-# Built-in datasets
-dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
-dataset: Dataset = vf.load_example_dataset("math", "train", n=6000)
+# Load your environment
+env = vf.load_environment("my-math-env")
 
-# Custom datasets - Option 1: Simple format with answer column
-dataset = Dataset.from_list([
-    {"question": "What is 2+2?", "answer": "4"},
-    {"question": "What is 3*5?", "answer": "15"},
-])
-
-# Custom datasets - Option 2: Complex format with info dict
-dataset = Dataset.from_list([
-    {
-        "question": "Solve this math problem: 2+2", 
-        "info": {
-            "answer": "4",
-            "difficulty": "easy",
-            "category": "arithmetic"
-        }
-    },
-    {
-        "question": "What is the capital of France?",
-        "info": {
-            "answer": "Paris",
-            "difficulty": "easy", 
-            "category": "geography"
-        }
-    }
-])
-
-# Environments automatically format prompts based on dataset structure
+# Test with a model
+client = OpenAI()
+results = env.evaluate(client, "gpt-4.1-mini", num_examples=5)
+print(results)
 ```
 
-### Message Types: Chat vs Completion
+### 3. Iterate on Design
 
-The framework supports two message formats:
+Common iterations:
+- Adjust system prompts for better performance
+- Refine parser logic for edge cases
+- Add new reward functions to the rubric
+- Configure dataset filtering or sampling
 
-```python
-# Chat format (recommended for most cases)
-message_type = "chat"
-# Input: List[Dict[str, str]] with "role" and "content" keys
-# Example: [{"role": "user", "content": "What is 2+2?"}]
-# Supports: system prompts, multi-turn conversations
+## Working with Rubrics
 
-# Completion format (for legacy models)
-message_type = "completion"  
-# Input: str (raw text)
-# Example: "What is 2+2?"
-# Limited: no system prompts
-```
+Rubrics are central to defining what makes a good response in your environment. Here's how to use them effectively:
 
-**Recommendation: Use "chat" format in the vast majority of cases** as it's more flexible and supports system prompts.
+### Basic Reward Functions
 
-### Automatic Setup
-
-Environments often provide sensible defaults:
+A reward function takes the full context and returns a score (typically 0.0 to 1.0):
 
 ```python
-# Simple - environment chooses parser/rubric automatically
-vf_env = vf.SingleTurnEnv(dataset=dataset)
-
-# Custom - specify your own components
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Custom instructions...",
-    parser=vf.ThinkParser(),
-    rubric=custom_rubric,
-    message_type="chat"  # Explicitly set recommended format
-)
-```
-
-## SingleTurnEnv: Question-Answer Tasks
-
-Perfect for tasks with a single question-answer exchange:
-
-```python
-import verifiers as vf
-from typing import Union, List, Dict
-
-dataset: Dataset = vf.load_example_dataset("gsm8k", split="train")
-
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-Then give your final answer.
-"""
-
-parser = vf.ThinkParser()
-
-def correct_answer_reward_func(completion: Union[str, List[Dict[str, str]]], answer: str, **kwargs) -> float:
-    response = parser.parse_answer(completion) or ''
+def exact_match(prompt, response, answer, state):
+    """Reward exact matches."""
     return 1.0 if response.strip() == answer.strip() else 0.0
 
-rubric = vf.Rubric(funcs=[
-    correct_answer_reward_func,
-    parser.get_format_reward_func()
-], weights=[1.0, 0.2])
+def partial_credit(prompt, response, answer, state):
+    """Give partial credit for containing key terms."""
+    key_terms = answer.lower().split()
+    found = sum(1 for term in key_terms if term in response.lower())
+    return found / len(key_terms) if key_terms else 0.0
+```
 
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended format
+### Creating Rubrics
+
+Combine multiple reward functions with weights:
+
+```python
+# Single criterion
+rubric = vf.Rubric(funcs=[exact_match])
+
+# Multi-criteria with weights
+rubric = vf.Rubric(
+    funcs=[exact_match, partial_credit, length_penalty],
+    weights=[1.0, 0.5, 0.1]  # Relative importance
 )
 ```
 
-**Use SingleTurnEnv when:**
-- Task has clear input-output structure
-- No external tools needed
-- Examples: Math problems, classification, translation
+### Using Parser Format Rewards
 
-## ToolEnv: Tool-Augmented Reasoning
-
-Enable models to use external tools for complex reasoning:
+Parsers often provide format reward functions:
 
 ```python
-import verifiers as vf
-from verifiers.tools import python
-from typing import List, Callable
+parser = vf.ThinkParser()
 
-TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags, then either call a tool inside <tool>...</tool> tags, or give your final answer inside <answer>...</answer> tags.
-
-You have access to tools to help solve problems. Tools can be called with JSON:
-<tool>
-{{"name": "python", "args": {{"code": "print(2+2)"}}}}
-</tool>
-"""
-
-dataset: Dataset = vf.load_example_dataset("math", split="train")
-
-vf_env = vf.ToolEnv(
-    dataset=dataset,
-    system_prompt=TOOL_PROMPT,
-    tools=[python],  # List[Callable]
-    max_steps=3,
-    message_type="chat"  # Recommended format
+rubric = vf.Rubric(
+    funcs=[
+        correct_answer,
+        parser.get_format_reward_func()  # Rewards proper thinking format
+    ],
+    weights=[1.0, 0.2]
 )
 ```
 
-**Use ToolEnv when:**
-- Task requires computation or external data
-- Reasoning alone is insufficient  
-- Examples: Complex math, data analysis, code execution
+### Stateful Reward Functions
 
-## SmolaToolEnv: SmolaAgents Integration
-
-Advanced tool integration using SmolaAgents:
+Access environment state for complex evaluation:
 
 ```python
-import verifiers as vf
-from verifiers.envs.smola_tool_env import SmolaToolEnv
-from typing import List, Callable
-
-try:    
-    from smolagents.default_tools import PythonInterpreterTool
-    from verifiers.tools.smolagents import CalculatorTool
-except ImportError:
-    raise ImportError("Please install smolagents")
-
-dataset: Dataset = vf.load_example_dataset("math", "train", n=6000)
-
-python_tool: PythonInterpreterTool = PythonInterpreterTool(
-    authorized_imports=["math", "sympy", "numpy"]
-)
-calculator_tool: CalculatorTool = CalculatorTool()
-
-vf_env = SmolaToolEnv(
-    dataset=dataset,
-    system_prompt=MATH_SMOLA_PROMPT_TEMPLATE,
-
-    tools=[python_tool, calculator_tool],  # List[Callable]
-    max_steps=5,
-    message_type="chat"  # Recommended format
-)
+def efficiency_reward(prompt, response, answer, state):
+    """Reward based on number of steps taken."""
+    max_steps = 10
+    steps_taken = state.get("turn", 0)
+    return max(0, (max_steps - steps_taken) / max_steps)
 ```
 
-**Use SmolaToolEnv when:**
-- Need advanced tool capabilities
-- Want SmolaAgents ecosystem integration
-- Examples: Complex scientific computation, multi-step tool workflows
+## Environment Types
 
-## DoubleCheckEnv: Self-Verification
+Choose the appropriate base class for your task:
 
-Multi-stage verification workflow where models check their own work:
+### SingleTurnEnv
+
+For one-shot tasks with clear input/output:
 
 ```python
-import verifiers as vf
-from verifiers.envs.doublecheck_env import DoubleCheckEnv
-
-SIMPLE_PROMPT = """
-You are a helpful assistant. Think step-by-step inside <think>...</think> tags, then give your final answer inside <answer>...</answer> tags.
-"""
-
-dataset: Dataset = vf.load_example_dataset("math", "train", n=1000)
-
-vf_env = DoubleCheckEnv(
-    dataset=dataset,
-    system_prompt=SIMPLE_PROMPT,
-
-    message_type="chat"  # Recommended format
-)
+def load_environment(**kwargs):
+    return vf.SingleTurnEnv(
+        dataset=dataset,
+        system_prompt="Answer the question.",
+        parser=parser,
+        rubric=rubric,
+        **kwargs
+    )
 ```
 
-**Use DoubleCheckEnv when:**
-- Want self-verification workflows
-- Need to improve reliability through checking
-- Examples: Critical reasoning tasks, factual accuracy
+### MultiTurnEnv
 
-## TextArenaEnv: Game Environments
-
-Training on interactive games and simulations:
+For interactive tasks requiring multiple steps:
 
 ```python
-import verifiers as vf
-from verifiers.envs.textarena_env import TextArenaEnv
+class MyGameEnv(vf.MultiTurnEnv):
+    def env_response(self, messages, state):
+        """Define how the environment responds."""
+        last_msg = messages[-1]["content"]
+        
+        if self.is_game_over(state):
+            return "Game over!", {"done": True}
+        
+        # Update game state
+        new_state = self.update_state(state, last_msg)
+        response = self.get_game_feedback(new_state)
+        
+        return response, new_state
 
-vf_env = TextArenaEnv(
-    game="Wordle-v0",
-    num_train_examples=2000, 
-    num_eval_examples=20,
-    message_type="chat"  # Recommended format
-)
+def load_environment(**kwargs):
+    return MyGameEnv(dataset=dataset, **kwargs)
 ```
 
-**Use TextArenaEnv when:**
-- Training on game-based tasks
-- Need interactive environment feedback
+### ToolEnv
 
-## Custom Environments
-
-For nontrivial tasks, you'll want to write your own environment by extending `MultiTurnEnv`:
+For tasks requiring external tools:
 
 ```python
-import verifiers as vf
-from typing import List, Dict, Any, Union
+def calculate(expression: str) -> float:
+    """Calculate a mathematical expression."""
+    return eval(expression)  # Simplified example
 
-class MyCustomEnv(vf.MultiTurnEnv):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Add custom initialization
+def load_environment(**kwargs):
+    return vf.ToolEnv(
+        dataset=dataset,
+        tools=[calculate],  # Automatically converted to tool schemas
+        parser=parser,
+        rubric=rubric,
+        **kwargs
+    )
+```
+
+## Advanced Patterns
+
+### Configurable Environments
+
+Accept parameters to customize behavior:
+
+```python
+def load_environment(
+    dataset_name="gsm8k",
+    num_examples=None,
+    difficulty="all",
+    use_calculator=False,
+    **kwargs
+):
+    # Load dataset with filtering
+    dataset = vf.load_example_dataset(dataset_name)
+    if difficulty != "all":
+        dataset = dataset.filter(lambda x: x["difficulty"] == difficulty)
+    if num_examples:
+        dataset = dataset.select(range(num_examples))
     
-    def is_completed(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> bool:
-        """Define completion criteria."""
-        # Your logic here
-        # state["responses"] contains full LLM response objects
-        return some_condition
+    # Conditionally add tools
+    tools = [calculate] if use_calculator else []
     
-    def env_response(self, messages: List[Dict[str, str]], state: Dict[str, Any], **kwargs) -> tuple[Dict[str, str], Dict[str, Any]]:
-        """Define environment responses."""
+    # Return appropriate environment type
+    if tools:
+        return vf.ToolEnv(dataset=dataset, tools=tools, **kwargs)
+    else:
+        return vf.SingleTurnEnv(dataset=dataset, **kwargs)
+```
+
+### Custom Datasets
+
+Load datasets from various sources:
+
+```python
+def load_environment(dataset_path=None, **kwargs):
+    if dataset_path:
+        # Load from file
+        dataset = Dataset.from_json(dataset_path)
+    else:
+        # Load from Hugging Face
+        dataset = load_dataset("owner/dataset-name", split="train")
+    
+    # Ensure required columns
+    assert "prompt" in dataset.column_names
+    assert "answer" in dataset.column_names or "info" in dataset.column_names
+    
+    return vf.SingleTurnEnv(dataset=dataset, **kwargs)
+```
+
+### Composition with EnvGroup
+
+Combine multiple environments for training on diverse tasks:
+
+```python
+def load_environment(**kwargs):
+    # Environment 1: GSM8K
+    gsm8k_dataset = vf.load_example_dataset("gsm8k")
+    gsm8k_env = vf.SingleTurnEnv(
+        dataset=gsm8k_dataset,
+        parser=parser,
+        rubric=gsm8k_rubric
+    )
+    
+    # Environment 2: MATH
+    math_dataset = vf.load_example_dataset("math")
+    math_env = vf.SingleTurnEnv(
+        dataset=math_dataset,
+        parser=parser,
+        rubric=math_rubric
+    )
+    
+    # Create grouped environment
+    return vf.EnvGroup(
+        envs=[gsm8k_env, math_env],
+        env_names=["gsm8k", "math"]
+    )
+```
+
+**How EnvGroup Works:**
+- **Dataset Concatenation**: Combines datasets from all environments with task labels
+- **Automatic Routing**: Routes rollouts to the correct environment based on the `task` column
+- **Unified Scoring**: Aggregates scores across all environments
+
+This is particularly useful for:
+- Training on multiple task types simultaneously
+- Evaluating general capabilities across domains
+- Creating curriculum learning setups
+
+## Installing from Repository
+
+Install environments from the verifiers repository:
+
+```bash
+# Install specific environment
+vf-install math-python --from-repo
+
+# Install from branch
+vf-install wordle --from-repo -b dev
+
+# List available environments
+vf-install --list
+```
+
+## Best Practices
+
+1. **Start Simple**: Begin with SingleTurnEnv and basic reward functions
+2. **Test Early**: Use `vf-eval` to test your environment during development
+3. **Document Well**: Include clear README with examples and expected behavior
+4. **Handle Errors**: Ensure parsers and reward functions handle edge cases
+5. **Version Dependencies**: Pin specific versions in pyproject.toml
+
+## Troubleshooting
+
+### Common Issues
+
+**Import errors after installation:**
+```bash
+# Reinstall in development mode
+vf-install my-env --dev
+```
+
+**Environment not found:**
+```python
+# Check installed environments
+import verifiers as vf
+print(vf.list_environments())
+```
+
+**Reward function errors:**
+```python
+# Add error handling
+def safe_reward_func(completion, answer, **kwargs):
+    try:
         # Your logic here
-        return response_message, updated_state
-
-# Use your custom environment
-vf_env = MyCustomEnv(
-    dataset=dataset,
-    parser=parser,
-    rubric=rubric,
-    message_type="chat"  # Recommended format
-)
+        return 1.0
+    except Exception as e:
+        print(f"Reward error: {e}")
+        return 0.0
 ```
 
-## Environment Evaluation
+## Next Steps
 
-Environments are powerful evaluation tools, not just for training:
-
-```python
-from typing import Dict, Any
-
-# Evaluate a model on the environment
-results: Dict[str, Any] = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=100,
-    rollouts_per_example=3
-)
-
-# Generate training data
-results: Dict[str, Any] = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
-    n_samples=1000
-)
-
-# Process results for training
-processed = vf_env.process_env_results(
-    prompts=results['prompts'],
-    completions=results['completions'],
-    states=results['states'],
-    rewards=results['rewards'],
-    processing_class=tokenizer
-)
-```
-
-## State Object Details
-
-The `state` object contains rollout information and accumulates LLM responses:
-
-```python
-from typing import Dict, Any, List
-
-# State structure
-state: Dict[str, Any] = {
-    "prompt": List[Dict[str, str]],  # Original prompt
-    "completion": List[Dict[str, str]],  # Model's response
-    "answer": str,  # Ground truth answer
-    "task": str,  # Task identifier
-    "info": Dict[str, Any],  # Additional metadata
-    "responses": List[Any],  # Full LLM response objects with token_ids, logprobs, etc.
-}
-```
-
-The `state["responses"]` list accumulates the complete LLM response objects, which can include:
-- `token_ids`: List of token IDs
-- `logprobs`: Token-level log probabilities  
-- `finish_reason`: Why generation stopped
-- `usage`: Token usage statistics
-
-This allows access to fine-grained information in environment and reward functions.
-
-## Sampling Arguments
-
-Pass vLLM-specific arguments through the `sampling_args` dict:
-
-```python
-from typing import Dict, Any
-
-# vLLM-specific sampling arguments
-sampling_args: Dict[str, Any] = {
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "max_tokens": 2048,
-    "extra_body": {
-        "skip_special_tokens": False,  # vLLM flag
-        "spaces_between_special_tokens": False,  # vLLM flag
-        "logprobs": True,  # Get token-level logprobs
-        "top_logprobs": 5,  # Top-k logprobs per token
-    }
-}
-
-# Use in environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    sampling_args=sampling_args
-)
-
-# Or pass during evaluation
-results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    sampling_args=sampling_args
-)
-```
-
-This allows access to fine-grained information like token IDs and logprobs in environment and reward functions.
-
-## Key Gotchas
-
-1. **Parser Integration**: Always include format rewards from your parser in the rubric
-2. **State Management**: MultiTurnEnv maintains conversation state - be careful about state mutations
-3. **Completion Criteria**: Define clear completion criteria in `is_completed()` to avoid infinite loops
-4. **Error Handling**: Environments should gracefully handle parsing failures and API errors
-5. **Dataset Format**: Ensure your dataset has the expected columns (`question`, `answer`) or pre-format with `prompt` column
-6. **Message Type**: Use "chat" format in the vast majority of cases for better flexibility
-7. **Type Hints**: Use proper type hints for better code clarity and IDE support
+- See [Components](components.md) for advanced rubrics, tools, parsers, and practical examples
+- Explore [Training](training.md) to use your environment for model improvement
