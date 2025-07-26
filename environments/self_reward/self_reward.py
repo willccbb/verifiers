@@ -7,6 +7,7 @@ import verifiers as vf
 
 
 def load_environment(
+    dataset_name: str,
     model_name: str,
     base_url: str = "http://0.0.0.0:8000/v1",
     api_key_var: str = "JUDGE_API_KEY",
@@ -19,7 +20,7 @@ def load_environment(
     )
     vf_env = vf.SingleTurnEnv(
         dataset=load_dataset(
-            "willcb/my-dataset", data_files="train"
+            dataset_name, data_files="train"
         ),  # HF dataset with "question" and "answer" columns
         system_prompt="You are a helpful assistant.",
         rubric=rubric,
