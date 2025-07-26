@@ -4,7 +4,9 @@ from typing import (
     Dict,
     List,
     Literal,
+    NotRequired,
     Optional,
+    TypedDict,
     Union,
 )
 
@@ -27,35 +29,11 @@ MessageType = Literal["chat", "completion"]
 ModelResponse = Union[Completion, ChatCompletion, None]
 
 
-class ChatMessage(BaseModel):
-    """Pydantic model for chat messages.
-    
-    Provides dict-like access for backward compatibility with TypedDict usage.
-    """
+class ChatMessage(TypedDict):
     role: str
     content: str
-    tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
-    tool_call_id: Optional[str] = None
-    
-    # Configuration for Pydantic model
-    model_config = {
-        "extra": "allow",  # Allow extra fields for flexibility
-    }
-    
-    # Allow dict-like access for backward compatibility
-    def __getitem__(self, key):
-        return getattr(self, key)
-    
-    def __setitem__(self, key, value):
-        setattr(self, key, value)
-    
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChatMessage":
-        """Create ChatMessage from dictionary for easy migration."""
-        return cls(**data)
+    tool_calls: NotRequired[List[ChatCompletionMessageToolCall]]
+    tool_call_id: NotRequired[str]
 
 
 Message = Union[str, ChatMessage]

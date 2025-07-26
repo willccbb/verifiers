@@ -1,26 +1,17 @@
 # Pydantic Migration Guide
 
-This document describes the lightweight reworking of the types system to use Pydantic instead of TypedDicts.
+This document describes the lightweight reworking of the types system to use Pydantic instead of TypedDicts where appropriate.
 
 ## Summary of Changes
 
-1. **Converted TypedDicts to Pydantic Models**:
-   - `ChatMessage` (TypedDict) → `ChatMessage` (BaseModel)
+1. **Converted Internal TypedDicts to Pydantic Models**:
    - `GenerateInputs` (TypedDict) → `GenerateInputs` (BaseModel)
    - `ProcessedOutputs` (TypedDict) → `ProcessedOutputs` (BaseModel)
+   - **Note**: `ChatMessage` remains a TypedDict as it's a standard interface expected by downstream methods
 
-2. **Maintained Backward Compatibility**:
-   - Added dict-like access methods (`__getitem__`, `__setitem__`, `get`) to `ChatMessage`
-   - All models allow extra fields with `model_config = {"extra": "allow"}`
-   - Added `from_dict()` class method for easy conversion
-
-3. **Created Utility Functions** (`verifiers/types_utils.py`):
-   - `ensure_chat_message()` - Convert dict or ChatMessage to ChatMessage instance
-   - `ensure_chat_messages()` - Convert list of dicts/ChatMessages to ChatMessages
-   - `create_user_message()` - Convenience function for user messages
-   - `create_assistant_message()` - Convenience function for assistant messages
-   - `create_system_message()` - Convenience function for system messages
-   - `create_tool_message()` - Convenience function for tool messages
+2. **Maintained Compatibility**:
+   - All Pydantic models allow extra fields with `model_config = {"extra": "allow"}`
+   - Optional fields default to None for easy instantiation
 
 ## Benefits of Pydantic Models
 
@@ -32,59 +23,93 @@ This document describes the lightweight reworking of the types system to use Pyd
 
 ## Migration Examples
 
-### Before (TypedDict):
-```python
-# Creating a message
-msg = {"role": "user", "content": "Hello"}
+### Example 1: GenerateInputs
 
-# Type annotation
-def process(msg: ChatMessage):
-    role = msg["role"]
+**Before (TypedDict):**
+```python
+inputs = {
+    "prompt": [messages],
+    "answer": ["expected answer"],
+    "info": [{"key": "value"}]
+}
 ```
 
-### After (Pydantic - Option 1: Direct):
+**After (Pydantic):**
 ```python
-from verifiers.types import ChatMessage
+from verifiers.types import GenerateInputs
 
-# Creating a message
-msg = ChatMessage(role="user", content="Hello")
+inputs = GenerateInputs(
+    prompt=[messages],
+    answer=["expected answer"],
+    info=[{"key": "value"}]
+)
 
-# Dict-like access still works
-role = msg["role"]  # Backward compatible
-role = msg.role     # Pydantic style
+# Access data
+prompts = inputs.prompt  # Direct attribute access
+inputs_dict = inputs.model_dump()  # Convert to dict
 ```
 
-### After (Pydantic - Option 2: Using utilities):
-```python
-from verifiers.types_utils import create_user_message
+### Example 2: ProcessedOutputs
 
-# Using convenience functions
-msg = create_user_message("Hello")
+**Before (TypedDict):**
+```python
+outputs = {
+    "prompt_ids": [1, 2, 3],
+    "prompt_mask": [1, 1, 1],
+    "completion_ids": [4, 5, 6],
+    "completion_mask": [1, 1, 1],
+    "completion_logprobs": [0.1, 0.2, 0.3],
+    "rewards": [1.0, 0.8, 0.9]
+}
 ```
 
-### For Gradual Migration:
+**After (Pydantic):**
 ```python
-from verifiers.types_utils import ensure_chat_message
+from verifiers.types import ProcessedOutputs
 
-# Works with both dict and ChatMessage
-def process(msg):
-    msg = ensure_chat_message(msg)  # Converts if needed
-    # Now msg is guaranteed to be a ChatMessage instance
+outputs = ProcessedOutputs(
+    prompt_ids=[1, 2, 3],
+    prompt_mask=[1, 1, 1],
+    completion_ids=[4, 5, 6],
+    completion_mask=[1, 1, 1],
+    completion_logprobs=[0.1, 0.2, 0.3],
+    rewards=[1.0, 0.8, 0.9]
+)
+
+# Validation happens automatically
+# JSON serialization is built-in
+json_str = outputs.model_dump_json()
+```
+
+### ChatMessage Remains Unchanged
+
+```python
+# ChatMessage stays as TypedDict for compatibility
+msg: ChatMessage = {
+    "role": "user",
+    "content": "Hello"
+}
+# This remains exactly as before
 ```
 
 ## Code Changes Made
 
-1. **verifiers/types.py**: Replaced TypedDict imports with Pydantic BaseModel
-2. **verifiers/types_utils.py**: Added utility functions for migration
-3. **verifiers/envs/multiturn_env.py**: Updated to use Pydantic model instantiation
+1. **verifiers/types.py**: 
+   - Converted `GenerateInputs` and `ProcessedOutputs` from TypedDict to Pydantic BaseModel
+   - `ChatMessage` remains TypedDict to maintain downstream compatibility
+   - Added `model_config = {"extra": "allow"}` to allow additional fields
+
+2. **verifiers/envs/environment.py**:
+   - Updated `process_completions()` to return `ProcessedOutputs` instance instead of dict
+   - Updated `process_completions_vllm()` to return `ProcessedOutputs` instance instead of dict
 
 ## Next Steps for Full Migration
 
-1. **Gradual Updates**: Update code that creates messages as dicts to use `ChatMessage()` directly
-2. **Use Utilities**: Leverage functions from `verifiers.types_utils` for cleaner code
-3. **Validation**: Add Pydantic validators where needed for business logic
-4. **Testing**: Existing tests should continue to work due to backward compatibility
+1. **Update Usage**: When creating `GenerateInputs` or `ProcessedOutputs`, use the Pydantic models directly
+2. **Add Validation**: Leverage Pydantic validators where needed for business logic
+3. **Gradual Adoption**: Convert other internal TypedDicts to Pydantic as appropriate
+4. **Testing**: Existing code using these types may need updates to use model instantiation
 
 ## No Functionality Changes
 
-This migration preserves all existing functionality. The dict-like access ensures that existing code continues to work without modification.
+This migration preserves all existing functionality. ChatMessage remains a TypedDict to maintain compatibility with downstream methods that expect dictionary objects.

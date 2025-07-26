@@ -87,11 +87,14 @@ class MultiTurnEnv(Environment):
                 assert isinstance(completion, list)
                 assert isinstance(response, ChatCompletion)
                 response_text: str = response.choices[0].message.content or ""  # type: ignore
-                response_message = ChatMessage(
-                    role="assistant",
-                    content=response_text,
-                    tool_calls=response.choices[0].message.tool_calls if response.choices[0].message.tool_calls else None
-                )
+                response_message: ChatMessage = {
+                    "role": "assistant",
+                    "content": response_text,
+                }
+                if response.choices[0].message.tool_calls:
+                    response_message["tool_calls"] = response.choices[
+                        0
+                    ].message.tool_calls  # type: ignore
                 rollout.append(response_message)
                 completion.append(response_message)
             else:
