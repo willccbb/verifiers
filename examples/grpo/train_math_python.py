@@ -9,7 +9,8 @@ vf-eval math-python (-m model_name in endpoints.py)
 
 # inference
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-1.7B' \
-    --data-parallel-size 6 --enforce-eager --disable-log-requests
+    --data-parallel-size 6 --enforce-eager --disable-log-requests \
+    --enable-auto-tool-choice --tool-call-parser hermes
 
 # training
 CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
