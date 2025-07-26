@@ -404,9 +404,9 @@ class SmolagentsParser(Parser):
             # Calculate format adherence for each message
             format_scores = []
             for msg in model_messages:
-                content = msg["content"]
-                parsed = self.parse(content)
-                parsed_no_strip = self.parse(content, strip=False)
+                content = msg["content"]  # type: ignore
+                parsed = self.parse(content)  # type: ignore
+                parsed_no_strip = self.parse(content, strip=False)  # type: ignore
 
                 # Check if the message has at least one valid field
                 has_any_field = False
@@ -440,8 +440,8 @@ class SmolagentsParser(Parser):
                             ):
                                 has_correct_spacing = False
                         elif (
-                            content.count(f"<{alt}>") > 0
-                            or content.count(f"</{alt}>") > 0
+                            content.count(f"<{alt}>") > 0  # type: ignore
+                            or content.count(f"</{alt}>") > 0  # type: ignore
                         ):
                             # Tag exists but content wasn't properly parsed
                             total_fields += 1
@@ -460,7 +460,7 @@ class SmolagentsParser(Parser):
                     1
                 ]  # Get alternatives for first field set
                 for alt in first_field_set:
-                    if content.strip().startswith(f"<{alt}>"):
+                    if content.strip().startswith(f"<{alt}>"):  # type: ignore
                         starts_with_any_field = True
                         break
 
@@ -470,7 +470,7 @@ class SmolagentsParser(Parser):
                     1
                 ]  # Get alternatives for last field set
                 for alt in last_field_set:
-                    if content.strip().endswith(f"</{alt}>"):
+                    if content.strip().endswith(f"</{alt}>"):  # type: ignore
                         ends_with_any_field = True
                         break
 

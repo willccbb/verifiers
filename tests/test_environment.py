@@ -1,11 +1,11 @@
 """Tests for the base Environment class."""
 
-import pytest
 from unittest.mock import AsyncMock, Mock
+
+import pytest
 from datasets import Dataset
-from verifiers import Environment
-from verifiers import Parser
-from verifiers import Rubric
+
+from verifiers import Environment, Parser, Rubric
 
 
 # Create a concrete implementation for testing the abstract base class
@@ -314,14 +314,14 @@ class TestEnvironmentBase:
             prompts, completions, states, rewards, mock_tokenizer
         )
 
-        assert "prompt_ids" in results
-        assert "prompt_mask" in results
-        assert "completion_ids" in results
-        assert "completion_mask" in results
-        assert "completion_logprobs" in results
-        assert "rewards" in results
-        assert len(results["rewards"]) == 1
-        assert results["rewards"][0] == 1.0
+        assert hasattr(results, "prompt_ids")
+        assert hasattr(results, "prompt_mask")
+        assert hasattr(results, "completion_ids")
+        assert hasattr(results, "completion_mask")
+        assert hasattr(results, "completion_logprobs")
+        assert hasattr(results, "rewards")
+        assert len(results.rewards) == 1
+        assert results.rewards[0] == 1.0
 
     def test_process_env_results_with_truncation(
         self, mock_openai_client, sample_dataset
@@ -379,10 +379,10 @@ class TestEnvironmentBase:
         )
 
         # Check that total length respects max_seq_len
-        total_len = len(results["prompt_ids"][0]) + len(results["completion_ids"][0])
+        total_len = len(results.prompt_ids[0]) + len(results.completion_ids[0])
         assert total_len <= 8
         # Check that truncated completion is masked
-        assert all(m == 0 for m in results["completion_mask"][0])
+        assert all(m == 0 for m in results.completion_mask[0])
 
     def test_parse_chat_completion_logprobs(self, mock_openai_client, sample_dataset):
         """Test parsing logprobs from a vLLM chat completion."""
