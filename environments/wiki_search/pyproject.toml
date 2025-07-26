@@ -3,6 +3,7 @@ name = "wiki-search"
 version = "0.1.0"
 dependencies = [
     "verifiers>=0.1.2",
+    "chromadb",
 ]
 
 [build-system]
