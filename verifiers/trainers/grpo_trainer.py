@@ -1042,20 +1042,14 @@ class GRPOTrainer(Trainer):
 
                 # Package raw data for broadcast (not tensors yet)
                 broadcast_data = {
-                    "prompt_ids": processed_results["prompt_ids"],
-                    "prompt_mask": processed_results["prompt_mask"],
-                    "completion_ids": processed_results["completion_ids"],
-                    "completion_mask": processed_results["completion_mask"],
-                    "rewards": processed_results["rewards"],
-                    "all_reward_dict": batch_result.all_reward_dict
-                    if hasattr(batch_result, "all_reward_dict")
-                    else {"reward": processed_results["rewards"]},
-                    "completions": batch_result.completions
-                    if hasattr(batch_result, "completions")
-                    else [],
-                    "prompts": batch_result.prompts
-                    if hasattr(batch_result, "prompts")
-                    else [],
+                    "prompt_ids": processed_results.prompt_ids,
+                    "prompt_mask": processed_results.prompt_mask,
+                    "completion_ids": processed_results.completion_ids,
+                    "completion_mask": processed_results.completion_mask,
+                    "rewards": processed_results.rewards,
+                    "all_reward_dict": batch_result.all_reward_dict,
+                    "completions": batch_result.completions,
+                    "prompts": batch_result.prompts,
                 }
             else:
                 broadcast_data = None
