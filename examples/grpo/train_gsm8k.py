@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
     --config-file configs/zero3.yaml examples/grpo/train_gsm8k.py
 """
 
-vf_env = vf.load_environment(env_id="gsm8k")
+vf_env = vf.load_environment(env_id="gsm8k", num_eval_examples=100)
 
 model_name = "willcb/Qwen3-0.6B"
 run_name = "gsm8k-grpo_" + model_name.split("/")[-1].lower()

@@ -28,6 +28,7 @@ classifiers = [
 dependencies = [
     "openai",
     "datasets",
+    "pydantic>=2.11.7",
 ]
 
 [project.optional-dependencies]
