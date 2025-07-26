@@ -42,9 +42,6 @@ def main():
     args = parser.parse_args()
 
     if args.from_repo:
-        env_path = Path(args.path) / args.env.replace("-", "_")
-        subprocess.run(["uv", "pip", "install", "-e", env_path])
-    else:
         env_name = args.env.replace("-", "_")
         env_folder = env_name.replace("_", "-")
         subprocess.run(
@@ -55,6 +52,9 @@ def main():
                 f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{args.branch}#subdirectory=environments/{env_folder}",
             ]
         )
+    else:
+        env_path = Path(args.path) / args.env.replace("-", "_")
+        subprocess.run(["uv", "pip", "install", "-e", env_path])
 
 
 if __name__ == "__main__":
