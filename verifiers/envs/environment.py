@@ -676,7 +676,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         completion_ids: list[int] = []
         completion_mask: list[int] = []
         completion_logprobs: list[float] = []
-        for message, response in zipped:
+        i = 0
+        while i < len(zipped):
+            message, response = zipped[i]
             # assistant case -- use response
             if message["role"] == "assistant":
                 assert response is not None, "Response should not be None"
@@ -687,15 +689,22 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
                 messages_consumed.append(message)
-            # user case -- use message
+                i += 1
+            # user/tool case -- use message
             else:
                 assert message["role"] == "user" or message["role"] == "tool"
+                # Collect all consecutive non-assistant messages
+                consecutive_messages = [message]
+                j = i + 1
+                while j < len(zipped) and zipped[j][0]["role"] != "assistant":
+                    consecutive_messages.append(zipped[j][0])
+                    j += 1
                 token_prefix: list[int] = processing_class.apply_chat_template(
                     conversation=messages_consumed  # type: ignore
                 )
                 token_prefix_with_turn: list[int] = (
                     processing_class.apply_chat_template(
-                        conversation=messages_consumed + [message],  # type: ignore
+                        conversation=messages_consumed + consecutive_messages,  # type: ignore
                     )
                 )
                 assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
@@ -710,7 +719,8 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
-                messages_consumed.append(message)
+                messages_consumed.extend(consecutive_messages)
+                i = j
         return (
             prompt_ids,
             prompt_mask,
