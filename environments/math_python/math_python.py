@@ -20,7 +20,11 @@ Give your final answer inside \\boxed{{}}."""
 
     def correct_answer_reward_func(parser, completion, answer) -> float:
         completion_answer = parser.parse_answer(completion)
-        if verify(parse(completion_answer), parse(answer)):
+        parsed_completion_answer = parse(completion_answer, parsing_timeout=0)
+        parsed_ground_truth_answer = parse(answer, parsing_timeout=0)
+        if verify(
+            parsed_completion_answer, parsed_ground_truth_answer, timeout_seconds=0
+        ):
             return 1.0
         else:
             return 0.0
