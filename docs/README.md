@@ -48,8 +48,7 @@ xdg-open build/html/index.html  # Linux
 - **api_reference.md** - Complete API documentation
 
 ### Development
-- **testing.md** - Testing guide and infrastructure
-- **development.md** - Contributing and development setup
+- **development.md** - Development, testing, and contributing guide
 
 ## Key Design Principles
 

@@ -1,7 +1,7 @@
 from typing import Tuple
 
 from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.types import Message, Messages, MessageType, State
+from verifiers.types import Messages, MessageType, State
 
 
 class SingleTurnEnv(MultiTurnEnv):
@@ -20,6 +20,6 @@ class SingleTurnEnv(MultiTurnEnv):
 
     def env_response(
         self, messages: Messages, state: State, **kwargs
-    ) -> Tuple[Message, State]:
+    ) -> Tuple[Messages, State]:
         # never called in MultiTurnEnv.rollout
-        return {"role": "user", "content": ""}, state
+        return [{"role": "user", "content": ""}], state

@@ -1,6 +1,5 @@
 """Tests for the ThinkParser class."""
 
-import pytest
 from verifiers import ThinkParser
 
 
@@ -10,7 +9,7 @@ class TestThinkParser:
     def test_think_parser_initialization(self, think_parser):
         """Test that ThinkParser initializes correctly."""
         assert isinstance(think_parser, ThinkParser)
-        assert hasattr(think_parser, 'extract_fn')
+        assert hasattr(think_parser, "extract_fn")
 
     def test_think_parser_with_custom_extractor(self, think_parser_with_extractor):
         """Test ThinkParser with custom extraction function."""
@@ -23,7 +22,7 @@ class TestThinkParser:
         I need to consider multiple factors.
         </think>
         The final answer is 42."""
-        
+
         result = think_parser.parse(text)
         assert result == "The final answer is 42."
 
@@ -39,7 +38,7 @@ class TestThinkParser:
         Some intermediate text.
         <think>Second thought</think>
         Final answer here."""
-        
+
         result = think_parser.parse(text)
         assert result == "Final answer here."
 
@@ -49,7 +48,7 @@ class TestThinkParser:
         I need to solve this step by step.
         </think>
         The answer is \\boxed{42}."""
-        
+
         result = think_parser_with_extractor.parse(text)
         assert result == "42"
 
@@ -59,7 +58,7 @@ class TestThinkParser:
         Thinking about the problem.
         </think>
         Just a plain answer."""
-        
+
         result = think_parser_with_extractor.parse(text)
         assert result == "Just a plain answer."
 
@@ -84,7 +83,7 @@ class TestThinkParser:
     def test_format_reward_function_good_format(self, think_parser):
         """Test format reward function with well-formatted content."""
         reward_func = think_parser.get_format_reward_func()
-        
+
         completion = [
             {"role": "assistant", "content": "<think>Let me think</think>Final answer"}
         ]
@@ -94,21 +93,24 @@ class TestThinkParser:
     def test_format_reward_function_bad_format(self, think_parser):
         """Test format reward function with poorly formatted content."""
         reward_func = think_parser.get_format_reward_func()
-        
+
         # Missing think tags
         bad_completion1 = [
             {"role": "assistant", "content": "Just an answer without thinking"}
         ]
         reward1 = reward_func(bad_completion1)
         assert reward1 == 0.0
-        
+
         # Multiple think tags
         bad_completion2 = [
-            {"role": "assistant", "content": "<think>First</think><think>Second</think>Answer"}
+            {
+                "role": "assistant",
+                "content": "<think>First</think><think>Second</think>Answer",
+            }
         ]
         reward2 = reward_func(bad_completion2)
         assert reward2 == 0.0
-        
+
         # No content after think
         bad_completion3 = [
             {"role": "assistant", "content": "<think>Only thinking</think>"}
@@ -119,11 +121,14 @@ class TestThinkParser:
     def test_format_reward_function_mixed_messages(self, think_parser):
         """Test format reward function with mixed good and bad messages."""
         reward_func = think_parser.get_format_reward_func()
-        
+
         completion = [
             {"role": "assistant", "content": "<think>Good thinking</think>Good answer"},
             {"role": "assistant", "content": "Bad answer without thinking"},
-            {"role": "assistant", "content": "<think>More thinking</think>Another good answer"}
+            {
+                "role": "assistant",
+                "content": "<think>More thinking</think>Another good answer",
+            },
         ]
         reward = reward_func(completion)
         assert reward == 2.0 / 3.0  # 2 out of 3 messages are well-formatted
@@ -131,10 +136,8 @@ class TestThinkParser:
     def test_format_reward_function_no_assistant_messages(self, think_parser):
         """Test format reward function with no assistant messages."""
         reward_func = think_parser.get_format_reward_func()
-        
-        completion = [
-            {"role": "user", "content": "Question"}
-        ]
+
+        completion = [{"role": "user", "content": "Question"}]
         # Should handle gracefully, though the implementation might vary
         # This tests robustness of the reward function
         try:
@@ -150,7 +153,10 @@ class TestThinkParser:
         """Test parse_answer method inherited from Parser."""
         completion = [
             {"role": "user", "content": "What is 2+2?"},
-            {"role": "assistant", "content": "<think>Let me calculate</think>The answer is 4"}
+            {
+                "role": "assistant",
+                "content": "<think>Let me calculate</think>The answer is 4",
+            },
         ]
         result = think_parser.parse_answer(completion)
         assert result == "The answer is 4"

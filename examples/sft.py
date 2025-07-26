@@ -1,12 +1,14 @@
 import argparse
+
 from datasets import load_dataset
-from trl import SFTConfig, SFTTrainer
+from trl import SFTConfig, SFTTrainer  # type: ignore
 
 import verifiers as vf
 
 """
 accelerate launch --config-file configs/zero3.yaml --num-processes 8 examples/sft.py
 """
+
 
 def main(args):
     # convenience function for FA2 initialization

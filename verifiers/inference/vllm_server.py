@@ -4,26 +4,47 @@ import signal
 from argparse import Namespace
 from typing import Sequence
 
-import torch
-import uvloop
-from fastapi import Request
-from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
-from vllm.distributed.parallel_state import get_world_group
-from vllm.distributed.utils import StatelessProcessGroup
-from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.engine.async_llm_engine import AsyncLLMEngine
-from vllm.entrypoints.launcher import serve_http
-from vllm.entrypoints.openai.api_server import (
-    build_app,
-    create_server_socket,
-    init_app_state,
-)
-from vllm.entrypoints.openai.cli_args import (
-    make_arg_parser,
-    validate_parsed_serve_args,
-)
-from vllm.usage.usage_lib import UsageContext
-from vllm.utils import FlexibleArgumentParser, set_ulimit
+try:
+    import torch  # type: ignore
+except ImportError:
+    print("torch is not installed. Please install it with `uv pip install torch`.")
+    exit(1)
+
+try:
+    import uvloop  # type: ignore
+except ImportError:
+    print("uvloop is not installed. Please install it with `uv pip install uvloop`.")
+    exit(1)
+
+try:
+    from fastapi import Request  # type: ignore
+except ImportError:
+    print("fastapi is not installed. Please install it with `uv pip install fastapi`.")
+    exit(1)
+
+try:
+    from vllm.distributed.device_communicators.pynccl import (  # type: ignore
+        PyNcclCommunicator,
+    )
+    from vllm.distributed.parallel_state import get_world_group  # type: ignore
+    from vllm.distributed.utils import StatelessProcessGroup  # type: ignore
+    from vllm.engine.arg_utils import AsyncEngineArgs  # type: ignore
+    from vllm.engine.async_llm_engine import AsyncLLMEngine  # type: ignore
+    from vllm.entrypoints.launcher import serve_http  # type: ignore
+    from vllm.entrypoints.openai.api_server import (  # type: ignore
+        build_app,
+        create_server_socket,
+        init_app_state,
+    )
+    from vllm.entrypoints.openai.cli_args import (  # type: ignore
+        make_arg_parser,
+        validate_parsed_serve_args,
+    )
+    from vllm.usage.usage_lib import UsageContext  # type: ignore
+    from vllm.utils import FlexibleArgumentParser, set_ulimit  # type: ignore
+except ImportError:
+    print("vLLM is not installed. Please install it with `pip install vllm`.")
+    exit(1)
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 

@@ -8,7 +8,9 @@ from verifiers.types import ChatMessage, Messages
 
 class XMLParser(Parser):
     def __init__(
-        self, fields: List[Union[str, Tuple[str, ...]]], answer_field: str = "answer"
+        self,
+        fields: List[Union[str, Tuple[str, ...]]],
+        answer_field: str = "answer",
     ):
         """
         Initialize the parser with field definitions.

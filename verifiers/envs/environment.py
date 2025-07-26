@@ -309,7 +309,7 @@ class Environment(ABC):
 
     async def a_generate(
         self,
-        inputs: GenerateInputs | Dataset,
+        inputs: GenerateInputs | Dataset | dict,
         client: AsyncOpenAI | None = None,
         model: str | None = None,
         sampling_args: SamplingArgs = {},
@@ -320,6 +320,8 @@ class Environment(ABC):
         """
         Generate completions and rewards for a given set of inputs.
         """
+        if isinstance(inputs, GenerateInputs):
+            inputs = inputs.model_dump()
         # use class-level client and model if not provided
         if client is None:
             assert self.client is not None
@@ -333,7 +335,13 @@ class Environment(ABC):
         # run rollouts
         if isinstance(inputs, Dataset):
             # get prompt column
-            results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
+            results = {}
+            for col in inputs.column_names:
+                if col == "info":
+                    # handle info column to ensure mutable dicts
+                    results[col] = [dict(item) for item in inputs[col]]
+                else:
+                    results[col] = deepcopy(inputs[col])
         else:
             results = {col: deepcopy(inputs[col]) for col in inputs}
         if "prompt" not in results:
@@ -399,26 +407,27 @@ class Environment(ABC):
             **kwargs,
         )
 
-        executor = ThreadPoolExecutor(max_workers=self.max_workers)
-
+        # check if we're in existing event loop (e.g. Jupyter)
         try:
-            loop = asyncio.new_event_loop()
-            loop.set_default_executor(executor)
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
-                asyncio.set_event_loop(None)
-        except RuntimeError:
+            loop = asyncio.get_running_loop()
             import nest_asyncio  # type: ignore
 
             nest_asyncio.apply()
-            loop = asyncio.get_running_loop()
+            return loop.run_until_complete(coro)
+        except RuntimeError:
+            pass
+
+        # script case: create new loop and executor
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        loop = asyncio.new_event_loop()
+        try:
             loop.set_default_executor(executor)
+            asyncio.set_event_loop(loop)
             return loop.run_until_complete(coro)
         finally:
-            # Critical: shutdown the executor to prevent thread leaks
+            loop.close()
+            asyncio.set_event_loop(None)
+            # shutdown the executor to prevent thread leaks
             executor.shutdown(wait=False)
 
     def process_chat_format(
@@ -598,14 +607,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 all_rewards.append(0.0)
             else:
                 all_rewards.append(reward)
-        return {
-            "prompt_ids": all_prompt_ids,
-            "prompt_mask": all_prompt_masks,
-            "completion_ids": all_completion_ids,
-            "completion_mask": all_completion_masks,
-            "completion_logprobs": all_completion_logprobs,
-            "rewards": all_rewards,
-        }
+        return ProcessedOutputs(
+            prompt_ids=all_prompt_ids,
+            prompt_mask=all_prompt_masks,
+            completion_ids=all_completion_ids,
+            completion_mask=all_completion_masks,
+            completion_logprobs=all_completion_logprobs,
+            rewards=all_rewards,
+        )
 
     def parse_chat_completion_logprobs(
         self, chat_completion: ChatCompletion
@@ -656,14 +665,15 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         Process chat format conversations using incremental prefixes.
         """
         responses = state["responses"]
+        responses_idx = 0
         zipped = []
         for turn in completion:
             if turn["role"] == "assistant":
-                # tuple = turn + popped first response
-                zipped.append((turn, responses.pop(0)))
+                zipped.append((turn, responses[responses_idx]))
+                responses_idx += 1
             else:
                 zipped.append((turn, None))
-        assert len(responses) == 0, "Responses not fully consumed"
+        assert len(responses) == responses_idx, "Responses not fully consumed"
         assert len(zipped) == len(completion), "Length mismatch"
         prompt_ids: list[int] = processing_class.apply_chat_template(
             conversation=prompt,  # type: ignore
@@ -674,7 +684,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         completion_ids: list[int] = []
         completion_mask: list[int] = []
         completion_logprobs: list[float] = []
-        for message, response in zipped:
+        i = 0
+        while i < len(zipped):
+            message, response = zipped[i]
             # assistant case -- use response
             if message["role"] == "assistant":
                 assert response is not None, "Response should not be None"
@@ -685,15 +697,22 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
                 messages_consumed.append(message)
-            # user case -- use message
+                i += 1
+            # user/tool case -- use message
             else:
                 assert message["role"] == "user" or message["role"] == "tool"
+                # Collect all consecutive non-assistant messages
+                consecutive_messages = [message]
+                j = i + 1
+                while j < len(zipped) and zipped[j][0]["role"] != "assistant":
+                    consecutive_messages.append(zipped[j][0])
+                    j += 1
                 token_prefix: list[int] = processing_class.apply_chat_template(
                     conversation=messages_consumed  # type: ignore
                 )
                 token_prefix_with_turn: list[int] = (
                     processing_class.apply_chat_template(
-                        conversation=messages_consumed + [message],  # type: ignore
+                        conversation=messages_consumed + consecutive_messages,  # type: ignore
                     )
                 )
                 assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
@@ -708,7 +727,8 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
                 completion_logprobs.extend(completion_turn_logprobs)
-                messages_consumed.append(message)
+                messages_consumed.extend(consecutive_messages)
+                i = j
         return (
             prompt_ids,
             prompt_mask,
@@ -797,14 +817,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 all_rewards.append(0)
             else:
                 all_rewards.append(reward)
-        return {
-            "prompt_ids": all_prompt_ids,
-            "prompt_mask": all_prompt_masks,
-            "completion_ids": all_completion_ids,
-            "completion_mask": all_completion_masks,
-            "completion_logprobs": all_completion_logprobs,
-            "rewards": all_rewards,
-        }
+        return ProcessedOutputs(
+            prompt_ids=all_prompt_ids,
+            prompt_mask=all_prompt_masks,
+            completion_ids=all_completion_ids,
+            completion_mask=all_completion_masks,
+            completion_logprobs=all_completion_logprobs,
+            rewards=all_rewards,
+        )
 
     # Evaluation and dataset generation
     def evaluate(

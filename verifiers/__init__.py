@@ -1,3 +1,5 @@
+__version__ = "0.1.2"
+
 import logging
 import sys
 from typing import Optional
@@ -29,7 +31,6 @@ from .envs.tool_env import ToolEnv
 from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
 from .parsers.xml_parser import XMLParser
-from .registry import load_environment
 from .rubrics.judge_rubric import JudgeRubric
 from .rubrics.rubric import Rubric
 from .rubrics.rubric_group import RubricGroup
@@ -39,10 +40,11 @@ from .utils.data_utils import (
     extract_hash_answer,
     load_example_dataset,
 )
+from .utils.env_utils import load_environment
 
 # Conditional import based on trl availability
 try:
-    import trl  # noqa: F401
+    import trl  # type: ignore # noqa: F401
 
     from .trainers import (  # noqa: F401
         GRPOConfig,
@@ -59,8 +61,6 @@ try:
     _HAS_TRL = True
 except ImportError:
     _HAS_TRL = False
-
-__version__ = "0.1.1"
 
 
 # Setup default logging configuration

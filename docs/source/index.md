@@ -1,180 +1,86 @@
 # Verifiers Documentation
 
-Welcome to the Verifiers documentation! Verifiers is a flexible framework for reinforcement learning with large language models (LLMs). It provides a modular architecture for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+Welcome to Verifiers! This library provides a flexible framework for creating RL environments with custom multi-turn interaction protocols between LLMs and environments.
 
-## Quick Start
+```{toctree}
+:maxdepth: 2
+:hidden:
 
-Get started with Verifiers in minutes:
-
-```python
-import verifiers as vf
-
-# Load a dataset
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-# Create a simple environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Solve the problem step by step.",
-    parser=vf.ThinkParser(),
-    rubric=vf.Rubric(funcs=[correct_answer_func])
-)
-
-# Evaluate the environment
-results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=10
-)
+overview
+environments
+components
+training
+development
+api_reference
 ```
 
-## Core Concepts
+## What is Verifiers?
 
-Verifiers is built around three fundamental primitives:
+Verifiers enables you to:
+- Define custom interaction protocols between models and environments
+- Build multi-turn conversations, tool-augmented reasoning, and interactive games
+- Create reusable evaluation environments with multi-criteria reward functions
+- Train models using GRPO or integrate with other RL frameworks
 
-### 1. Environments
-Manage the complete interaction flow between models, datasets, and evaluation.
+Key features:
+- **Flexible multi-turn interactions** via `MultiTurnEnv` 
+- **Native tool calling** support with `ToolEnv`
+- **Modular reward functions** through rubrics
+- **Environment modules** for easy sharing and reuse
 
-- **SingleTurnEnv**: One-shot Q&A tasks (most common entry point)
-- **MultiTurnEnv**: Interactive conversations and multi-step reasoning
-- **ToolEnv**: Tasks requiring external tools
-- **Custom Environments**: Write your own by extending base classes
+## Installation
 
-### 2. Parsers
-Extract structured information from model outputs.
+### Basic Installation
 
-- **XMLParser**: Convenience parser for XML-tagged fields
-- **ThinkParser**: Convenience parser for step-by-step reasoning
-- **Custom Parsers**: Write your own for specific output formats
+For evaluation and API model usage:
+```bash
+uv add verifiers
+```
 
-### 3. Rubrics
-Combine multiple reward functions to evaluate model outputs.
+### Training Support
 
-- **Base Rubric**: Combine multiple reward functions with weights
-- **RubricGroup**: Aggregate multiple rubrics
-- **Custom Rubrics**: Write your own for task-specific evaluation
+For GPU training with `vf.GRPOTrainer`:
+```bash
+uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
+```
 
-## Documentation Sections
+### Latest Development Version
+
+To use the latest `main` branch:
+```bash
+uv add verifiers @ git+https://github.com/willccbb/verifiers.git
+```
+
+### Development Setup
+
+For contributing to verifiers:
+```bash
+git clone https://github.com/willccbb/verifiers.git
+cd verifiers
+uv sync --all-extras && uv pip install flash-attn --no-build-isolation
+uv run pre-commit install
+```
+
+### Integration with prime-rl
+
+For large-scale FSDP training, see [prime-rl](https://github.com/PrimeIntellect-ai/prime-rl).
+
+## Documentation
 
 ### Getting Started
-- **[Overview](overview.md)**: Core concepts and architecture
-- **[Examples](examples.md)**: Practical examples from real usage
-- **[Environments](environments.md)**: Environment types and usage
 
-### Core Components
-- **[Parsers](parsers.md)**: Structured output extraction
-- **[Rubrics](rubrics.md)**: Multi-criteria evaluation
-- **[API Reference](api_reference.md)**: Complete API documentation
+**[Overview](overview.md)** — Core concepts and architecture. Start here if you're new to Verifiers to understand how environments orchestrate interactions.
 
-### Advanced Topics
-- **[Tools](tools.md)**: Tool integration and usage
-- **[Testing](testing.md)**: Testing environments and components
-- **[Development](development.md)**: Contributing to the framework
+**[Environments](environments.md)** — Creating custom interaction protocols with `MultiTurnEnv`, `ToolEnv`, and basic rubrics.
 
-## Key Design Principles
+### Advanced Usage
 
-### 1. Start Simple
-Most environments provide sensible defaults:
+**[Components](components.md)** — Advanced rubrics, tools, parsers, with practical examples. Covers judge rubrics, tool design, and complex workflows.
 
-```python
-# Simple - environment chooses defaults
-vf_env = vf.SingleTurnEnv(dataset=dataset)
+**[Training](training.md)** — GRPO training and hyperparameter tuning. Read this when you're ready to train models with your environments.
 
-# Custom - specify your own components
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    parser=vf.ThinkParser(),
-    rubric=custom_rubric
-)
-```
+### Reference
 
-### 2. Multi-Criteria Evaluation
-Real-world tasks have multiple success criteria:
+**[Development](development.md)** — Contributing to verifiers
 
-```python
-rubric = vf.Rubric(funcs=[
-    correct_answer_func,      # Is it right?
-    reasoning_clarity_func,   # Is it well-explained?
-    format_compliance_func    # Does it follow instructions?
-], weights=[0.7, 0.2, 0.1])
-```
-
-### 3. Incremental Complexity
-Start with basic environments and add complexity as needed:
-
-1. Begin with `SingleTurnEnv` for Q&A tasks
-2. Use `MultiTurnEnv` for interactive tasks
-3. Write custom parsers for specific output formats
-4. Write custom rubrics for task-specific evaluation
-
-## Environment Types
-
-Different environment types are designed for different tasks:
-
-| Environment | Use Case | Examples |
-|-------------|----------|----------|
-| **SingleTurnEnv** | One-shot Q&A | Math problems, classification |
-| **MultiTurnEnv** | Interactive conversations | Multi-step reasoning, dialogue |
-| **ToolEnv** | Need external tools | Code execution, calculations |
-| **TextArenaEnv** | Games/simulations | Wordle, strategy games |
-| **Custom** | Specific requirements | Write your own |
-
-## Training and Evaluation
-
-Environments are not just for training - they're also powerful evaluation tools:
-
-```python
-# Evaluate a model
-results = vf_env.evaluate(
-    client=openai_client,
-    model="gpt-4",
-    num_examples=100
-)
-
-# Generate training data
-results = vf_env.generate(
-    client=openai_client,
-    model="gpt-4",
-    n_samples=1000
-)
-```
-
-The framework supports various training approaches:
-- **GRPO Trainer**: Reinforcement learning with the environment
-- **Verifiers**: Async FSDP environment training
-- **Custom Training**: Use environments as reward functions in your own training loops
-
-## Examples
-
-See the [Examples](examples.md) section for complete working examples:
-
-- **GSM8K Math**: Simple Q&A with step-by-step reasoning
-- **Tool-Augmented Math**: Complex math with Python execution
-- **Interactive Wordle**: Game-based training
-- **Multi-Turn Wiki Search**: Interactive search with tools
-- **Custom Parsers**: Writing parsers for specific formats
-- **Custom Rubrics**: Writing rubrics for specific evaluation
-
-## Best Practices
-
-1. **Start Simple**: Begin with `SingleTurnEnv` and basic parsers
-2. **Add Complexity**: Gradually add custom parsers and rubrics
-3. **Include Format Rewards**: Always include `parser.get_format_reward_func()` in rubrics
-4. **Test Thoroughly**: Test environments before large-scale training
-5. **Document Format**: Clearly specify expected output format in system prompts
-6. **Handle Errors**: Ensure parsers and rubrics handle malformed input gracefully
-
-## Getting Help
-
-- **Examples**: Check the [Examples](examples.md) section for working code
-- **API Reference**: See [API Reference](api_reference.md) for complete documentation
-- **Issues**: Report bugs and request features on GitHub
-- **Discussions**: Ask questions and share ideas on GitHub Discussions
-
-## Contributing
-
-We welcome contributions! See the [Development](development.md) guide for:
-- Setting up the development environment
-- Running tests
-- Contributing code
-- Code style guidelines
+**[Type Reference](api_reference.md)** — Understanding data structures
