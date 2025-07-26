@@ -92,9 +92,6 @@ envs = [
     "requests",
     "duckduckgo-search",
     "brave-search",
-    "smolagents",
-    "chromadb",
-    "reasoning_gym",
 ]
 
 
