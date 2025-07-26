@@ -12,9 +12,7 @@ def load_environment(
     **kwargs,
 ):
     dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
-    system_prompt = """\
-In every turn, think step by step inside <think>...</think>.
-Give your final answer inside \\boxed{{}}."""
+    system_prompt = """Use tool calls for all calculations."""
 
     parser = vf.Parser(extract_fn=extract_boxed_answer)
 
