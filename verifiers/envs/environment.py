@@ -400,7 +400,7 @@ class Environment(ABC):
         )
 
         executor = ThreadPoolExecutor(max_workers=self.max_workers)
-
+        is_jupyter = False
         try:
             loop = asyncio.new_event_loop()
             loop.set_default_executor(executor)
@@ -414,12 +414,14 @@ class Environment(ABC):
             import nest_asyncio  # type: ignore
 
             nest_asyncio.apply()
+            is_jupyter = True
             loop = asyncio.get_running_loop()
             loop.set_default_executor(executor)
             return loop.run_until_complete(coro)
         finally:
             # Critical: shutdown the executor to prevent thread leaks
-            executor.shutdown(wait=False)
+            if not is_jupyter:
+                executor.shutdown(wait=False)
 
     def process_chat_format(
         self,
