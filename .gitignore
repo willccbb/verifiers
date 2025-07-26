@@ -42,3 +42,8 @@ scratch/
 verifiers/envs/multibranch_env.py
 wip/
 old/
+
+# Incomplete environments
+environments/aime2024/
+environments/aime2025/
+environments/reverse_text_mini/
