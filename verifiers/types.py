@@ -54,10 +54,6 @@ class GenerateInputs(BaseModel):
     info: Optional[List[Dict]] = None
     task: Optional[List[str]] = None
     completion: Optional[List[Messages]] = None
-    
-    model_config = {
-        "extra": "allow",
-    }
 
 
 GenerateOutputs = Dict[str, Any]
@@ -71,7 +67,3 @@ class ProcessedOutputs(BaseModel):
     completion_mask: List[int]
     completion_logprobs: List[float]
     rewards: List[float]
-    
-    model_config = {
-        "extra": "allow",
-    }

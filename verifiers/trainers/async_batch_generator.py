@@ -297,7 +297,7 @@ class AsyncBatchGenerator:
 
         return BatchResult(
             batch_id=request.batch_id,
-            processed_results=processed_results.model_dump(),
+            processed_results=processed_results,
             all_reward_dict=all_reward_dict,
             completions=env_results["completion"],
             prompts=env_results["prompt"],
