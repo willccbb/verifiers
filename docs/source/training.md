@@ -274,6 +274,6 @@ args.num_completions_to_print = 5  # Sample size to log
 
 ## Next Steps
 
-- See [Examples](examples.md) for complete training scripts
 - Explore [Environments](environments.md) to create custom tasks
-- Review [Advanced](advanced.md) for complex training scenarios
+- Review [Components](components.md) for advanced patterns
+- See the [examples directory](https://github.com/willccbb/verifiers/tree/main/examples) on GitHub for complete training scripts
