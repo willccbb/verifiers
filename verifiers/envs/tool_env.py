@@ -14,10 +14,10 @@ class ToolEnv(MultiTurnEnv):
         error_formatter: Callable[[Exception], str] = lambda e: f"{str(e)}",
         **kwargs,
     ):
-        super().__init__(**kwargs)
         self.tools = tools
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in tools]
         self.tool_map = {tool.__name__: tool for tool in tools}
+        super().__init__(oai_tools=self.oai_tools, **kwargs)
         self.max_turns = max_turns
         self.error_formatter = error_formatter
 

@@ -8,17 +8,20 @@ class ToolRubric(Rubric):
     """Simple rubric that counts tool calls in completion messages."""
 
     def __init__(self, tools: List[Callable] = []):
-        super().__init__()
         self.tools = tools
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in tools]
         self.tool_names = [tool.__name__ for tool in tools]
 
-        self.reward_funcs = [self.total_tool_calls]
-        self.reward_weights = [0.0]
+        # Build initial reward functions and weights
+        reward_funcs = [self.total_tool_calls]
+        reward_weights = [0.0]
 
         for tool_name in self.tool_names:
-            self.reward_funcs.append(self.get_tool_call_count_func(tool_name))
-            self.reward_weights.append(0.0)
+            reward_funcs.append(self.get_tool_call_count_func(tool_name))
+            reward_weights.append(0.0)
+
+        # Pass them to parent class
+        super().__init__(funcs=reward_funcs, weights=reward_weights)
 
     def total_tool_calls(self, completion, **kwargs) -> float:
         """Count the total number of tool calls across all assistant messages."""

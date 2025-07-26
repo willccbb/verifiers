@@ -156,7 +156,8 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
         rollouts_per_example=args.rollouts_per_example,
         max_concurrent_requests=args.max_concurrent_requests,
     )
-    rewards = {k: v for k, v in results.items() if "reward" in k}
+    scoring_func_names = vf_env.rubric.get_reward_func_names() + ["reward"]
+    rewards = {k: v for k, v in results.items() if k in scoring_func_names}
     print("--- Evaluation ---")
     print(f"Environment: {args.env}")
     print(f"Model: {args.model}")
@@ -170,8 +171,9 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
     )
     print("--- All ---")
     print("Rewards:")
-    for k, v in results.items():
-        if "reward" in k:
+    for k in scoring_func_names:
+        if k in results:
+            v = results[k]
             print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
             n = args.num_examples
             r = args.rollouts_per_example

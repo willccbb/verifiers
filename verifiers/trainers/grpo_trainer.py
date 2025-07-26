@@ -1349,7 +1349,7 @@ class GRPOTrainer(Trainer):
 
         # Log individual reward function scores
         for key in eval_results:
-            if key.startswith("reward_") and key != "reward":
+            if key != "reward":
                 reward_values = eval_results[key]
                 if isinstance(reward_values, list):
                     metrics[f"eval_rewards/{key[7:]}"] = float(np.mean(reward_values))

@@ -333,7 +333,13 @@ class Environment(ABC):
         # run rollouts
         if isinstance(inputs, Dataset):
             # get prompt column
-            results = {col: deepcopy(inputs[col]) for col in inputs.column_names}
+            results = {}
+            for col in inputs.column_names:
+                if col == "info":
+                    # handle info column to ensure mutable dicts
+                    results[col] = [dict(item) for item in inputs[col]]
+                else:
+                    results[col] = deepcopy(inputs[col])
         else:
             results = {col: deepcopy(inputs[col]) for col in inputs}
         if "prompt" not in results:

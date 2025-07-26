@@ -4,17 +4,17 @@ ENDPOINTS = {
         "url": "https://some-endpoint.com/v1",
         "key": "SOME_API_KEY",
     },
-    "4.1-mini": {
+    "gpt-4.1-mini": {
         "model": "gpt-4.1-mini",
         "url": "https://api.openai.com/v1",
         "key": "OPENAI_API_KEY",
     },
-    "4.1-nano": {
+    "gpt-4.1-nano": {
         "model": "gpt-4.1-nano",
         "url": "https://api.openai.com/v1",
         "key": "OPENAI_API_KEY",
     },
-    "4.1": {
+    "gpt-4.1": {
         "model": "gpt-4.1",
         "url": "https://api.openai.com/v1",
         "key": "OPENAI_API_KEY",
