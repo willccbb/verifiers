@@ -109,6 +109,21 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
         
+        # Store tools for later use
+        self.oai_tools = None
+        if hasattr(tau2_env, 'get_tools'):
+            tools = tau2_env.get_tools()
+            self.oai_tools = [tool.openai_schema for tool in tools] if tools else []
+        
+
+    def get_dataset_row(self, idx):
+        """Override to inject tools dynamically."""
+        row = super().get_dataset_row(idx)
+        # Replace serialized tools with actual tools
+        if self.oai_tools and "info" in row:
+            row["info"]["oai_tools"] = self.oai_tools
+        return row
+        
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
         # Check max turns
@@ -612,8 +627,8 @@ class Tau2BenchEnv(MultiTurnEnv):
         return tau2_messages
 
 
-def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
-    """Convert tau2 tasks to verifiers dataset format with exact original prompts."""
+def create_tau2_dataset(tau2_tasks: List[Any], domain: str, tau2_env: Any) -> Dataset:
+    """Convert tau2 tasks to verifiers dataset format with exact original prompts and tools."""
     dataset_rows = []
     
     # Load the domain policy
@@ -644,6 +659,11 @@ Try to be helpful and always follow the policy. Always make sure you generate va
 <policy>
 {domain_policy}
 </policy>"""
+    
+    # Get tools from the environment
+    tools = tau2_env.get_tools() if hasattr(tau2_env, 'get_tools') else []
+    # Convert to OpenAI format
+    oai_tools = [tool.openai_schema for tool in tools] if tools else []
     
     for task in tau2_tasks:
         # Extract key information with null checks
@@ -682,7 +702,8 @@ Try to be helpful and always follow the policy. Always make sure you generate va
                 "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
                 "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
                 "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
-                "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {}
+                "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
+                "oai_tools": json.dumps(oai_tools) if oai_tools else "[]"  # Serialize to avoid HF Dataset schema inference
             },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
@@ -847,7 +868,7 @@ def load_environment(
         raise ValueError(f"Unknown domain: {domain}")
         
     # Convert tasks to dataset
-    full_dataset = create_tau2_dataset(tau2_tasks, domain)
+    full_dataset = create_tau2_dataset(tau2_tasks, domain, tau2_env)
     
     # Split into train/eval
     total_tasks = len(full_dataset)
