@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from datasets import load_dataset
 from openai import OpenAI
 import verifiers as vf
@@ -8,7 +9,7 @@ def load_environment(
     judge_model: str = "gpt-4.1-mini",
     judge_base_url: str = "https://api.openai.com/v1",
     judge_api_key_var: str = "OPENAI_API_KEY",
-    max_examples: int = None,
+    max_examples: Optional[int] = None,
     **kwargs
 ) -> vf.Environment:
     """
