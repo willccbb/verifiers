@@ -13,6 +13,7 @@ from datetime import datetime
 
 import verifiers as vf
 from verifiers.envs.multiturn_env import MultiTurnEnv
+from verifiers.types import ChatCompletionMessageToolCall
 from datasets import Dataset
 
 # Import tau2-bench components
@@ -301,14 +302,21 @@ class Tau2BenchEnv(MultiTurnEnv):
         
         for tool_call in tool_calls:
             # Handle both dict and object formats
-            if hasattr(tool_call, 'function'):
+            if isinstance(tool_call, ChatCompletionMessageToolCall):
+                # This is the OpenAI object format
                 tool_name = tool_call.function.name
                 tool_args = json.loads(tool_call.function.arguments)
-                tool_id = tool_call.id if hasattr(tool_call, 'id') else ""
+                tool_id = tool_call.id  # This should never be None for OpenAI objects
+            elif hasattr(tool_call, 'function'):
+                # Generic object format
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_id = getattr(tool_call, 'id', f"tool_call_{tool_name}_{datetime.now().timestamp()}")
             else:
+                # Dictionary format
                 tool_name = tool_call["function"]["name"]
                 tool_args = json.loads(tool_call["function"]["arguments"])
-                tool_id = tool_call.get("id", "")
+                tool_id = tool_call.get("id", f"tool_call_{tool_name}_{datetime.now().timestamp()}")
             
             # Record execution
             exec_record = {
@@ -395,22 +403,29 @@ class Tau2BenchEnv(MultiTurnEnv):
         
         for tool_call in tool_calls:
             # Handle both dict and object formats
-            if hasattr(tool_call, 'function'):
+            if isinstance(tool_call, ChatCompletionMessageToolCall):
+                # This is the OpenAI object format
                 tool_name = tool_call.function.name
                 tool_args = json.loads(tool_call.function.arguments)
-                tool_id = tool_call.id if hasattr(tool_call, 'id') else ""
+                tool_id = tool_call.id
+            elif hasattr(tool_call, 'function'):
+                # Generic object format
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_id = getattr(tool_call, 'id', f"tool_call_{tool_name}_{datetime.now().timestamp()}")
             else:
-                tool_name = tool_call["function"]["name"]
-                tool_args = json.loads(tool_call["function"]["arguments"])
-                tool_id = tool_call.get("id", "")
-            
+                # Dictionary format
+                tool_name = tool_call.get("function", {}).get("name", "")
+                tool_args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                tool_id = tool_call.get("id", f"tool_call_{tool_name}_{datetime.now().timestamp()}")
+                
             # Record execution
             exec_record = {
                 "role": "user",
                 "tool": tool_name,
-                "arguments": tool_args,  # tau2 expects "arguments"
+                "arguments": tool_args,
                 "timestamp": datetime.now().isoformat(),
-                "requestor": "user"  # for evaluation matching
+                "requestor": "user"
             }
             
             try:
@@ -430,7 +445,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                         tool_messages.append({
                             "role": "tool",
                             "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
-                            "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                            "tool_call_id": tool_id,
                             "name": f"user_{tool_name}"  # Prefix to distinguish user tools
                         })
                         continue  # Skip the success handling
@@ -451,7 +466,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                         tool_messages.append({
                             "role": "tool", 
                             "content": content,
-                            "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                            "tool_call_id": tool_id,
                             "name": f"user_{tool_name}"  # Prefix to distinguish user tools
                         })
                 else:
@@ -461,7 +476,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_messages.append({
                         "role": "tool",
                         "content": f"Error: User tool {tool_name} not found", 
-                        "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                        "tool_call_id": tool_id,
                         "name": f"user_{tool_name}"
                     })
                     
@@ -476,7 +491,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                 tool_messages.append({
                     "role": "tool",
                     "content": f"Error executing {tool_name}: {error_msg}",
-                    "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                    "tool_call_id": tool_id,
                     "name": f"user_{tool_name}"
                 })
                 
@@ -868,13 +883,17 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 
             # Convert messages to tau2 format
             tau2_messages = []
+            tool_call_count = 0
+            tool_message_count = 0
+            
             if isinstance(completion, list):
                 # completion is already the full message history
-                for msg in completion:
+                for i, msg in enumerate(completion):
                     if msg["role"] == "assistant":
                         # Convert tool calls to tau2 format if present
                         tau2_tool_calls = None
                         if "tool_calls" in msg and msg["tool_calls"]:
+                            tool_call_count += len(msg["tool_calls"])
                             tau2_tool_calls = []
                             for tc in msg["tool_calls"]:
                                 # Handle both dict and object formats
@@ -942,6 +961,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             tool_calls=tau2_tool_calls
                         )
                     elif msg["role"] == "tool":
+                        tool_message_count += 1
                         tau2_msg = ToolMessage(
                             id=msg.get("tool_call_id", ""),
                             role="tool",
@@ -951,6 +971,11 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                     else:
                         continue
                     tau2_messages.append(tau2_msg)
+                    
+            print(f"\nDEBUG: Converted {len(tau2_messages)} messages")
+            print(f"DEBUG: Found {tool_call_count} tool calls and {tool_message_count} tool messages")
+            if tool_call_count != tool_message_count:
+                print(f"WARNING: Tool call/message count mismatch!")
                     
             simulation = SimulationRun(
                 id=f"verifiers_eval_{task_id}_{datetime.now().isoformat()}",
@@ -969,28 +994,63 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 metadata={}
             )
             
-            # Debug logging for evaluation (moved before evaluation call)
-            print(f"\n{'='*80}")
-            print(f"EVALUATION DEBUG for task {task_id}")
-            print(f"{'='*80}")
-            
-            # Log expected actions
+            # Check actions
+            expected_actions = []
             if task.evaluation_criteria and task.evaluation_criteria.actions:
-                print(f"\nEXPECTED ACTIONS ({len(task.evaluation_criteria.actions)}):")
-                for i, action in enumerate(task.evaluation_criteria.actions):
-                    print(f"  {i+1}. {action.requestor}: {action.name}({action.arguments})")
-                    if action.compare_args:
-                        print(f"     Compare only: {action.compare_args}")
+                expected_actions = task.evaluation_criteria.actions
+                
+            # Print detailed comparison
+            print(f"\n================================================================================")
+            print(f"EVALUATION DEBUG for task {task_id}")
+            print(f"================================================================================")
             
-            # Log actual tool calls from messages
+            print(f"\nEXPECTED ACTIONS ({len(expected_actions)}):")
+            for i, action in enumerate(expected_actions, 1):
+                print(f"  {i}. {action.requestor}: {action.name}({action.arguments})")
+                if action.compare_args:
+                    print(f"     Compare only: {action.compare_args}")
+                    
             print(f"\nACTUAL TOOL CALLS:")
-            tool_call_count = 0
-            for msg in tau2_messages:
-                if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        tool_call_count += 1
-                        print(f"  {tool_call_count}. {msg.role}: {tc.name}({tc.arguments})")
-            
+            actual_count = 0
+            for exec_record in state.get("tool_executions", []):
+                actual_count += 1
+                print(f"  {actual_count}. {exec_record.get('requestor', 'unknown')}: {exec_record['tool']}({exec_record['arguments']})")
+                
+            # Try to match each expected action
+            print(f"\nDETAILED ACTION MATCHING:")
+            for action in expected_actions:
+                print(f"\nLooking for: {action.name} by {action.requestor}")
+                print(f"  Expected args: {action.arguments}")
+                if action.compare_args:
+                    print(f"  Compare only: {action.compare_args}")
+                    
+                found = False
+                for exec_record in state.get("tool_executions", []):
+                    if exec_record['tool'] == action.name and exec_record.get('requestor', 'assistant') == action.requestor:
+                        # Check arguments
+                        if action.compare_args:
+                            # Only compare specified args
+                            expected_subset = {k: v for k, v in action.arguments.items() if k in action.compare_args}
+                            actual_subset = {k: v for k, v in exec_record['arguments'].items() if k in action.compare_args}
+                            if expected_subset == actual_subset:
+                                found = True
+                                print(f"  ✓ MATCHED with {exec_record['tool']} call")
+                                break
+                            else:
+                                print(f"  ✗ Args mismatch with {exec_record['tool']}: expected {expected_subset}, got {actual_subset}")
+                        else:
+                            # Compare all args
+                            if exec_record['arguments'] == action.arguments:
+                                found = True
+                                print(f"  ✓ MATCHED with {exec_record['tool']} call")
+                                break
+                            else:
+                                print(f"  ✗ Args mismatch with {exec_record['tool']}: expected {action.arguments}, got {exec_record['arguments']}")
+                                
+                if not found:
+                    print(f"  ✗ NOT FOUND")
+                    
+            # Also run the tau2 evaluation
             print(f"\nRunning tau2 evaluation...")
             
             # Use tau2-bench's official evaluation
