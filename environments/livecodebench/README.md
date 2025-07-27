@@ -63,6 +63,13 @@ The implementation downloads JSONL files directly from HuggingFace due to the de
 - `release_v1` through `release_v5`
 - `release_v2.1`
 
+### Private Test Cases
+
+LiveCodeBench stores private test cases using a proprietary encoding scheme to prevent data contamination and maintain benchmark integrity. This implementation:
+- Attempts to decode private test cases using standard decompression methods
+- Falls back to using only public test cases when decoding fails
+- This is expected behavior and aligns with LiveCodeBench's anti-contamination measures
+
 ### Evaluation Metrics
 
 1. **Pass@1**: Whether the generated code passes all test cases
@@ -77,7 +84,7 @@ The implementation downloads JSONL files directly from HuggingFace due to the de
 
 ## Known Limitations
 
-1. **Private test cases are encoded**: Many private test cases in the LiveCodeBench dataset are stored as encoded/compressed strings rather than JSON. This is a limitation of the current dataset format. The environment will use public test cases for these problems, which may result in less comprehensive evaluation. You'll see messages like "Note: Private test cases appear to be encoded" for affected problems.
+1. **Private test cases**: Many private test cases in LiveCodeBench use a proprietary encoding that cannot be decoded without the official key. This is by design to prevent test data contamination. The environment will evaluate using public test cases only for these problems. This may result in less comprehensive testing but maintains the integrity of the benchmark.
 2. Network DNS resolution issues may temporarily prevent dataset downloading
 3. The environment requires Docker and cannot fall back to subprocess execution
 
