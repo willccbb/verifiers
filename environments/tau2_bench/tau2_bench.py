@@ -531,25 +531,20 @@ class Tau2BenchEnv(MultiTurnEnv):
                             "arguments": args_dict
                         })
                 
-                # Only include tool_calls if there are any
-                if tau2_tool_calls:
-                    tau2_msg = AssistantMessage(
-                        role="assistant",
-                        content=msg.get("content", ""),
-                        tool_calls=tau2_tool_calls,
-                        cost=0.0
-                    )
-                else:
-                    tau2_msg = AssistantMessage(
-                        role="assistant",
-                        content=msg.get("content", ""),
-                        cost=0.0
-                    )
+                # Set tool_calls to None if empty (critical for tau2 compatibility)
+                tau2_msg = AssistantMessage(
+                    role="assistant",
+                    content=msg.get("content", ""),
+                    tool_calls=tau2_tool_calls if tau2_tool_calls else None,
+                    cost=0.0
+                )
             elif msg["role"] == "user":
+                # Handle user tool calls (for telecom domain)
+                user_tool_calls = msg.get("tool_calls", [])
                 tau2_msg = UserMessage(
                     role="user",
                     content=msg.get("content", ""),
-                    tool_calls=msg.get("tool_calls", [])
+                    tool_calls=user_tool_calls if user_tool_calls else None
                 )
             elif msg["role"] == "tool":
                 tau2_msg = ToolMessage(
