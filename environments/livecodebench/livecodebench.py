@@ -404,11 +404,8 @@ def load_environment(
     parser = vf.Parser(extract_fn=extract_code)
     
     # Define rubric functions
-    def correctness_score(completion, info, parser=None, **kwargs) -> float:
+    def correctness_score(completion, info, parser, **kwargs) -> float:
         """Evaluate code correctness using test cases"""
-        if parser is None:
-            parser = kwargs.get('parser', vf.Parser(extract_fn=extract_code))
-            
         code = parser.parse_answer(completion)
         
         if not code or not info.get('test_cases'):
@@ -443,11 +440,8 @@ def load_environment(
         
         return passed / total if total > 0 else 0.0
     
-    def execution_success(completion, info, parser=None, **kwargs) -> float:
+    def execution_success(completion, info, parser, **kwargs) -> float:
         """Check if code executes without errors"""
-        if parser is None:
-            parser = kwargs.get('parser', vf.Parser(extract_fn=extract_code))
-            
         code = parser.parse_answer(completion)
         
         if not code:
