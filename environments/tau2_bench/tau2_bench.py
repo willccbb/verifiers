@@ -1,21 +1,17 @@
 """
-Main τ²-bench environment implementation for verifiers.
+τ²-bench implementation for verifiers.
 Supports full dual-control (both agent and user can execute tools).
+All tool execution and user simulation happens within env_response.
 """
 
 import json
-from typing import List, Tuple, Dict, Any, Optional, Union
+from typing import List, Tuple, Dict, Any, Optional
 from copy import deepcopy
 from datetime import datetime
-from pathlib import Path
 
 import verifiers as vf
 from verifiers.envs import MultiTurnEnv
 from datasets import Dataset
-
-# Import local modules
-from .orchestrator import Tau2Orchestrator
-from .tool_adapter import extract_tool_definitions_from_tau2, ToolExecutor
 
 # Import tau2-bench components
 try:
@@ -26,21 +22,23 @@ try:
     from tau2.domains.telecom.environment import get_environment as get_telecom_env
     from tau2.domains.telecom.environment import get_tasks as get_telecom_tasks
     from tau2.data_model.message import (
-        AssistantMessage, UserMessage, ToolMessage, 
-        MultiToolMessage, ToolCall, Message as Tau2Message
+        AssistantMessage, UserMessage, ToolMessage, Message as Tau2Message
     )
     from tau2.user.user_simulator import UserSimulator
-    from tau2.user.dummy_user import DummyUser
+    from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
     TAU2_AVAILABLE = True
 except ImportError:
     TAU2_AVAILABLE = False
+    STOP = "STOP"
+    TRANSFER = "TRANSFER"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
     print("Warning: tau2-bench not installed. Please install it to use this environment.")
 
 
 class Tau2BenchEnv(MultiTurnEnv):
     """
     τ²-bench environment supporting dual-control scenarios.
-    Both agent and user can execute tools.
+    Both agent and user can execute tools within env_response.
     """
     
     def __init__(self,
@@ -62,9 +60,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Create task lookup
         self.task_lookup = {task['id']: task for task in tau2_tasks}
         
-        # Extract tool definitions
-        self.agent_tools, self.user_tools = extract_tool_definitions_from_tau2(tau2_env)
-        
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
         # Check max turns
@@ -78,23 +73,21 @@ class Tau2BenchEnv(MultiTurnEnv):
             last_msg = messages[-1]
             if last_msg["role"] == "user":
                 content = last_msg.get("content", "").lower()
-                if "stop" in content or "transfer" in content:
+                if any(word in content for word in ["stop", "transfer", "goodbye", "bye"]):
                     state["termination_reason"] = "user_stop"
                     return True
                     
-        # Check if task goal is achieved using orchestrator
-        if "orchestrator" in state:
-            orchestrator = state["orchestrator"]
-            if orchestrator.check_task_completion(state):
-                state["termination_reason"] = "goal_achieved"
-                return True
+        # Check if task goal is achieved
+        if self._check_task_completion(state):
+            state["termination_reason"] = "goal_achieved"
+            return True
             
         return False
         
     def env_response(self, messages: vf.Messages, state: vf.State, **kwargs) -> Tuple[vf.Messages, vf.State]:
         """
-        Handle environment response including user simulation and tool execution.
-        This is the core of the dual-control logic.
+        Handle environment response including tool execution and user simulation.
+        All non-agent logic happens here.
         """
         if not messages:
             return [], state
@@ -102,74 +95,370 @@ class Tau2BenchEnv(MultiTurnEnv):
         last_msg = messages[-1]
         response_messages = []
         
-        # Initialize state namespaces if needed
-        if "agent_state" not in state:
-            state["agent_state"] = {}
-        if "user_state" not in state:
-            state["user_state"] = self._init_user_state(state)
-        if "env_db" not in state:
-            state["env_db"] = self._init_env_db(state)
-        if "turn_count" not in state:
-            state["turn_count"] = 0
-        if "tool_executions" not in state:
-            state["tool_executions"] = []
+        # Initialize state components if needed
+        self._init_state(state)
         
-        # Initialize orchestrator for this task if not already done
-        if "orchestrator" not in state:
-            task_id = state.get("task_id")
-            task = self.task_lookup.get(task_id, {})
-            state["orchestrator"] = Tau2Orchestrator(
-                tau2_env=self.tau2_env,
-                domain=self.domain,
-                task=task,
-                user_llm=self.user_llm,
-                max_turns=self.max_turns
-            )
-            
-        # Use orchestrator to handle the message
-        orchestrator = state["orchestrator"]
-        
+        # Handle assistant messages (may contain tool calls)
         if last_msg["role"] == "assistant":
-            # Process agent message through orchestrator
-            new_messages, state = orchestrator.process_agent_message(messages, state)
-            response_messages.extend(new_messages)
-                    
-        elif last_msg["role"] == "user":
-            # Process user message through orchestrator (mainly for user tools in telecom)
-            new_messages, state = orchestrator.process_user_message(messages, state)
-            response_messages.extend(new_messages)
+            # Process any tool calls from the agent
+            if "tool_calls" in last_msg and last_msg["tool_calls"]:
+                tool_results = self._execute_agent_tools(last_msg["tool_calls"], state)
+                response_messages.extend(tool_results)
                 
+            # Generate user response after agent message/tools
+            user_response = self._generate_user_response(messages + response_messages, state)
+            if user_response:
+                response_messages.append(user_response)
+                
+                # In telecom, user response might contain tool calls
+                if self.domain == "telecom" and "tool_calls" in user_response:
+                    user_tool_results = self._execute_user_tools(
+                        user_response["tool_calls"], 
+                        state
+                    )
+                    response_messages.extend(user_tool_results)
+                    
         # Update turn count
         state["turn_count"] += len([m for m in response_messages if m["role"] in ["assistant", "user"]])
         
         return response_messages, state
         
-    def _init_user_state(self, state: vf.State) -> Dict[str, Any]:
-        """Initialize user simulator state."""
+    def _init_state(self, state: vf.State):
+        """Initialize state components if not already present."""
+        if "agent_state" not in state:
+            state["agent_state"] = {}
+            
+        if "user_state" not in state:
+            task_id = state.get("task_id")
+            task = self.task_lookup.get(task_id, {})
+            state["user_state"] = {
+                "instructions": task.get("user_instructions", {}),
+                "context": {},
+                "conversation_stage": "initial"
+            }
+            
+        if "env_db" not in state:
+            task_id = state.get("task_id")
+            task = self.task_lookup.get(task_id, {})
+            initial_state = task.get("initial_state", {})
+            if initial_state and "initialization_data" in initial_state:
+                state["env_db"] = deepcopy(initial_state["initialization_data"])
+            else:
+                state["env_db"] = {}
+                
+        if "turn_count" not in state:
+            state["turn_count"] = 0
+            
+        if "tool_executions" not in state:
+            state["tool_executions"] = []
+            
+        # Initialize user simulator if needed
+        if "user_simulator" not in state:
+            self._init_user_simulator(state)
+            
+    def _init_user_simulator(self, state: vf.State):
+        """Initialize the user simulator for this task."""
+        user_instructions = state["user_state"]["instructions"]
+        
+        if self.domain == "telecom" and hasattr(self.tau2_env, 'user_tools'):
+            # User with tools for telecom
+            user_tools = list(self.tau2_env.user_tools.get_tools().values())
+            state["user_simulator"] = UserSimulator(
+                tools=user_tools,
+                instructions=user_instructions,
+                llm=self.user_llm
+            )
+        else:
+            # User without tools for other domains
+            state["user_simulator"] = UserSimulator(
+                tools=None,
+                instructions=user_instructions,
+                llm=self.user_llm
+            )
+            
+    def _execute_agent_tools(self, tool_calls: List[Dict], state: vf.State) -> List[Dict]:
+        """Execute agent tool calls and return tool messages."""
+        tool_messages = []
+        
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+            tool_args = json.loads(tool_call["function"]["arguments"])
+            
+            # Record execution
+            exec_record = {
+                "role": "agent",
+                "tool": tool_name,
+                "args": tool_args,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            try:
+                # Execute tool through tau2 environment
+                if hasattr(self.tau2_env.tools, tool_name):
+                    tool_func = getattr(self.tau2_env.tools, tool_name)
+                    result = tool_func(**tool_args)
+                    
+                    exec_record["result"] = result
+                    exec_record["success"] = True
+                    
+                    # Sync environment state after tool execution
+                    if hasattr(self.tau2_env.tools, 'db'):
+                        state["env_db"]["agent_db"] = self.tau2_env.tools.db.model_dump()
+                    if hasattr(self.tau2_env, 'sync_tools'):
+                        self.tau2_env.sync_tools()
+                    
+                    # Create tool message
+                    content = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": tool_call["id"]
+                    })
+                else:
+                    exec_record["error"] = f"Tool {tool_name} not found"
+                    exec_record["success"] = False
+                    
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": f"Error: Tool {tool_name} not found",
+                        "tool_call_id": tool_call["id"]
+                    })
+                    
+            except Exception as e:
+                exec_record["error"] = str(e)
+                exec_record["success"] = False
+                
+                tool_messages.append({
+                    "role": "tool",
+                    "content": f"Error executing {tool_name}: {str(e)}",
+                    "tool_call_id": tool_call["id"]
+                })
+                
+            # Track execution
+            state["tool_executions"].append(exec_record)
+            
+        return tool_messages
+        
+    def _execute_user_tools(self, tool_calls: List[Dict], state: vf.State) -> List[Dict]:
+        """Execute user tool calls (only in telecom domain)."""
+        if self.domain != "telecom":
+            return []
+            
+        tool_messages = []
+        
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+            tool_args = json.loads(tool_call["function"]["arguments"])
+            
+            # Record execution
+            exec_record = {
+                "role": "user",
+                "tool": tool_name,
+                "args": tool_args,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            try:
+                # Execute tool through tau2 environment
+                if hasattr(self.tau2_env.user_tools, tool_name):
+                    tool_func = getattr(self.tau2_env.user_tools, tool_name)
+                    result = tool_func(**tool_args)
+                    
+                    exec_record["result"] = result
+                    exec_record["success"] = True
+                    
+                    # Sync user's environment state
+                    if hasattr(self.tau2_env.user_tools, 'db'):
+                        state["env_db"]["user_db"] = self.tau2_env.user_tools.db.model_dump()
+                    if hasattr(self.tau2_env, 'sync_tools'):
+                        self.tau2_env.sync_tools()
+                    
+                    # Create tool message
+                    content = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": tool_call["id"],
+                        "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                    })
+                else:
+                    exec_record["error"] = f"User tool {tool_name} not found"
+                    exec_record["success"] = False
+                    
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": f"Error: User tool {tool_name} not found",
+                        "tool_call_id": tool_call["id"]
+                    })
+                    
+            except Exception as e:
+                exec_record["error"] = str(e)
+                exec_record["success"] = False
+                
+                tool_messages.append({
+                    "role": "tool",
+                    "content": f"Error executing user tool {tool_name}: {str(e)}",
+                    "tool_call_id": tool_call["id"]
+                })
+                
+            # Track execution
+            state["tool_executions"].append(exec_record)
+            
+        return tool_messages
+        
+    def _generate_user_response(self, messages: vf.Messages, state: vf.State) -> Optional[Dict]:
+        """Generate user response using tau2 user simulator."""
+        user_sim = state.get("user_simulator")
+        if not user_sim:
+            return None
+            
+        # Convert messages to tau2 format
+        tau2_messages = self._convert_to_tau2_messages(messages)
+        
+        try:
+            # Generate user response
+            user_msg, new_user_state = user_sim.generate_next_message(
+                message_history=tau2_messages,
+                user_state=state["user_state"]
+            )
+            
+            # Update user state
+            if new_user_state:
+                state["user_state"].update(new_user_state)
+                
+            # Handle special responses
+            if user_msg.content == STOP:
+                state["termination_reason"] = "user_stop"
+                return {
+                    "role": "user",
+                    "content": "I'd like to stop here. Thank you for your help."
+                }
+            elif user_msg.content == TRANSFER:
+                state["termination_reason"] = "user_transfer"
+                return {
+                    "role": "user",
+                    "content": "I'd like to speak to a human agent please."
+                }
+            elif user_msg.content == OUT_OF_SCOPE:
+                return {
+                    "role": "user",
+                    "content": "I'm not sure that's related to what I need help with."
+                }
+                
+            # Convert to verifiers format
+            msg = {
+                "role": "user",
+                "content": user_msg.content if user_msg.content else ""
+            }
+            
+            # Handle tool calls in user message (telecom only)
+            if hasattr(user_msg, 'tool_calls') and user_msg.tool_calls:
+                msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in user_msg.tool_calls
+                ]
+                
+            return msg
+            
+        except Exception as e:
+            # Fallback response
+            state["user_errors"] = state.get("user_errors", 0) + 1
+            return {
+                "role": "user",
+                "content": "I'm having trouble understanding. Could you please help me?"
+            }
+            
+    def _check_task_completion(self, state: vf.State) -> bool:
+        """Check if task goals are achieved."""
         task_id = state.get("task_id")
         task = self.task_lookup.get(task_id, {})
         
-        user_state = {
-            "instructions": task.get("user_instructions", {}),
-            "context": {},
-            "conversation_stage": "initial"
-        }
+        expected_state = task.get("expected_state", {})
+        if not expected_state:
+            return False
+            
+        # Check goals
+        goals = expected_state.get("goals", [])
+        if not goals:
+            return False
+            
+        # Check each goal
+        achieved = 0
+        for goal in goals:
+            if self._check_single_goal(goal, state):
+                achieved += 1
+                
+        # All goals must be achieved
+        return achieved == len(goals)
         
-        return user_state
+    def _check_single_goal(self, goal: Dict, state: vf.State) -> bool:
+        """Check if a single goal is achieved."""
+        goal_type = goal.get("type", "")
         
-    def _init_env_db(self, state: vf.State) -> Dict[str, Any]:
-        """Initialize environment database state."""
-        task_id = state.get("task_id")
-        task = self.task_lookup.get(task_id, {})
+        if goal_type == "db_state":
+            # Check database state matches expected
+            expected_db = goal.get("expected_db", {})
+            current_db = state.get("env_db", {})
+            
+            # Simple check - all expected fields match
+            for key, expected_value in expected_db.items():
+                if current_db.get(key) != expected_value:
+                    return False
+            return True
+            
+        elif goal_type == "tool_called":
+            # Check if required tool was called successfully
+            required_tool = goal.get("tool_name", "")
+            tool_execs = state.get("tool_executions", [])
+            
+            for exec in tool_execs:
+                if exec["tool"] == required_tool and exec.get("success", False):
+                    return True
+            return False
+            
+        elif goal_type == "conversation":
+            # Check conversation content - simplified
+            return True
+            
+        return False
         
-        # Get initial state from task
-        initial_state = task.get("initial_state", {})
-        if initial_state and "initialization_data" in initial_state:
-            # Deep copy the initialization data
-            return deepcopy(initial_state["initialization_data"])
+    def _convert_to_tau2_messages(self, messages: vf.Messages) -> List[Tau2Message]:
+        """Convert verifiers messages to tau2 format."""
+        tau2_messages = []
         
-        # Default empty DB
-        return {}
+        for msg in messages:
+            if msg["role"] == "assistant":
+                tau2_msg = AssistantMessage(
+                    role="assistant",
+                    content=msg.get("content", ""),
+                    tool_calls=msg.get("tool_calls", []),
+                    cost=0.0
+                )
+            elif msg["role"] == "user":
+                tau2_msg = UserMessage(
+                    role="user",
+                    content=msg.get("content", ""),
+                    tool_calls=msg.get("tool_calls", [])
+                )
+            elif msg["role"] == "tool":
+                tau2_msg = ToolMessage(
+                    role="tool",
+                    content=msg.get("content", ""),
+                    tool_call_id=msg.get("tool_call_id", "")
+                )
+            else:
+                continue
+                
+            tau2_messages.append(tau2_msg)
+            
+        return tau2_messages
 
 
 def create_tau2_dataset(tau2_tasks: List[Dict], domain: str) -> Dataset:
@@ -195,19 +484,20 @@ def create_tau2_dataset(tau2_tasks: List[Dict], domain: str) -> Dataset:
         # Default system prompt based on domain
         if not initial_messages:
             if domain == "retail":
-                system_content = "You are a customer service agent for an online retail company."
+                system_content = "You are a customer service agent for an online retail company. You have access to tools to help customers with their orders, returns, and other inquiries."
             elif domain == "airline":
-                system_content = "You are a customer service agent for an airline."
+                system_content = "You are a customer service agent for an airline. You have access to tools to help customers with flight bookings, changes, and cancellations."
             elif domain == "telecom":
-                system_content = "You are a technical support agent for a telecom company."
+                system_content = "You are a technical support agent for a telecom company. You have access to tools to help customers with technical issues, account management, and service inquiries."
             else:
                 system_content = "You are a helpful customer service agent."
                 
             initial_messages = [{"role": "system", "content": system_content}]
         
+        # Create dataset row
         row = {
             "prompt": initial_messages,
-            "question": scenario,
+            "question": scenario if scenario else "Help the customer with their request.",
             "info": {
                 "task_id": task["id"],
                 "domain": domain,
@@ -215,7 +505,7 @@ def create_tau2_dataset(tau2_tasks: List[Dict], domain: str) -> Dataset:
                 "initial_state": task.get("initial_state", {}),
                 "user_instructions": user_instructions
             },
-            "answer": "Successfully completed task",  # Placeholder
+            "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
             # Store task_id in state for easy lookup
             "task_id": task["id"]
@@ -239,19 +529,32 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             if termination == "goal_achieved":
                 return 1.0
             elif termination == "user_stop":
-                return 0.5  # Partial credit
+                return 0.5  # Partial credit for user satisfaction
             else:
                 return 0.0
                 
         # Check each goal
         achieved = 0
         for goal in goals:
-            # This would need domain-specific logic
-            # For now, check if relevant tools were called
-            tool_execs = state.get("tool_executions", [])
-            if any(exec["tool"] == goal.get("required_tool") for exec in tool_execs):
-                achieved += 1
-                
+            goal_type = goal.get("type", "")
+            if goal_type == "tool_called":
+                # Check if required tool was called
+                tool_execs = state.get("tool_executions", [])
+                required_tool = goal.get("tool_name", "")
+                if any(exec["tool"] == required_tool and exec.get("success", False) 
+                       for exec in tool_execs):
+                    achieved += 1
+            elif goal_type == "db_state":
+                # Check database state
+                expected_db = goal.get("expected_db", {})
+                current_db = state.get("env_db", {})
+                if all(current_db.get(k) == v for k, v in expected_db.items()):
+                    achieved += 1
+            else:
+                # Default: assume achieved if conversation completed
+                if state.get("termination_reason") in ["goal_achieved", "user_stop"]:
+                    achieved += 1
+                    
         return achieved / len(goals) if goals else 0.0
         
     def check_efficiency(completion, info, state, **kwargs) -> float:
@@ -272,16 +575,21 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
         """Check appropriate tool usage."""
         tool_execs = state.get("tool_executions", [])
         
+        if not tool_execs:
+            # No tools used - might be okay for simple queries
+            return 0.5
+            
         # Check for errors
-        errors = [e for e in tool_execs if "Error" in e.get("result", "")]
+        errors = [e for e in tool_execs if not e.get("success", False)]
         if errors:
-            return 1.0 - (len(errors) / max(len(tool_execs), 1))
+            error_rate = len(errors) / len(tool_execs)
+            return max(0, 1.0 - error_rate)
         else:
             return 1.0
             
     # Different weights for different domains
     if domain == "telecom":
-        # Telecom values correct tool usage highly
+        # Telecom values correct tool usage highly due to dual-control
         weights = [0.6, 0.2, 0.2]
     else:
         # Other domains focus more on goal achievement

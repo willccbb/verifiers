@@ -6,24 +6,24 @@ This is a complete implementation of τ²-bench (tau2-bench) for the verifiers f
 
 - ✅ Full dual-control support (agent and user tools)
 - ✅ Complete state management (agent, user, environment)
-- ✅ Orchestrator logic preserved
+- ✅ All logic handled within `env_response`
 - ✅ All domains supported (retail, airline, telecom)
 - ✅ Exact task logic replication
 - ✅ User tool execution tracking
 
 ## Architecture
 
-The implementation uses `MultiTurnEnv` to manage the complex interactions between:
-1. **Agent**: Uses agent tools to help the user
-2. **User**: Can execute their own tools (in telecom domain)
-3. **Environment**: Maintains database state and validates actions
+The implementation uses `MultiTurnEnv` with all orchestration logic contained within `env_response`:
+1. **Agent Tools**: Executed when assistant messages contain tool calls
+2. **User Simulation**: Generated after agent actions, may include user tools (telecom)
+3. **State Management**: Single unified state dict tracks all actors
 
-State is tracked in a single dict with namespaces:
+Key components in state:
 - `agent_state`: Agent's internal state
-- `user_state`: User simulator state
-- `env_db`: Environment database state
-- `message_history`: Full conversation history
-- `tool_executions`: Track of all tool calls
+- `user_state`: User simulator state and instructions
+- `env_db`: Environment database state (agent_db, user_db)
+- `tool_executions`: Complete history of all tool calls
+- `user_simulator`: The tau2 UserSimulator instance
 
 ## Installation
 
