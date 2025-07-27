@@ -433,22 +433,10 @@ def load_environment(
         
         return passed / len(test_cases) if test_cases else 0.0
     
-    def execution_success(completion, info, parser) -> float:
-        """Check if code executes without errors
-        
-        For LiveCodeBench, we just check if valid code was generated.
-        Actual execution testing happens in correctness_score with proper test inputs.
-        """
-        code = parser.parse_answer(completion)
-        
-        # If we successfully parsed code, consider it a success
-        # The actual execution with test cases is handled by correctness_score
-        return 1.0 if code else 0.0
-    
     # Create rubric
     rubric = vf.Rubric(
-        funcs=[correctness_score, execution_success],
-        weights=[1.0, 0.0],  # Only correctness_score contributes to the final score
+        funcs=[correctness_score],
+        weights=[1.0],
         parser=parser
     )
     

@@ -71,11 +71,11 @@ LiveCodeBench includes both public and private test cases:
 
 This implementation successfully decodes and uses both public and private test cases, providing comprehensive evaluation that matches the official LiveCodeBench methodology.
 
-### Evaluation Metrics
+## Metrics
 
-1. **Pass@1**: Whether the generated code passes all test cases
-2. **Correctness Score**: Fraction of test cases passed
-3. **Execution Success**: Whether the code executes without errors
+This environment evaluates code generation using functional correctness:
+
+1. **Correctness Score**: Fraction of test cases passed (0.0 to 1.0)
 
 ## Security
 
