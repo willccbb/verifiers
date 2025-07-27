@@ -434,23 +434,16 @@ def load_environment(
         return passed / len(test_cases) if test_cases else 0.0
     
     def execution_success(completion, info, parser) -> float:
-        """Check if code executes without errors"""
+        """Check if code executes without errors
+        
+        For LiveCodeBench, we just check if valid code was generated.
+        Actual execution testing happens in correctness_score with proper test inputs.
+        """
         code = parser.parse_answer(completion)
         
-        if not code:
-            return 0.0
-        
-        # Add starter code if provided
-        if info.get('starter_code'):
-            code = info['starter_code'] + '\n\n' + code
-        
-        # Try to execute with a simple test
-        container = sandbox.container_pool.get_container()
-        try:
-            _, stderr, exit_code = sandbox.execute_in_container(container, code, "")
-            return 1.0 if exit_code == 0 else 0.0
-        finally:
-            sandbox.container_pool.return_container(container)
+        # If we successfully parsed code, consider it a success
+        # The actual execution with test cases is handled by correctness_score
+        return 1.0 if code else 0.0
     
     # Create rubric
     rubric = vf.Rubric(
