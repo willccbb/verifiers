@@ -148,27 +148,83 @@ def load_livecodebench_dataset(
     print(f"Loading LiveCodeBench dataset: {dataset_name}")
     print(f"Version: {version_tag}")
     
+    # Map version tags to JSONL files
+    version_to_file = {
+        "release_v1": "test.jsonl",
+        "release_v2": "test2.jsonl", 
+        "release_v3": "test3.jsonl",
+        "release_v4": "test4.jsonl",
+        "release_v5": "test5.jsonl",
+        "release_v6": "test6.jsonl"
+    }
+    
+    # Get the appropriate file
+    jsonl_file = version_to_file.get(version_tag, "test5.jsonl")
+    
+    print(f"Downloading {jsonl_file} from HuggingFace...")
+    
     try:
-        # Load the dataset with trust_remote_code=True as required
-        dataset = load_dataset(
-            dataset_name,
-            split=split,
-            trust_remote_code=True,  # Required for LiveCodeBench
-            version_tag=version_tag
-        )
+        import urllib.request
+        import json
         
-        print(f"Successfully loaded {len(dataset)} problems from LiveCodeBench")
+        # Download JSONL file from HuggingFace
+        url = f"https://huggingface.co/datasets/{dataset_name}/resolve/main/{jsonl_file}"
         
-        # Limit examples if specified
-        if num_examples > 0 and len(dataset) > num_examples:
-            dataset = dataset.select(range(num_examples))
-            print(f"Limited to {num_examples} examples")
+        examples = []
+        with urllib.request.urlopen(url) as response:
+            # Read line by line to handle large files
+            for line_num, line in enumerate(response):
+                if line.strip():
+                    try:
+                        example = json.loads(line)
+                        examples.append(example)
+                        
+                        # Print progress every 100 examples
+                        if (line_num + 1) % 100 == 0:
+                            print(f"Loaded {line_num + 1} examples...")
+                            
+                        # Stop if we've reached the desired number
+                        if num_examples > 0 and len(examples) >= num_examples:
+                            break
+                    except json.JSONDecodeError as e:
+                        print(f"Error parsing line {line_num}: {e}")
+                        continue
+        
+        print(f"Successfully loaded {len(examples)} problems from LiveCodeBench")
+        
+        # Convert to HuggingFace Dataset
+        dataset = Dataset.from_list(examples)
         
         return dataset
         
     except Exception as e:
         print(f"Error loading LiveCodeBench dataset: {e}")
-        raise
+        
+        # Fallback: Try the standard datasets library approaches
+        print("Attempting standard loading approaches...")
+        
+        # Try various loading methods
+        for attempt_name, load_func in [
+            ("with trust_remote_code", lambda: load_dataset(dataset_name, split=split, trust_remote_code=True)),
+            ("without trust_remote_code", lambda: load_dataset(dataset_name, split=split)),
+            ("with config", lambda: load_dataset(dataset_name, version_tag, split=split)),
+            ("basic", lambda: load_dataset(dataset_name, split=split))
+        ]:
+            try:
+                print(f"Trying {attempt_name}...")
+                dataset = load_func()
+                print(f"Success with {attempt_name}")
+                
+                # Limit examples if specified
+                if num_examples > 0 and len(dataset) > num_examples:
+                    dataset = dataset.select(range(num_examples))
+                    
+                return dataset
+            except Exception as e2:
+                print(f"Failed {attempt_name}: {e2}")
+                continue
+        
+        raise Exception("All approaches to load LiveCodeBench dataset failed")
 
 
 def load_environment(
@@ -266,7 +322,7 @@ def load_environment(
         # Return the entire completion as last resort
         return completion
     
-    answer_parser = vf.answer_parser_factory(extract_answer=extract_code)
+    parser = vf.Parser(extract_fn=extract_code)
     
     # Define rubric functions
     def correctness_score(parser, completion, info) -> float:
@@ -313,18 +369,17 @@ def load_environment(
         return 1.0 if exit_code == 0 else 0.0
     
     # Create rubric
-    rubric = vf.rubric_factory(
-        {
-            'correctness_score': correctness_score,
-            'execution_success': execution_success
-        }
+    rubric = vf.Rubric(
+        funcs=[correctness_score, execution_success],
+        weights=[1.0, 0.0],  # Only correctness_score contributes to the final score
+        parser=parser
     )
     
     # Create environment
     env = vf.SingleTurnEnv(
         dataset=dataset,
         rubric=rubric, 
-        answer_parser=answer_parser
+        parser=parser
     )
     
     return env
