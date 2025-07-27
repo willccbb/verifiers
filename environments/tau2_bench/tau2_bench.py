@@ -10,7 +10,7 @@ from copy import deepcopy
 from datetime import datetime
 
 import verifiers as vf
-from verifiers.envs import MultiTurnEnv
+from verifiers.envs.multiturn_env import MultiTurnEnv
 from datasets import Dataset
 
 # Import tau2-bench components
@@ -46,7 +46,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                  rubric: vf.Rubric,
                  domain: str,
                  tau2_env,
-                 tau2_tasks: List[Dict],
+                 tau2_tasks: List[Any],
                  user_llm: str = "gpt-4",
                  max_turns: int = 30,
                  **kwargs):
@@ -58,7 +58,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         self.max_turns = max_turns
         
         # Create task lookup
-        self.task_lookup = {task['id']: task for task in tau2_tasks}
+        self.task_lookup = {task.id: task for task in tau2_tasks}
         
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
@@ -130,19 +130,23 @@ class Tau2BenchEnv(MultiTurnEnv):
             
         if "user_state" not in state:
             task_id = state.get("task_id")
-            task = self.task_lookup.get(task_id, {})
+            task = self.task_lookup.get(task_id)
+            user_instructions = task.user_instructions.model_dump() if task and hasattr(task, 'user_instructions') and task.user_instructions else {}
             state["user_state"] = {
-                "instructions": task.get("user_instructions", {}),
+                "instructions": user_instructions,
                 "context": {},
                 "conversation_stage": "initial"
             }
             
         if "env_db" not in state:
             task_id = state.get("task_id")
-            task = self.task_lookup.get(task_id, {})
-            initial_state = task.get("initial_state", {})
-            if initial_state and "initialization_data" in initial_state:
-                state["env_db"] = deepcopy(initial_state["initialization_data"])
+            task = self.task_lookup.get(task_id)
+            if task and hasattr(task, 'initial_state') and task.initial_state:
+                initial_state_dict = task.initial_state.model_dump()
+                if "initialization_data" in initial_state_dict:
+                    state["env_db"] = deepcopy(initial_state_dict["initialization_data"])
+                else:
+                    state["env_db"] = {}
             else:
                 state["env_db"] = {}
                 
@@ -378,11 +382,12 @@ class Tau2BenchEnv(MultiTurnEnv):
     def _check_task_completion(self, state: vf.State) -> bool:
         """Check if task goals are achieved."""
         task_id = state.get("task_id")
-        task = self.task_lookup.get(task_id, {})
+        task = self.task_lookup.get(task_id)
         
-        expected_state = task.get("expected_state", {})
-        if not expected_state:
+        if not task or not hasattr(task, 'expected_state') or not task.expected_state:
             return False
+            
+        expected_state = task.expected_state.model_dump()
             
         # Check goals
         goals = expected_state.get("goals", [])
@@ -461,24 +466,24 @@ class Tau2BenchEnv(MultiTurnEnv):
         return tau2_messages
 
 
-def create_tau2_dataset(tau2_tasks: List[Dict], domain: str) -> Dataset:
+def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
     """Convert tau2 tasks to verifiers dataset format."""
     dataset_rows = []
     
     for task in tau2_tasks:
         # Extract key information
-        user_instructions = task.get("user_instructions", {})
-        scenario = user_instructions.get("scenario", "")
+        user_instructions = task.user_instructions
+        scenario = user_instructions.scenario if hasattr(user_instructions, 'scenario') else ""
         
         # Get initial message history if available
         initial_messages = []
-        if task.get("initial_state", {}).get("message_history"):
+        if hasattr(task, 'initial_state') and task.initial_state and hasattr(task.initial_state, 'message_history'):
             initial_messages = [
                 {
-                    "role": msg["role"],
-                    "content": msg.get("content", "")
+                    "role": msg.role,
+                    "content": msg.content if hasattr(msg, 'content') else ""
                 }
-                for msg in task["initial_state"]["message_history"]
+                for msg in task.initial_state.message_history
             ]
         
         # Default system prompt based on domain
@@ -499,16 +504,16 @@ def create_tau2_dataset(tau2_tasks: List[Dict], domain: str) -> Dataset:
             "prompt": initial_messages,
             "question": scenario if scenario else "Help the customer with their request.",
             "info": {
-                "task_id": task["id"],
+                "task_id": task.id,
                 "domain": domain,
-                "expected_state": task.get("expected_state", {}),
-                "initial_state": task.get("initial_state", {}),
-                "user_instructions": user_instructions
+                "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
+                "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
+                "user_instructions": user_instructions.model_dump() if hasattr(user_instructions, 'model_dump') else {}
             },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
             # Store task_id in state for easy lookup
-            "task_id": task["id"]
+            "task_id": task.id
         }
         dataset_rows.append(row)
         
