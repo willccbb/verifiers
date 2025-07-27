@@ -130,6 +130,7 @@ Respond with ONLY a single number from 0 to 10."""
                 score = float(numbers[0]) / 10.0  # Normalize to 0-1
                 return max(0.0, min(1.0, score))  # Clamp to [0, 1]
         except Exception:
+
             pass
         return 0.0
 
