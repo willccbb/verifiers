@@ -8,5 +8,6 @@ version = "0.1.0"
 description = "TruthfulQA environment for evaluating model truthfulness and informativeness"
 dependencies = [
     "verifiers",
-    "datasets>=2.14.0",
+    "datasets",
+    "openai",
 ]
