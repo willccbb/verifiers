@@ -74,40 +74,31 @@ The key challenge in porting was τ²-bench's strict message format requirements
 
 ### Evaluation Logic (EXACT from τ²-bench)
 
-The evaluation uses **binary pass/fail scoring** (1.0 or 0.0) with NO partial credit, exactly matching the original τ²-bench evaluation:
+The evaluation uses **binary pass/fail scoring** (1.0 or 0.0) with NO partial credit, using the official τ²-bench evaluation logic:
 
 1. **Automatic Failure Conditions**:
    - Task terminated due to too many errors
    - Task reached maximum turns without completion
 
-2. **Action-Based Evaluation**:
-   - Checks if ALL required actions were performed
-   - Each action must match:
-     - Exact tool name
-     - Correct requestor (assistant vs user)
-     - Exact arguments (or subset if `compare_args` specified)
-   - Missing ANY required action = FAIL
+2. **Evaluation Types**:
+   - **ACTION**: Checks if all required actions were performed with correct tool names and arguments
+   - **DB**: Verifies final environment database state matches expected state
+   - **ENV_ASSERTION**: Environment-specific assertions
+   - **NL_ASSERTION**: Natural language assertions about conversation content
+   - **COMMUNICATE**: Communication requirements between agent and user
 
-3. **Environment State Evaluation**:
-   - If `RewardType.DB` is in the task's reward basis
-   - Compares final environment database state
-   - Currently simplified (full hash comparison not implemented)
+3. **Official τ²-bench Evaluator**:
+   - The implementation uses `tau2.evaluator.evaluator.evaluate_simulation` directly
+   - Messages are properly converted to τ²-bench format before evaluation
+   - Ensures exact match with original benchmark evaluation logic
 
 ### Current Limitations
 
 1. **Tool Discovery**: The current implementation does not automatically provide tool descriptions to the agent in the system prompt. The agent must already know what tools are available and how to call them.
 
-2. **Exact Matching Required**: The evaluation expects exact tool names and arguments. Any deviation in:
-   - Tool name spelling
-   - Argument names  
-   - Argument values
-   - Call order
-   Will result in evaluation failure (0.0 score).
-
-3. **Agent Compatibility**: Standard LLM agents may not naturally produce the exact tool calls τ²-bench expects without specific prompting or fine-tuning.
+2. **Agent Compatibility**: Standard LLM agents may not naturally produce the exact tool calls τ²-bench expects without specific prompting or fine-tuning.
 
 ### Key Differences from Original
 - Uses Verifiers' `MultiTurnEnv` pattern instead of Orchestrator
-- Simplified evaluation (no environment assertions)
 - All non-agent logic encapsulated in `env_response`
-- Rubric-based scoring interface (though internally uses binary pass/fail)
+- Leverages official τ²-bench evaluation functions directly

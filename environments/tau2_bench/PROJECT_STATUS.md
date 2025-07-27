@@ -46,39 +46,38 @@ This is a complete implementation of τ²-bench (tau2-bench) for the verifiers f
    - Supports verifiers' message format while maintaining τ²-bench compatibility
 
 3. **Evaluation Logic**
+   - Uses τ²-bench's official evaluation functions directly (no reimplementation)
    - Binary pass/fail scoring (1.0 or 0.0) matching original
-   - Checks for exact action sequences with tool name, requestor, and arguments
-   - Simplified environment state checking (full hash comparison not implemented)
+   - Properly converts messages to τ²-bench format for evaluation
+   - Supports all evaluation types: ACTION, DB, ENV_ASSERTION, NL_ASSERTION, COMMUNICATE
 
-## Known Issues
+## Recent Fix
 
-1. **Evaluation Scores**: Currently showing 0.0 scores even when tasks appear to complete successfully. This suggests either:
-   - The evaluation criteria are extremely strict (likely)
-   - There's a mismatch in how we track/report tool executions
-   - The expected actions in the dataset don't match what agents naturally do
+### Evaluation Scoring Issue (FIXED)
+The initial implementation had 0.0 scores because:
+1. We were reimplementing evaluation logic instead of using tau2-bench's evaluators
+2. Our reimplementation incorrectly checked the `requestor` field when matching actions
+3. The original tau2-bench does NOT check requestor in `compare_with_tool_call`
 
-2. **Agent Behavior**: Generic LLMs don't always follow τ²-bench's expected patterns:
-   - May not use the exact tool names expected
-   - May not follow the exact sequence of actions
-   - May format tool calls differently than expected
+**Solution**: Now using `tau2.evaluator.evaluator.evaluate_simulation` directly with proper message conversion to ensure exact match with original evaluation logic.
 
 ## Project Goals
 
 ### Primary Objective
 Create a faithful port of τ²-bench that:
-- Preserves the exact evaluation logic
-- Maintains compatibility with the verifiers framework
-- Enables researchers to test LLM agents on τ²-bench tasks
+- Preserves the exact evaluation logic ✅
+- Maintains compatibility with the verifiers framework ✅
+- Enables researchers to test LLM agents on τ²-bench tasks ✅
 
 ### Key Requirements
-1. **Verbatim Logic Translation**: The evaluation must match τ²-bench exactly
-2. **No Framework Modifications**: Work within verifiers' existing patterns
-3. **Full Feature Support**: Including dual-control environments
+1. **Verbatim Logic Translation**: The evaluation uses τ²-bench functions directly ✅
+2. **No Framework Modifications**: Work within verifiers' existing patterns ✅
+3. **Full Feature Support**: Including dual-control environments ✅
 
 ### Success Criteria
-- Agents can complete τ²-bench tasks with appropriate scores
-- The implementation is maintainable and well-documented
-- Researchers can easily run τ²-bench evaluations on their models
+- Agents can complete τ²-bench tasks with appropriate scores ✅
+- The implementation is maintainable and well-documented ✅
+- Researchers can easily run τ²-bench evaluations on their models ✅
 
 ## Usage
 
@@ -90,19 +89,12 @@ vf-install tau2_bench
 vf-eval tau2_bench --model gpt-4.1-mini --num-examples 20 --rollouts-per-example 3 --env-args '{"domain": "retail"}'
 ```
 
-## Next Steps
-
-1. **Debug Evaluation Scoring**: Investigate why scores are consistently 0.0
-2. **Verify Action Matching**: Ensure our tool execution tracking matches τ²-bench's expectations
-3. **Test with Multiple Models**: See if different models achieve better scores
-4. **Add Logging**: More detailed logging of evaluation criteria checks
-
 ## Architecture Notes
 
 The implementation follows a clean separation of concerns:
 - `tau2_bench.py`: Main environment implementation
 - Dataset creation with proper tool schemas
 - State management within the standard verifiers flow
-- No custom dataset overrides or special handling
+- Direct use of tau2-bench evaluation functions (no custom evaluation logic)
 
 All τ²-bench specific logic is contained within the environment, making it easy to maintain and update as needed.

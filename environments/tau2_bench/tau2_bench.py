@@ -29,6 +29,10 @@ try:
     from tau2.user.user_simulator import UserSimulator
     from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
     from tau2.utils.utils import DATA_DIR
+    # Import the evaluators
+    from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
+    from tau2.data_model.simulation import SimulationRun, TerminationReason
+    from tau2.data_model.tasks import RewardType
     TAU2_AVAILABLE = True
 except ImportError:
     TAU2_AVAILABLE = False
@@ -732,28 +736,19 @@ Try to be helpful and always follow the policy. Always make sure you generate va
 
 
 def create_tau2_rubric(domain: str) -> vf.Rubric:
-    """Create evaluation rubric that matches original τ²-bench evaluation logic exactly."""
+    """Create evaluation rubric that uses tau2-bench's official evaluation logic."""
     
     def evaluate_tau2_task(completion, info, state, **kwargs) -> float:
         """
-        Evaluate task using the exact same logic as original τ²-bench.
+        Evaluate task using tau2-bench's official evaluation logic.
         Returns 1.0 for pass, 0.0 for fail (no partial credit).
         """
-        # Check for premature termination (automatic fail)
-        termination = state.get("termination_reason", "")
-        if termination in ["too_many_errors", "max_turns_reached"]:
-            return 0.0
-            
         # Get task info
         task_id = state.get("task_id") or info.get("task_id")
         if not task_id:
             return 0.0
             
         # Get the original task from tau2
-        from tau2.domains.retail.environment import get_tasks as get_retail_tasks
-        from tau2.domains.airline.environment import get_tasks as get_airline_tasks  
-        from tau2.domains.telecom.environment import get_tasks as get_telecom_tasks
-        
         if domain == "retail":
             all_tasks = get_retail_tasks()
         elif domain == "airline":
@@ -764,74 +759,215 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             return 0.0
             
         task = next((t for t in all_tasks if t.id == task_id), None)
-        if not task or not task.evaluation_criteria:
-            return 1.0  # No evaluation criteria means pass
+        if not task:
+            return 0.0
             
-        # Evaluate based on the task's reward basis
-        evaluation_passed = True
-        
-        # 1. Check ACTIONS if required
-        if hasattr(task.evaluation_criteria, 'actions') and task.evaluation_criteria.actions:
-            # Get all tool calls from the conversation
-            tool_executions = state.get("tool_executions", [])
+        # Create a SimulationRun object from our state and messages
+        termination_reason = state.get("termination_reason", "")
+        if termination_reason == "too_many_errors":
+            term_reason = TerminationReason.TOO_MANY_ERRORS
+        elif termination_reason == "max_turns_reached":
+            term_reason = TerminationReason.MAX_STEPS
+        elif termination_reason == "user_stop":
+            term_reason = TerminationReason.USER_STOP
+        elif termination_reason == "goal_achieved":
+            term_reason = TerminationReason.ASSISTANT_STOP
+        else:
+            term_reason = TerminationReason.ASSISTANT_STOP
             
-            # Check each required action
-            for required_action in task.evaluation_criteria.actions:
-                action_found = False
+        # Convert messages to tau2 format
+        tau2_messages = []
+        if isinstance(completion, list):
+            # completion is already the full message history
+            for msg in completion:
+                if msg["role"] == "assistant":
+                    # Convert tool calls to tau2 format if present
+                    tau2_tool_calls = None
+                    if "tool_calls" in msg and msg["tool_calls"]:
+                        from tau2.data_model.message import ToolCall, FunctionCall
+                        tau2_tool_calls = []
+                        for tc in msg["tool_calls"]:
+                            # Handle both dict and object formats
+                            if hasattr(tc, 'function'):
+                                args_str = tc.function.arguments
+                                tc_id = tc.id if hasattr(tc, 'id') else ""
+                                tc_name = tc.function.name
+                            else:
+                                args_str = tc.get("function", {}).get("arguments", "{}")
+                                tc_id = tc.get("id", "")
+                                tc_name = tc.get("function", {}).get("name", "")
+                            
+                            # Parse arguments
+                            try:
+                                args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                            except:
+                                args_dict = {}
+                                
+                            tau2_tool_calls.append(
+                                ToolCall(
+                                    id=tc_id,
+                                    function=FunctionCall(
+                                        name=tc_name,
+                                        arguments=args_dict
+                                    )
+                                )
+                            )
+                    
+                    tau2_msg = AssistantMessage(
+                        role="assistant",
+                        content=msg.get("content", ""),
+                        tool_calls=tau2_tool_calls,
+                        cost=0.0
+                    )
+                elif msg["role"] == "user":
+                    # Handle user tool calls (for telecom domain)
+                    tau2_tool_calls = None
+                    if "tool_calls" in msg and msg["tool_calls"]:
+                        from tau2.data_model.message import ToolCall, FunctionCall
+                        tau2_tool_calls = []
+                        for tc in msg["tool_calls"]:
+                            # Similar conversion as above
+                            if hasattr(tc, 'function'):
+                                args_str = tc.function.arguments
+                                tc_id = tc.id if hasattr(tc, 'id') else ""
+                                tc_name = tc.function.name
+                            else:
+                                args_str = tc.get("function", {}).get("arguments", "{}")
+                                tc_id = tc.get("id", "")
+                                tc_name = tc.get("function", {}).get("name", "")
+                            
+                            try:
+                                args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                            except:
+                                args_dict = {}
+                                
+                            tau2_tool_calls.append(
+                                ToolCall(
+                                    id=tc_id,
+                                    function=FunctionCall(
+                                        name=tc_name,
+                                        arguments=args_dict
+                                    )
+                                )
+                            )
+                    
+                    tau2_msg = UserMessage(
+                        role="user",
+                        content=msg.get("content", ""),
+                        tool_calls=tau2_tool_calls
+                    )
+                elif msg["role"] == "tool":
+                    tau2_msg = ToolMessage(
+                        id=msg.get("tool_call_id", ""),
+                        role="tool",
+                        content=msg.get("content", ""),
+                        name=msg.get("name", "tool")
+                    )
+                else:
+                    continue
+                tau2_messages.append(tau2_msg)
                 
-                for exec in tool_executions:
-                    # Check if tool name matches
-                    if exec.get("tool") != required_action.name:
-                        continue
-                        
-                    # Check if requestor matches 
-                    exec_requestor = "assistant" if exec.get("role") == "assistant" else "user"
-                    if required_action.requestor != exec_requestor:
-                        continue
-                        
-                    # Check arguments
-                    exec_args = exec.get("arguments", {})
-                    
-                    # If compare_args is specified, only check those
-                    if hasattr(required_action, 'compare_args') and required_action.compare_args:
-                        args_match = all(
-                            exec_args.get(arg) == required_action.arguments.get(arg)
-                            for arg in required_action.compare_args
-                        )
-                    else:
-                        # Check all arguments match exactly
-                        args_match = exec_args == required_action.arguments
-                        
-                    if args_match:
-                        action_found = True
-                        break
-                        
-                if not action_found:
-                    evaluation_passed = False
-                    break
-                    
-        # 2. Check ENVIRONMENT STATE if required  
-        if evaluation_passed and hasattr(task.evaluation_criteria, 'reward_basis'):
-            from tau2.data_model.tasks import RewardType
-            reward_basis = set(task.evaluation_criteria.reward_basis)
+        simulation = SimulationRun(
+            agent_id="verifiers_agent",
+            task_id=task_id,
+            messages=tau2_messages,
+            termination_reason=term_reason,
+            task_completed=state.get("termination_reason") == "goal_achieved",
+            errors=state.get("error_count", 0),
+            num_steps=state.get("turn_count", 0),
+            cost=0.0,  # We don't track cost in verifiers
+            timestamp="",
+            metadata={}
+        )
+        
+        # Use tau2-bench's official evaluation
+        reward_info = evaluate_simulation(
+            simulation=simulation,
+            task=task,
+            evaluation_type=EvaluationType.ALL,
+            solo_mode=(domain != "telecom"),  # Only telecom has dual-control
+            domain=domain
+        )
+        
+        # Debug logging for evaluation
+        print(f"\n{'='*80}")
+        print(f"EVALUATION DEBUG for task {task_id}")
+        print(f"{'='*80}")
+        
+        # Log expected actions
+        if task.evaluation_criteria and task.evaluation_criteria.actions:
+            print(f"\nEXPECTED ACTIONS ({len(task.evaluation_criteria.actions)}):")
+            for i, action in enumerate(task.evaluation_criteria.actions):
+                print(f"  {i+1}. {action.requestor}: {action.name}({action.arguments})")
+                if action.compare_args:
+                    print(f"     Compare only: {action.compare_args}")
+        
+        # Log actual tool calls from messages
+        print(f"\nACTUAL TOOL CALLS:")
+        tool_call_count = 0
+        for msg in tau2_messages:
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tool_call_count += 1
+                    print(f"  {tool_call_count}. {msg.role}: {tc.function.name}({tc.function.arguments})")
+        
+        # Log evaluation results
+        print(f"\nEVALUATION RESULTS:")
+        print(f"  Final reward: {reward_info.reward}")
+        if hasattr(reward_info, 'reward_breakdown') and reward_info.reward_breakdown:
+            print(f"  Reward breakdown: {reward_info.reward_breakdown}")
+        
+        # Log specific check results
+        if hasattr(reward_info, 'action_checks') and reward_info.action_checks:
+            print(f"\n  Action checks:")
+            for check in reward_info.action_checks:
+                status = "✓" if check.action_match else "✗"
+                print(f"    {status} {check.action.name} - Match: {check.action_match}")
+                if not check.action_match:
+                    print(f"       Expected args: {check.action.arguments}")
+                    if check.action.compare_args:
+                        print(f"       Compare only: {check.action.compare_args}")
+                    # Try to find closest match
+                    print(f"       Looking for tool call with name: {check.action.name}")
+                    found_with_name = False
+                    for msg in tau2_messages:
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                if tc.function.name == check.action.name:
+                                    found_with_name = True
+                                    print(f"       Found call with args: {tc.function.arguments}")
+                                    # Show which args differ
+                                    if check.action.compare_args:
+                                        for arg in check.action.compare_args:
+                                            expected = check.action.arguments.get(arg)
+                                            actual = tc.function.arguments.get(arg)
+                                            if expected != actual:
+                                                print(f"         - {arg}: expected '{expected}', got '{actual}'")
+                    if not found_with_name:
+                        print(f"       No tool call found with name '{check.action.name}'")
+        
+        if hasattr(reward_info, 'db_check') and reward_info.db_check:
+            print(f"\n  DB check: {reward_info.db_check}")
             
-            # If DB state checking is required
-            if RewardType.DB in reward_basis:
-                # This requires comparing environment database hashes
-                # Since we don't have access to the original environment here,
-                # we check if the tau2_env state matches expected
-                tau2_env = state.get("tau2_env")
-                if tau2_env and hasattr(tau2_env, 'get_db_hash'):
-                    try:
-                        # The original creates a golden environment and compares
-                        # For now, check if all required actions were executed successfully
-                        if hasattr(task.evaluation_criteria, 'actions'):
-                            # Already checked above
-                            pass
-                    except Exception:
-                        evaluation_passed = False
-                        
-        return 1.0 if evaluation_passed else 0.0
+        if hasattr(reward_info, 'nl_assertions') and reward_info.nl_assertions:
+            print(f"\n  NL assertions: {len(reward_info.nl_assertions)} checks")
+            
+        if hasattr(reward_info, 'communicate_checks') and reward_info.communicate_checks:
+            print(f"\n  Communicate checks: {len(reward_info.communicate_checks)} checks")
+        
+        # Log termination reason
+        print(f"\n  Termination: {term_reason.value}")
+        print(f"  Task completed: {simulation.task_completed}")
+        print(f"  Errors: {simulation.errors}")
+        print(f"  Steps: {simulation.num_steps}")
+        
+        # Log info if present
+        if hasattr(reward_info, 'info') and reward_info.info:
+            print(f"\n  Additional info: {reward_info.info}")
+        
+        print(f"{'='*80}\n")
+        
+        return reward_info.reward
     
     # Create rubric with the exact evaluation function
     return vf.Rubric(
