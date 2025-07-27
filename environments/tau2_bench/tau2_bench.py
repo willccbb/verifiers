@@ -109,20 +109,31 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
         
-        # Store tools for later use
-        self.oai_tools = None
-        if hasattr(tau2_env, 'get_tools'):
-            tools = tau2_env.get_tools()
-            self.oai_tools = [tool.openai_schema for tool in tools] if tools else []
-        
-
     def get_dataset_row(self, idx):
-        """Override to inject tools dynamically."""
+        """Override to deserialize info JSON."""
         row = super().get_dataset_row(idx)
-        # Replace serialized tools with actual tools
-        if self.oai_tools and "info" in row:
-            row["info"]["oai_tools"] = self.oai_tools
+        # Deserialize info if it's a string
+        if isinstance(row.get("info"), str):
+            row["info"] = json.loads(row["info"])
         return row
+        
+    async def a_generate(self, prompt_dataset, client, model, gen_sampling_args=None, eval_dataset=None, max_concurrent=5, **kwargs):
+        """Override to handle JSON deserialization of info."""
+        # Convert dataset to dict format
+        inputs = prompt_dataset.to_dict() if hasattr(prompt_dataset, 'to_dict') else prompt_dataset
+        
+        # If inputs has info column with JSON strings, deserialize them
+        if "info" in inputs:
+            deserialized_infos = []
+            for info in inputs["info"]:
+                if isinstance(info, str):
+                    deserialized_infos.append(json.loads(info))
+                else:
+                    deserialized_infos.append(info)
+            inputs = dict(inputs)  # Make a copy
+            inputs["info"] = deserialized_infos
+        
+        return await super().a_generate(inputs, client, model, gen_sampling_args, eval_dataset, max_concurrent, **kwargs)
         
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
@@ -271,13 +282,20 @@ class Tau2BenchEnv(MultiTurnEnv):
                 llm=self.user_llm
             )
             
-    def _execute_agent_tools(self, tool_calls: List[Dict], state: vf.State) -> List[Dict]:
+    def _execute_agent_tools(self, tool_calls: List[Any], state: vf.State) -> List[Dict]:
         """Execute agent tool calls and return tool messages."""
         tool_messages = []
         
         for tool_call in tool_calls:
-            tool_name = tool_call["function"]["name"]
-            tool_args = json.loads(tool_call["function"]["arguments"])
+            # Handle both dict and object formats
+            if hasattr(tool_call, 'function'):
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_id = tool_call.id if hasattr(tool_call, 'id') else ""
+            else:
+                tool_name = tool_call["function"]["name"]
+                tool_args = json.loads(tool_call["function"]["arguments"])
+                tool_id = tool_call.get("id", "")
             
             # Record execution
             exec_record = {
@@ -308,7 +326,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_messages.append({
                         "role": "tool",
                         "content": content,
-                        "tool_call_id": tool_call["id"]
+                        "tool_call_id": tool_id
                     })
                 else:
                     exec_record["error"] = f"Tool {tool_name} not found"
@@ -317,7 +335,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_messages.append({
                         "role": "tool",
                         "content": f"Error: Tool {tool_name} not found",
-                        "tool_call_id": tool_call["id"]
+                        "tool_call_id": tool_id
                     })
                     
             except Exception as e:
@@ -328,7 +346,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                 tool_messages.append({
                     "role": "tool",
                     "content": f"Error executing {tool_name}: {str(e)}",
-                    "tool_call_id": tool_call["id"]
+                    "tool_call_id": tool_id
                 })
                 
             # Track execution
@@ -336,7 +354,7 @@ class Tau2BenchEnv(MultiTurnEnv):
             
         return tool_messages
         
-    def _execute_user_tools(self, tool_calls: List[Dict], state: vf.State) -> List[Dict]:
+    def _execute_user_tools(self, tool_calls: List[Any], state: vf.State) -> List[Dict]:
         """Execute user tool calls (only in telecom domain)."""
         if self.domain != "telecom":
             return []
@@ -344,8 +362,15 @@ class Tau2BenchEnv(MultiTurnEnv):
         tool_messages = []
         
         for tool_call in tool_calls:
-            tool_name = tool_call["function"]["name"]
-            tool_args = json.loads(tool_call["function"]["arguments"])
+            # Handle both dict and object formats
+            if hasattr(tool_call, 'function'):
+                tool_name = tool_call.function.name
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_id = tool_call.id if hasattr(tool_call, 'id') else ""
+            else:
+                tool_name = tool_call["function"]["name"]
+                tool_args = json.loads(tool_call["function"]["arguments"])
+                tool_id = tool_call.get("id", "")
             
             # Record execution
             exec_record = {
@@ -584,7 +609,18 @@ class Tau2BenchEnv(MultiTurnEnv):
                 tau2_tool_calls = []
                 if "tool_calls" in msg and msg["tool_calls"]:
                     for tc in msg["tool_calls"]:
-                        args_str = tc.get("function", {}).get("arguments", "{}")
+                        # Handle both dict and object formats
+                        if hasattr(tc, 'function'):
+                            # Object format (from API)
+                            args_str = tc.function.arguments
+                            tc_id = tc.id if hasattr(tc, 'id') else ""
+                            tc_name = tc.function.name
+                        else:
+                            # Dict format
+                            args_str = tc.get("function", {}).get("arguments", "{}")
+                            tc_id = tc.get("id", "")
+                            tc_name = tc.get("function", {}).get("name", "")
+                        
                         # Parse arguments if they're a string
                         try:
                             args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
@@ -592,8 +628,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                             args_dict = {}
                             
                         tau2_tool_calls.append({
-                            "id": tc.get("id", ""),
-                            "name": tc.get("function", {}).get("name", ""),
+                            "id": tc_id,
+                            "name": tc_name,
                             "arguments": args_dict
                         })
                 
@@ -662,7 +698,7 @@ Try to be helpful and always follow the policy. Always make sure you generate va
     
     # Get tools from the environment
     tools = tau2_env.get_tools() if hasattr(tau2_env, 'get_tools') else []
-    # Convert to OpenAI format
+    # Convert to OpenAI format - we'll store as a JSON string to avoid HF Dataset schema inference issues
     oai_tools = [tool.openai_schema for tool in tools] if tools else []
     
     for task in tau2_tasks:
@@ -693,18 +729,21 @@ Try to be helpful and always follow the policy. Always make sure you generate va
         initial_messages = [{"role": "system", "content": system_prompt}] + initial_messages
         
         # Create dataset row
+        # Store info as JSON string to preserve tool schemas
+        info_dict = {
+            "task_id": task_id,
+            "domain": domain,
+            "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
+            "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
+            "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
+            "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
+            "oai_tools": oai_tools  # Pass tools directly as JSON schema
+        }
+        
         row = {
             "prompt": initial_messages,
             "question": scenario if scenario else "Help the customer with their request.",
-            "info": {
-                "task_id": task_id,
-                "domain": domain,
-                "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
-                "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
-                "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
-                "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
-                "oai_tools": json.dumps(oai_tools) if oai_tools else "[]"  # Serialize to avoid HF Dataset schema inference
-            },
+            "info": json.dumps(info_dict),  # Store as JSON string to avoid HF Dataset corruption
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
             # Store task_id in state for easy lookup
