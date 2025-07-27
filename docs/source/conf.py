@@ -3,29 +3,35 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import os, sys
-sys.path.insert(0, os.path.abspath('..'))  # ← one level up to project root
+import os
+import sys
+
+# Add project root to Python path for importing verifiers
+sys.path.insert(0, os.path.abspath("../.."))  # ← up two levels to project root
+
+# Import verifiers to get version dynamically
+import verifiers
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'verifiers'
-copyright = '2025, William Brown'
-author = 'William Brown'
-release = '0.1.0'
+project = "verifiers"
+copyright = "2025, William Brown"
+author = "William Brown"
+release = verifiers.__version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'myst_parser',
+    "myst_parser",
 ]
 
-html_theme = 'sphinx_rtd_theme'
+html_theme = "sphinx_rtd_theme"
 
 source_suffix = {
-    '.rst': 'restructuredtext',
-    '.md': 'markdown',
+    ".rst": "restructuredtext",
+    ".md": "markdown",
 }
 
 myst_enable_extensions = [
@@ -36,14 +42,12 @@ myst_enable_extensions = [
     "colon_fence",
 ]
 
-templates_path = ['_templates']
+templates_path = ["_templates"]
 exclude_patterns = []
-
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
-html_static_path = ['_static']
-
+html_theme = "alabaster"
+# html_static_path = ["_static"]

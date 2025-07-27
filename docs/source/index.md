@@ -1,190 +1,86 @@
-# Verifiers
+# Verifiers Documentation
 
-**Note: These docs are mostly written by Claude 4 Opus. Many things are wrong. This is here as a starting point for me to work from, and they will be gradually improved over time.**
+Welcome to Verifiers! This library provides a flexible framework for creating RL environments with custom multi-turn interaction protocols between LLMs and environments.
 
-Verifiers is a flexible framework for reinforcement learning with large language models. It provides modular components for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+```{toctree}
+:maxdepth: 2
+:hidden:
 
-## What does it do?
+overview
+environments
+components
+training
+development
+api_reference
+```
+
+## What is Verifiers?
 
 Verifiers enables you to:
+- Define custom interaction protocols between models and environments
+- Build multi-turn conversations, tool-augmented reasoning, and interactive games
+- Create reusable evaluation environments with multi-criteria reward functions
+- Train models using GRPO or integrate with other RL frameworks
 
-- **Build custom evaluation environments** for any task
-- **Define multi-criteria reward functions** for nuanced evaluation  
-- **Train models using GRPO** (Group Relative Policy Optimization)
-- **Parse structured outputs** reliably with built-in validation
-- **Integrate tools** to extend model capabilities
+Key features:
+- **Flexible multi-turn interactions** via `MultiTurnEnv` 
+- **Native tool calling** support with `ToolEnv`
+- **Modular reward functions** through rubrics
+- **Environment modules** for easy sharing and reuse
 
-The framework emphasizes modularity and composability, allowing you to start simple and progressively add complexity as needed.
+## Installation
+
+### Basic Installation
+
+For evaluation and API model usage:
+```bash
+uv add verifiers
+```
+
+### Training Support
+
+For GPU training with `vf.GRPOTrainer`:
+```bash
+uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
+```
+
+### Latest Development Version
+
+To use the latest `main` branch:
+```bash
+uv add verifiers @ git+https://github.com/willccbb/verifiers.git
+```
+
+### Development Setup
+
+For contributing to verifiers:
+```bash
+git clone https://github.com/willccbb/verifiers.git
+cd verifiers
+uv sync --all-extras && uv pip install flash-attn --no-build-isolation
+uv run pre-commit install
+```
+
+### Integration with prime-rl
+
+For large-scale FSDP training, see [prime-rl](https://github.com/PrimeIntellect-ai/prime-rl).
 
 ## Documentation
 
-```{toctree}
-:maxdepth: 2
-:caption: Getting Started:
+### Getting Started
 
-overview
-examples
-```
+**[Overview](overview.md)** — Core concepts and architecture. Start here if you're new to Verifiers to understand how environments orchestrate interactions.
 
-```{toctree}
-:maxdepth: 2
-:caption: Core Components:
+**[Environments](environments.md)** — Creating custom interaction protocols with `MultiTurnEnv`, `ToolEnv`, and basic rubrics.
 
-environments
-parsers
-rubrics
-tools
-```
+### Advanced Usage
 
-```{toctree}
-:maxdepth: 2
-:caption: Training & Advanced:
+**[Components](components.md)** — Advanced rubrics, tools, parsers, with practical examples. Covers judge rubrics, tool design, and complex workflows.
 
-training
-advanced
-```
+**[Training](training.md)** — GRPO training and hyperparameter tuning. Read this when you're ready to train models with your environments.
 
-```{toctree}
-:maxdepth: 2
-:caption: Reference:
+### Reference
 
-api_reference
-testing
-development
-```
+**[Development](development.md)** — Contributing to verifiers
 
-## Quick Start
-
-### Installation
-
-```bash
-# Install using uv (recommended)
-uv add verifiers
-
-# Or clone and install locally
-git clone https://github.com/your-org/verifiers
-cd verifiers
-uv sync
-```
-
-### Basic Example
-
-Here's a simple example using ThinkParser (for step-by-step reasoning):
-
-```python
-import verifiers as vf
-
-# Load dataset 
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-Then give your final answer.
-"""
-
-# ThinkParser extracts content after </think>
-parser = vf.ThinkParser()
-
-def correct_answer_reward_func(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response.strip() == answer.strip() else 0.0
-
-rubric = vf.Rubric(funcs=[
-    correct_answer_reward_func,
-    parser.get_format_reward_func()
-], weights=[1.0, 0.2])
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-)
-
-# Load model and train
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="example")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
-
-### Alternative: Using XMLParser for structured output
-
-```python
-import verifiers as vf
-
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-system_prompt = """
-Format your response as:
-<reasoning>
-Your step-by-step solution
-</reasoning>
-<answer>
-Your final answer
-</answer>
-"""
-
-# XMLParser extracts structured fields
-parser = vf.XMLParser(fields=["reasoning", "answer"])
-
-def correct_answer_reward_func(completion, answer, **kwargs):
-    parsed = parser.parse(completion)
-    return 1.0 if parsed.answer == answer else 0.0
-
-rubric = vf.Rubric(funcs=[
-    correct_answer_reward_func,
-    parser.get_format_reward_func()
-], weights=[1.0, 0.2])
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-)
-
-# Training setup is the same
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="example")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
-
-## Key Concepts
-
-### 1. **Environments** orchestrate the evaluation process
-- Handle dataset management and prompt formatting
-- Execute model interactions (rollouts)
-- Integrate parsers and rubrics for complete evaluation
-
-### 2. **Parsers** extract structured information
-- ThinkParser for step-by-step reasoning (extracts content after `</think>`)
-- XMLParser for structured output with multiple fields
-- Built-in format validation and rewards
-
-### 3. **Rubrics** define evaluation criteria
-- Combine multiple reward functions with weights
-- Support task-specific and general evaluations
-- Enable sophisticated multi-aspect scoring
-
-### 4. **Tools** extend model capabilities
-- Simple Python functions with clear signatures
-- Automatic discovery and schema generation
-- Safe execution with error handling
-
-## Why Verifiers?
-
-- **Modular Design**: Mix and match components for your use case
-- **Production Ready**: Used for training state-of-the-art models
-- **Efficient**: Async operations and batch processing built-in
-- **Flexible**: Support for any OpenAI-compatible API
-- **Extensible**: Easy to add custom environments, parsers, and rubrics
-
-## Learn More
-
-- Start with the [Overview](overview.md) for core concepts
-- Walk through [Examples](examples.md) to see real implementations
-- Deep dive into [Environments](environments.md), [Parsers](parsers.md), and [Rubrics](rubrics.md)
-- Learn about [Training](training.md) models with GRPO
-- Explore [Advanced](advanced.md) patterns for complex use cases
+**[Type Reference](api_reference.md)** — Understanding data structures

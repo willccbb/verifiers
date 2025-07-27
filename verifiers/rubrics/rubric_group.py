@@ -1,13 +1,14 @@
-from typing import List, Dict, Any
+from typing import Dict, List
 
-from verifiers import RewardFunc
 from verifiers.rubrics.rubric import Rubric
+from verifiers.types import Info, Messages, RewardFunc, State
 
 
 class RubricGroup(Rubric):
     """
     Class for aggregating multiple rubrics.
     """
+
     def __init__(self, rubrics: List[Rubric], **kwargs):
         self.rubrics = rubrics
         assert len(rubrics) > 0, "RubricGroup must have at least one rubric"
@@ -31,31 +32,32 @@ class RubricGroup(Rubric):
         for rubric in self.rubrics:
             weights.extend(rubric.get_reward_weights())
         return weights
-    
+
     def add_reward_func(self, func: RewardFunc, weight: float = 1.0):
         assert len(self.rubrics) > 0, "RubricGroup must have at least one rubric"
         self.logger.warning("Adding reward function to the first rubric in the group.")
         self.rubrics[0].add_reward_func(func, weight)
 
-    async def score_rollouts(self,
-                             prompts: List[List[Dict[str, str]] | str],
-                             completions: List[List[Dict[str, str]] | str],
-                             answers: List[Any],
-                             states: List[Dict[str, Any]],
-                             tasks: List[str],
-                             infos: List[Dict[str, Any]] = [],
-                             max_concurrent: int = 32,
-                             **kwargs) -> Dict[str, List[float]]:
+    async def score_rollouts(
+        self,
+        prompts: List[Messages],
+        completions: List[Messages],
+        answers: List[str],
+        states: List[State],
+        tasks: List[str],
+        infos: List[Info] = [],
+        **kwargs,
+    ) -> Dict[str, List[float]]:
         """
         Run all rubrics sequentially and return the aggregated scores.
 
         Reward functions with the same name are summed up.
         """
-        all_scores = {} 
+        all_scores = {}
         for rubric in self.rubrics:
             rubric_scores = await rubric.score_rollouts(
-                prompts, completions, answers, states, tasks, infos,
-                max_concurrent=max_concurrent, **kwargs)
+                prompts, completions, answers, states, tasks, infos, **kwargs
+            )
             for key, value in rubric_scores.items():
                 if key in all_scores:
                     # element-wise sum

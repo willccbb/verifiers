@@ -1,13 +1,10 @@
 import asyncio
-from asyncio import Semaphore
-import concurrent.futures
-
 import inspect
 import logging
-from typing import List, Dict, Any, Union
+from typing import Dict, List, Union
 
-from verifiers import RewardFunc
-from verifiers.parsers import Parser
+from verifiers.parsers.parser import Parser
+from verifiers.types import ChatMessage, Info, RewardFunc, State
 
 
 class Rubric:
@@ -15,7 +12,7 @@ class Rubric:
     Rubric class for reward functions.
 
     Each reward function takes:
-    - prompt: List[Dict[str, str]] | str 
+    - prompt: List[Dict[str, str]] | str
     - completion: List[Dict[str, str]] | str
     - answer: Any (metadata for scoring)
     - task (optional): str (type of task)
@@ -25,11 +22,14 @@ class Rubric:
     - float | List[float] | Dict[str, float]
     """
 
-    def __init__(self, 
-                 funcs: List[RewardFunc] = [],
-                 weights: List[float] = [],
-                 parser: Parser = Parser(),
-                 **kwargs):
+    def __init__(
+        self,
+        funcs: List[RewardFunc] = [],
+        weights: List[float] = [],
+        parser: Parser = Parser(),
+        parallelize_scoring: bool = True,
+        **kwargs,
+    ):
         self.logger = logging.getLogger(f"verifiers.rubrics.{self.__class__.__name__}")
         self.parser = parser
         for key, value in kwargs.items():
@@ -38,29 +38,33 @@ class Rubric:
         self.reward_weights = weights
         if not self.reward_weights:
             self.reward_weights = [1.0] * len(self.reward_funcs)
+        self.parallelize_scoring = parallelize_scoring
 
     def get_reward_func_names(self) -> List[str]:
         return [func.__name__ for func in self.reward_funcs]
 
     def get_reward_funcs(self) -> List[RewardFunc]:
-        return self.reward_funcs # type: ignore
+        return self.reward_funcs  # type: ignore
 
     def get_reward_weights(self) -> List[float]:
-        return self.reward_weights # type: ignore
+        return self.reward_weights  # type: ignore
 
     def add_reward_func(self, func: RewardFunc, weight: float = 1.0):
         self.reward_funcs.append(func)
         self.reward_weights.append(weight)
 
-    async def call_reward_func(self,
-                               func: RewardFunc,
-                               prompt: Union[str, List[Dict[str, Any]]],
-                               completion: Union[str, List[Dict[str, Any]]],
-                               answer: Any,
-                               state: Dict[str, Any],
-                               task: str = "default",
-                               info: dict = {},
-                               **kwargs) -> float:
+    async def call_reward_func(
+        self,
+        func: RewardFunc,
+        parser: Parser,
+        prompt: Union[str, List[ChatMessage]],
+        completion: Union[str, List[ChatMessage]],
+        answer: str,
+        state: State,
+        task: str = "default",
+        info: Info = {},
+        **kwargs,
+    ) -> float:
         """
         Invoke `func` with only the required arguments.
 
@@ -73,6 +77,7 @@ class Rubric:
         sig = inspect.signature(func)
 
         common = dict(
+            parser=parser,
             prompt=prompt,
             completion=completion,
             answer=answer,
@@ -96,40 +101,78 @@ class Rubric:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
         return ans
-    
-    async def score_rollout(self,
-                            prompt: Union[str, List[Dict[str, Any]]],
-                            completion: Union[str, List[Dict[str, Any]]],
-                            answer: Any,
-                            state: Dict[str, Any],
-                            task: str = "default",
-                            info: dict = {},
-                            **kwargs) -> Dict[str, float]:
+
+    async def score_rollout(
+        self,
+        prompt: Union[str, List[ChatMessage]],
+        completion: Union[str, List[ChatMessage]],
+        answer: str,
+        state: State,
+        task: str = "default",
+        info: Info = {},
+        **kwargs,
+    ) -> Dict[str, float]:
         """
         Evaluate all reward functions asynchronously for a single rollout.
         """
-        score_tasks = [
-            self.call_reward_func(func, prompt, completion, answer, state, task, info, **kwargs)
-            for func in self.get_reward_funcs()
-        ]
-        reward_scores = await asyncio.gather(*score_tasks)
-        rewards = {func.__name__: reward for func, reward in zip(self.get_reward_funcs(), reward_scores)}
-        rewards['reward'] = sum([reward * weight for reward, weight in zip(reward_scores, self.get_reward_weights())])
+        if self.parallelize_scoring:
+            score_tasks = [
+                self.call_reward_func(
+                    func=func,
+                    parser=self.parser,
+                    prompt=prompt,
+                    completion=completion,
+                    answer=answer,
+                    state=state,
+                    task=task,
+                    info=info,
+                    **kwargs,
+                )
+                for func in self.get_reward_funcs()
+            ]
+            reward_scores = await asyncio.gather(*score_tasks)
+        else:
+            reward_scores = []
+            for func in self.get_reward_funcs():
+                score = await self.call_reward_func(
+                    func=func,
+                    parser=self.parser,
+                    prompt=prompt,
+                    completion=completion,
+                    answer=answer,
+                    state=state,
+                    task=task,
+                    info=info,
+                    **kwargs,
+                )
+                reward_scores.append(score)
+        rewards = {
+            func.__name__: reward
+            for func, reward in zip(self.get_reward_funcs(), reward_scores)
+        }
+        rewards["reward"] = sum(
+            [
+                reward * weight
+                for reward, weight in zip(reward_scores, self.get_reward_weights())
+            ]
+        )
         return rewards
-    
-    async def score_rollouts(self,
-                             prompts: List[Union[str, List[Dict[str, Any]]]],
-                             completions: List[Union[str, List[Dict[str, Any]]]],
-                             answers: List[Any],
-                             states: List[Dict[str, Any]],
-                             tasks: List[str],
-                             infos: List[Dict[str, Any]] = [],
-                             **kwargs) -> Dict[str, List[float]]:
+
+    async def score_rollouts(
+        self,
+        prompts: List[Union[str, List[ChatMessage]]],
+        completions: List[Union[str, List[ChatMessage]]],
+        answers: List[str],
+        states: List[State],
+        tasks: List[str],
+        infos: List[Info] = [],
+        **kwargs,
+    ) -> Dict[str, List[float]]:
         """
         Compute reward scores for a group of rollouts.
-        
+
         Default behavior:
-        - evaluate each rollout asynchronously 
+        - evaluate each rollout asynchronously
         - return list of dictionaries of reward function names and their scores
 
         Potential overrides:
@@ -137,6 +180,7 @@ class Rubric:
         - scores computed using global state stored in Rubric class
         """
         from tqdm.asyncio import tqdm_asyncio
+
         rollout_tasks = [
             self.score_rollout(*pcasti, **kwargs)
             for pcasti in zip(prompts, completions, answers, states, tasks, infos)
@@ -144,13 +188,13 @@ class Rubric:
         rewards = await tqdm_asyncio.gather(
             *rollout_tasks,
             total=len(prompts),
-            desc=f"Evaluating {len(prompts)} rollouts"
+            desc=f"Evaluating {len(prompts)} rollouts",
         )
-        
+
         # Handle empty rewards list
         if not rewards:
             # Return empty dict with keys for each reward function
             reward_func_names = self.get_reward_func_names()
-            return {name: [] for name in reward_func_names + ['reward']}
-        
-        return {k: [item[k] for item in rewards] for k in rewards[0]} 
+            return {name: [] for name in reward_func_names + ["reward"]}
+
+        return {k: [item[k] for item in rewards] for k in rewards[0]}

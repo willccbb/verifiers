@@ -1,17 +1,27 @@
 # Training
 
-The verifiers framework integrates with Group Relative Policy Optimization (GRPO) to train language models using reward signals from your environments. Training is designed to be simple and scalable.
+This guide covers training models with Verifiers using GRPO (Group Relative Policy Optimization).
+
+## Training Options
+
+### PRIME-RL (Recommended)
+
+Unless you require LoRA support, use [prime-rl](https://github.com/PrimeIntellect-ai/prime-rl) which natively supports Verifiers environments and is optimized for large-scale FSDP training.
+
+### GRPOTrainer
+
+The included `GRPOTrainer` supports GRPO-style training via Accelerate/DeepSpeed with vLLM inference. It's designed for:
+- LoRA and smaller setups (2-16 GPUs)
+- Full-parameter finetuning
+- Experimentation and prototyping
 
 ## Quick Start
-
-Here's the basic pattern used in all examples:
 
 ```python
 import verifiers as vf
 
 # 1. Create environment
-dataset = vf.load_example_dataset("gsm8k", split="train")
-vf_env = vf.SingleTurnEnv(dataset=dataset)
+env = vf.load_environment("math-python")
 
 # 2. Load model
 model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
@@ -23,446 +33,247 @@ args = vf.grpo_defaults(run_name="my-experiment")
 trainer = vf.GRPOTrainer(
     model=model,
     processing_class=tokenizer,
-    env=vf_env,
+    env=env,
     args=args,
 )
 trainer.train()
-```
-
-## GRPO: Group Relative Policy Optimization
-
-GRPO is a reinforcement learning algorithm designed specifically for LLMs that:
-- Learns from relative comparisons within groups
-- Reduces reward hacking through comparative evaluation
-- Provides stable training dynamics
-- Works with any differentiable model
-
-## Training Configuration
-
-### Using Defaults
-
-All examples start with `vf.grpo_defaults()`:
-
-```python
-args = vf.grpo_defaults(run_name="descriptive-name")
-
-# Common overrides
-args.per_device_train_batch_size = 8
-args.num_generations = 16
-args.gradient_accumulation_steps = 4
-args.max_steps = 500
-args.max_prompt_length = 1024
-args.max_completion_length = 2048
-```
-
-### Key Parameters
-
-```python
-# Batch configuration
-args.per_device_train_batch_size = 8    # Samples per GPU
-args.num_generations = 16               # Completions per prompt
-args.gradient_accumulation_steps = 4    # Steps before update
-
-# Length limits
-args.max_prompt_length = 1024           # Truncate long prompts
-args.max_completion_length = 2048       # Truncate long responses
-
-# Training schedule
-args.max_steps = 500                    # Total training steps
-args.num_iterations = 1                 # Updates per batch
-args.learning_rate = 1e-6               # Learning rate
-
-# Generation settings
-args.temperature = 1.0                  # Sampling temperature
-args.top_p = 1.0                        # Nucleus sampling
-```
-
-## Model Loading
-
-Use the standard pattern from examples:
-
-```python
-# Basic loading
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-
-# With specific models from examples
-model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"  # Pre-trained on math
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-# Different sizes
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
-model, tokenizer = vf.get_model_and_tokenizer("willcb/Qwen3-14B-Arc-1D-SFT")
-```
-
-## Parameter-Efficient Training
-
-Use LoRA for large models:
-
-```python
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-    peft_config=vf.lora_defaults()  # Add LoRA
-)
 ```
 
 ## Infrastructure Setup
 
-### Single GPU Training
+### vLLM Server
 
-```python
-# Simple single GPU training
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="single-gpu-experiment")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
-
-### Multi-GPU Training
-
-The examples use this infrastructure pattern:
+Start a vLLM inference server for generation:
 
 ```bash
-# Start vLLM inference server (4 GPUs for generation)
-CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model 'Qwen/Qwen2.5-7B-Instruct' \
-    --tensor-parallel-size 4 --max-model-len 8192 --dtype bfloat16 \
-    --gpu-memory-utilization 0.9 --enable-prefix-caching \
-    --host 0.0.0.0 --port 8000
-
-# Run training on separate GPUs (4 GPUs for training)
-CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config-file configs/zero3.yaml \
-    --num-processes 4 your_training_script.py
+# Example: 6 GPUs for inference
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-7B-Instruct \
+    --data-parallel-size 6 --enforce-eager --disable-log-requests
 ```
 
-### ZeRO Configuration
+### Training Launch
 
-The examples use DeepSpeed ZeRO-3. Create `configs/zero3.yaml`:
-
-```yaml
-compute_environment: LOCAL_MACHINE
-distributed_type: MULTI_GPU
-downcast_bf16: 'no'
-gpu_ids: all
-machine_rank: 0
-main_training_function: main
-mixed_precision: bf16
-num_machines: 1
-num_processes: 4
-rdzv_backend: static
-same_network: true
-tpu_env: []
-tpu_use_cluster: false
-tpu_use_sudo: false
-use_cpu: false
-deepspeed_config:
-  gradient_accumulation_steps: 1
-  gradient_clipping: 1.0
-  offload_optimizer_device: cpu
-  offload_param_device: cpu
-  zero3_init_flag: true
-  zero3_save_16bit_model: true
-  zero_stage: 3
+```bash
+# Example: 2 GPUs for training
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config-file configs/zero3.yaml \
+    --num-processes 2 your_training_script.py
 ```
 
-## Environment-Specific Examples
+## Key Hyperparameters
 
-### Math Training
+### Batch Configuration
 
 ```python
-import verifiers as vf
+args = vf.grpo_defaults(run_name="experiment")
 
-dataset = vf.load_example_dataset("gsm8k", split="train")
-eval_dataset = vf.load_example_dataset("gsm8k", split="test")
+# Core batch settings
+args.per_device_train_batch_size = 8    # Prompts per GPU per step
+args.num_generations = 16               # Completions per prompt (group size)
+args.gradient_accumulation_steps = 4    # Steps before optimizer update
 
-system_prompt = """
-Think step-by-step inside <think>...</think> tags.
-Then, give your final numerical answer inside \\boxed{{...}}.
-"""
-
-parser = vf.ThinkParser(extract_fn=vf.extract_boxed_answer)
-
-def correct_answer_reward_func(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response == answer else 0.0
-
-rubric = vf.Rubric(funcs=[
-    correct_answer_reward_func,
-    parser.get_format_reward_func()
-], weights=[1.0, 0.2])
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    eval_dataset=eval_dataset,
-    system_prompt=system_prompt,
-    parser=parser,
-    rubric=rubric,
-)
-
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-args = vf.grpo_defaults(run_name="gsm8k-grpo")
-args.per_device_train_batch_size = 12
-args.num_generations = 12
-args.max_steps = 100
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-    peft_config=vf.lora_defaults()
-)
-trainer.train()
+# Effective batch size = per_device_train_batch_size * num_processes * gradient_accumulation_steps
+# Must be divisible by num_generations
 ```
 
-### Tool Training
+**How to think about batch settings:**
+- `num_generations`: Larger groups (16-32) increase reward diversity but use more memory
+- `per_device_train_batch_size`: Limited by GPU memory after model weights
+- `gradient_accumulation_steps`: Use to achieve larger effective batch sizes
+
+### Generation Parameters
 
 ```python
-import verifiers as vf
-from verifiers.tools import python
+# Sampling configuration
+args.temperature = 1.0          # Higher = more diverse completions
+args.top_p = 1.0               # Nucleus sampling threshold
+args.top_k = None              # Top-k filtering (None = disabled)
 
-TOOL_PROMPT = """
-Think step-by-step inside <think>...</think> tags, then either call a tool or give your final answer.
-
-Tools can be called with JSON:
-<tool>
-{{"name": "python", "args": {{"code": "print(2+2)"}}}}
-</tool>
-"""
-
-dataset = vf.load_example_dataset("math", split="train")
-
-vf_env = vf.ToolEnv(
-    dataset=dataset,
-    system_prompt=TOOL_PROMPT,
-    tools=[python],
-    max_steps=3
-)
-
-model_name = "willcb/Qwen2.5-7B-Math-Python-SFT"
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-args = vf.grpo_defaults(run_name="math-tool-grpo")
-args.num_iterations = 2
-args.per_device_train_batch_size = 8
-args.num_generations = 8
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-)
-trainer.train()
+# Length limits
+args.max_prompt_length = 1024      # Truncate prompts (left-truncated)
+args.max_completion_length = 2048  # Truncate completions
+args.max_seq_len = 4096           # Model's context window
 ```
 
-### Game Training
+**Generation strategy:**
+- High temperature (0.8-1.0) increases diversity within groups
+- Consider your model's context window when setting lengths
+- Longer completions allow more complex reasoning but increase memory usage
+
+### Training Schedule
 
 ```python
-import verifiers as vf
-from verifiers.envs.textarena_env import TextArenaEnv
-
-model_name = 'willcb/Qwen2.5-7B-Wordle-SFT'
-model, tokenizer = vf.get_model_and_tokenizer(model_name)
-
-vf_env = TextArenaEnv(
-    game="Wordle-v0",
-    num_samples=2000, 
-    num_eval_samples=20
-)
-
-args = vf.grpo_defaults(run_name="wordle-grpo")
-args.num_iterations = 1
-args.per_device_train_batch_size = 8
-args.num_generations = 16
-args.gradient_accumulation_steps = 6
-args.max_prompt_length = 1024
-args.max_completion_length = 3072
-args.max_steps = 100
-args.mask_env_responses = True
-
-trainer = vf.GRPOTrainer(
-    model=model,
-    processing_class=tokenizer,
-    env=vf_env,
-    args=args,
-)
-trainer.train()
-```
-
-## Advanced Configuration
-
-### Custom Training Arguments
-
-```python
-args = vf.grpo_defaults(run_name="my-experiment")
-
-# Scale up for larger experiments
-args.per_device_train_batch_size = 4
-args.num_generations = 32
-args.gradient_accumulation_steps = 8
-args.max_concurrent = 512
-args.max_steps = 1000
-
-# Memory optimization
-args.gradient_checkpointing = True
-args.bf16 = True
-
-# Learning schedule
-args.learning_rate = 1e-6
+# Optimization settings
+args.learning_rate = 1e-6              # Conservative default
 args.lr_scheduler_type = "constant_with_warmup"
-args.warmup_steps = 10
+args.warmup_steps = 10                 # Gradual warmup
+args.max_steps = 500                   # Total training steps
+args.num_iterations = 1                # PPO-style updates per batch
 
-# Logging and saving
-args.logging_steps = 1
-args.save_strategy = "steps"
-args.save_steps = 100
-args.report_to = "wandb"
+# Gradient control
+args.max_grad_norm = 0.01              # Aggressive clipping for stability
 ```
 
-### Environment Masking
+**Training dynamics:**
+- Start with default `learning_rate = 1e-6` for stability
+- `num_iterations > 1` does multiple updates per batch (more off-policy)
+- Lower `max_grad_norm` for more stable but slower training
 
-For interactive environments, mask environment responses:
+### GRPO-Specific Parameters
 
 ```python
-args.mask_env_responses = True  # Don't train on environment responses
-args.mask_truncated_completions = True  # Ignore truncated outputs
+# KL regularization
+args.beta = 0.001                      # KL penalty coefficient
+args.sync_ref_model = True             # Update reference model
+args.ref_model_sync_steps = 100        # How often to sync
+args.ref_model_mixup_alpha = 0.5       # Mix ratio for updates
+
+# Loss configuration
+args.loss_type = "dr_grpo"             # Recommended: no length bias
+args.epsilon = 0.2                     # Clipping bound (lower)
+args.delta = None                      # Optional upper clipping bound
 ```
 
-### Concurrent Generation
+**KL regularization:**
+- `beta = 0` removes reference model (faster, less stable)
+- `beta = 0.001` is conservative; some use 0.01-0.1
+- Sync reference model periodically for long runs
+
+### Async Generation
 
 ```python
-args.max_concurrent = 512  # Parallel rollouts
-args.async_generation_timeout = 300.0  # Timeout for generation
+# Overlapped training and inference
+args.num_batches_ahead = 1      # Batches to generate ahead
+args.async_generation_timeout = 300.0  # Timeout in seconds
+args.max_concurrent = 1024      # Max concurrent env requests
 ```
 
-## Training Scripts
+**How async generation works:**
+1. Maintains a pipeline of `num_batches_ahead` batches
+2. While training on batch N, generates batch N+1
+3. Overlaps compute-bound training with I/O-bound generation
+4. Set `num_batches_ahead = 0` for synchronous (debug) mode
 
-### Complete Training Script
+## Evaluation During Training
 
 ```python
-import verifiers as vf
+# Add evaluation dataset
+args.eval_strategy = "steps"
+args.eval_steps = 100
+args.per_device_eval_batch_size = 16
 
-def main():
-    # Load dataset and create environment
-    dataset = vf.load_example_dataset("gsm8k", split="train")
-    vf_env = vf.SingleTurnEnv(dataset=dataset)
-    
-    # Load model
-    model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-    
-    # Configure training
-    args = vf.grpo_defaults(run_name="my-experiment")
-    args.max_steps = 100
-    
-    # Create and run trainer
-    trainer = vf.GRPOTrainer(
-        model=model,
-        processing_class=tokenizer,
-        env=vf_env,
-        args=args,
-    )
-    trainer.train()
-
-if __name__ == "__main__":
-    main()
+# The environment can provide an eval dataset
+env = vf.load_environment("math-python", eval_split="test")
 ```
 
-### Multi-GPU Script
+## Parameter-Efficient Training
 
-Save as `train.py`:
+For large models or limited GPU memory:
 
 ```python
-import verifiers as vf
-
-def main():
-    dataset = vf.load_example_dataset("math", "train", n=6000)
-    vf_env = vf.ToolEnv(dataset=dataset, tools=[vf.tools.python])
-    
-    model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-7B-Instruct")
-    args = vf.grpo_defaults(run_name="multi-gpu-experiment")
-    
-    trainer = vf.GRPOTrainer(
-        model=model,
-        processing_class=tokenizer,
-        env=vf_env,
-        args=args,
-    )
-    trainer.train()
-
-if __name__ == "__main__":
-    main()
-```
-
-Run with:
-```bash
-accelerate launch --config-file configs/zero3.yaml --num-processes 4 train.py
-```
-
-## Monitoring Training
-
-### Weights & Biases Integration
-
-```python
-args = vf.grpo_defaults(run_name="my-experiment")
-args.report_to = "wandb"
-args.log_completions = True  # Log sample completions
-
-# Will automatically log:
-# - Training loss
-# - Reward statistics
-# - Sample completions
-# - Model metrics
-```
-
-### Manual Evaluation
-
-```python
-# During training, evaluate on test set
-eval_results = trainer.env.evaluate(
-    client=trainer.oai_client,
-    model=trainer._get_model_name(),
-    sampling_args=trainer._get_sampling_args(),
-    num_samples=100
+trainer = vf.GRPOTrainer(
+    model=model,
+    processing_class=tokenizer,
+    env=env,
+    args=args,
+    peft_config=vf.lora_defaults(r=8, alpha=16)
 )
-print(f"Eval reward: {eval_results['reward']}")
 ```
+
+## GRPO Rules of Thumb
+
+RL is notoriously sensitive to implementation details. Here's practical guidance:
+
+### Before Training
+
+1. **Evaluate baseline performance**: If your model gets 0% reward after 10+ attempts, the task is too hard
+2. **Check task difficulty**: If baseline is already 80%+, consider harder examples
+3. **Ensure reward diversity**: You want varied scores within each generation group
+
+### Stability vs Performance Trade-offs
+
+**For more aggressive training** (higher risk of collapse):
+- Set `beta = 0` (no KL penalty)
+- Increase learning rate (2e-6 to 5e-6)
+- Increase `num_iterations` (2-4)
+
+**For more stable training** (slower progress):
+- Increase `num_generations` (32-64)
+- Increase batch size via `gradient_accumulation_steps`
+- Decrease `max_grad_norm` (0.001-0.005)
+- Use larger models (14B+)
+- Keep `num_iterations = 1` (stay on-policy)
+
+### Best Practices
+
+**Likely beneficial:**
+- Learning rate warmup (10-20 steps minimum)
+- Periodic reference model updates for 500+ step runs
+- One-step off-policy training (`num_batches_ahead = 1`)
+
+**Context-dependent:**
+- High `beta` values (0.1+) - more conservative
+- Overlong filtering - depends on task
+- Tool response masking - useful for multi-turn
+
+**Key insight**: The best way to improve training is ensuring appropriate task difficulty for your model - not too easy, not too hard.
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **CUDA Out of Memory**
-   ```python
-   args.per_device_train_batch_size = 2  # Reduce batch size
-   args.gradient_checkpointing = True     # Enable checkpointing
-   args.bf16 = True                       # Use half precision
-   ```
+**OOM during generation:**
+- Reduce `num_generations` or `per_device_train_batch_size`
+- Use LoRA instead of full finetuning
+- Check vLLM server has sufficient memory
 
-2. **Slow Training**
-   ```python
-   args.max_concurrent = 256              # Increase concurrency
-   args.gradient_accumulation_steps = 8   # Larger effective batch
-   ```
+**Training instability:**
+- Reduce learning rate
+- Decrease `max_grad_norm`
+- Increase `beta` for stronger KL regularization
 
-3. **vLLM Connection Issues**
-   ```bash
-   # Check vLLM server is running
-   curl http://localhost:8000/health
-   
-   # Check GPU usage
-   nvidia-smi
-   ```
+**Poor reward diversity:**
+- Increase temperature
+- Check if task difficulty matches model capability
+- Ensure your rubric differentiates quality levels
 
-### Performance Tips
+### Infrastructure
 
-1. **Use appropriate batch sizes**: Start small and scale up
-2. **Enable async generation**: Set `max_concurrent` appropriately
-3. **Use LoRA for large models**: Add `peft_config=vf.lora_defaults()`
-4. **Monitor GPU utilization**: Ensure GPUs are fully used
-5. **Use bf16**: Enable mixed precision training
+- Set `OPENAI_API_KEY` (can be dummy for vLLM)
+- Increase ulimit for high concurrency: `ulimit -n 4096`
+- For NCCL issues: try `NCCL_P2P_DISABLE=1`
 
-The training framework is designed to scale from single GPU experiments to large multi-GPU production runs. All examples follow the same basic patterns, making it easy to reproduce and extend the training setups.
+## Advanced Configuration
+
+### Custom Sampling
+
+```python
+# Fine-grained generation control
+args.repetition_penalty = 1.1   # Reduce repetition
+args.top_k = 50                # Limit vocabulary
+args.min_p = 0.05              # Min probability threshold
+```
+
+### Resource Optimization
+
+```python
+# Memory-constrained settings
+args.gradient_checkpointing = True
+args.ds3_gather_for_generation = False  # For very large models
+args.generation_batch_size = 16  # Control generation batch size
+```
+
+### Monitoring
+
+```python
+# Logging configuration
+args.logging_steps = 1
+args.log_completions = True
+args.report_to = "wandb"  # or "none" to disable
+args.num_completions_to_print = 5  # Sample size to log
+```
+
+## Next Steps
+
+- Explore [Environments](environments.md) to create custom tasks
+- Review [Components](components.md) for advanced patterns
+- See the [examples directory](https://github.com/willccbb/verifiers/tree/main/examples) on GitHub for complete training scripts

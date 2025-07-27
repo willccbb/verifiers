@@ -11,6 +11,8 @@ CLAUDE.md
 .cursor/
 
 # artifacts
+core.* 
+.coverage
 dist/
 build/
 _build/
@@ -18,6 +20,7 @@ docs/build/
 *.egg-info/
 */__pycache__/
 .pytest_cache/
+.ruff_cache/
 *.pyo
 *.pyd
 *.pyc
@@ -28,13 +31,19 @@ outputs/
 logs/
 
 # development
+local/
+scratch/
 .idea/
 .vscode/
 *.swp
 .DS_Store
 
 # WIPs
+verifiers/envs/multibranch_env.py
 wip/
 old/
-scripts/
-notebooks/
+
+# Incomplete environments
+environments/aime2024/
+environments/aime2025/
+environments/reverse_text_mini/
