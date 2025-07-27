@@ -47,10 +47,13 @@ class Tau2BenchEnv(MultiTurnEnv):
                  domain: str,
                  tau2_env,
                  tau2_tasks: List[Any],
-                 user_llm: str = "gpt-4o-mini",
+                 user_llm: str = "gpt-4.1-mini",
                  max_turns: int = 30,
                  **kwargs):
         # Initialize with message_type="chat" for multi-turn conversations
+        # Remove any existing message_type from kwargs to avoid conflicts
+        kwargs.pop('message_type', None)
+        kwargs.pop('max_turns', None)
         super().__init__(dataset, rubric, message_type="chat", max_turns=max_turns, **kwargs)
         self.domain = domain
         self.tau2_env = tau2_env
@@ -615,7 +618,7 @@ def load_environment(
     domain: str = "retail",
     num_train_examples: int = -1,
     num_eval_examples: int = 10,
-    user_llm: str = "gpt-4o-mini",
+    user_llm: str = "gpt-4.1-mini",
     **kwargs
 ) -> vf.Environment:
     """
@@ -665,6 +668,11 @@ def load_environment(
     rubric = create_tau2_rubric(domain)
     
     # Create environment
+    # Remove any verifiers-specific kwargs that might conflict
+    env_kwargs = kwargs.copy()
+    env_kwargs.pop('message_type', None)
+    env_kwargs.pop('max_turns', None)
+    
     env = Tau2BenchEnv(
         dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -673,7 +681,7 @@ def load_environment(
         tau2_env=tau2_env,
         tau2_tasks=tau2_tasks,
         user_llm=user_llm,
-        **kwargs
+        **env_kwargs
     )
     
     return env
