@@ -119,12 +119,12 @@ def env_response(
     """
     Returns:
         - Response messages (List[ChatMessage] or str for completion mode)
-        - Updated state dictionary (modified, not recreated)
+        - Updated state dictionary
     """
     # Return a list of ChatMessage dicts (typical case)
     response = [{"role": "user", "content": "Environment feedback"}]
     
-    # Update existing state - DO NOT create new state dict
+    # Update state as needed
     state["turn"] = state.get("turn", 0) + 1
     state["last_action"] = "provided feedback"
     

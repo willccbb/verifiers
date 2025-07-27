@@ -224,7 +224,7 @@ class MyGameEnv(vf.MultiTurnEnv):
             state["done"] = True
             return response, state
         
-        # Update game state (modify existing state, don't create new one)
+        # Update game state
         state = self.update_state(state, player_action)
         feedback = self.get_game_feedback(state)
         
