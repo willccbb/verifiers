@@ -33,7 +33,10 @@ class MyProtocol(vf.MultiTurnEnv):
     def env_response(self, messages, state):
         """Define how environment responds to model"""
         # Custom logic for your protocol
-        return response, new_state
+        response = [{"role": "user", "content": "Environment feedback"}]
+        # Modify state in-place, don't create new dict
+        state["turn"] = state.get("turn", 0) + 1
+        return response, state
     
     def is_completed(self, messages, state):
         """Define when interaction ends"""

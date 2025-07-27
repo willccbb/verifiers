@@ -351,18 +351,22 @@ class WordleEnv(vf.MultiTurnEnv):
     def env_response(self, messages, state):
         if state.get("turn", 0) == 0:
             # First turn: initialize
-            return "Guess a 5-letter word. You have 6 attempts.", {
-                "turn": 1,
-                "target": state["answer"],
-                "guesses": []
-            }
+            state["turn"] = 1
+            state["target"] = state["answer"]
+            state["guesses"] = []
+            return [{"role": "user", "content": "Guess a 5-letter word. You have 6 attempts."}], state
         
-        guess = messages[-1]["content"].strip().upper()
+        # Get the last assistant message
+        last_msg = messages[-1]
+        if last_msg["role"] != "assistant":
+            return [], state  # No response if not assistant message
+            
+        guess = last_msg["content"].strip().upper()
         target = state["target"]
         
         # Validate guess
         if len(guess) != 5 or not guess.isalpha():
-            return "Please guess a 5-letter word.", state
+            return [{"role": "user", "content": "Please guess a 5-letter word."}], state
         
         # Generate feedback
         feedback = self.get_feedback(guess, target)
@@ -370,12 +374,14 @@ class WordleEnv(vf.MultiTurnEnv):
         state["turn"] += 1
         
         if guess == target:
-            return f"Correct! The word was {target}.", {**state, "solved": True}
+            state["solved"] = True
+            return [{"role": "user", "content": f"Correct! The word was {target}."}], state
         elif state["turn"] > self.max_guesses:
-            return f"Out of guesses. The word was {target}.", {**state, "failed": True}
+            state["failed"] = True
+            return [{"role": "user", "content": f"Out of guesses. The word was {target}."}], state
         else:
             remaining = self.max_guesses - state["turn"] + 1
-            return f"{feedback}\n{remaining} guesses remaining.", state
+            return [{"role": "user", "content": f"{feedback}\n{remaining} guesses remaining."}], state
     
     def is_completed(self, messages, state):
         return state.get("solved", False) or state.get("failed", False)
@@ -491,4 +497,4 @@ def load_math_suite(**kwargs):
 
 - Build your own environments using these components in [Environments](environments.md)
 - Train models with your environments in [Training](training.md)
-- Understand the type system in [Type Reference](api_reference.md) 
+- Understand the type system in [Type Reference](api_reference.md)
