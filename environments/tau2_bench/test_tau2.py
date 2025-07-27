@@ -44,12 +44,11 @@ def test_basic_loading():
             # Show first task
             if env.tau2_tasks:
                 first_task = env.tau2_tasks[0]
-                print(f"  First task ID: {first_task['id']}")
+                print(f"  First task ID: {first_task.id}")
                 
                 # Check for user instructions
-                user_instr = first_task.get("user_instructions", {})
-                if user_instr:
-                    scenario = user_instr.get("scenario", "")[:100]
+                if hasattr(first_task, "user_scenario") and first_task.user_scenario:
+                    scenario = getattr(first_task.user_scenario, "scenario", "")[:100]
                     print(f"  Scenario: {scenario}...")
                     
             # Check tool availability

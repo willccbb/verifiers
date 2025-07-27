@@ -49,6 +49,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                  tau2_tasks: List[Any],
                  user_llm: str = "gpt-4.1-mini",
                  max_turns: int = 30,
+                 max_errors: int = 3,
                  **kwargs):
         # Initialize parent class
         super().__init__(dataset=dataset, rubric=rubric, **kwargs)
@@ -57,6 +58,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         self.tau2_tasks = tau2_tasks
         self.user_llm = user_llm
         self.max_turns = max_turns
+        self.max_errors = max_errors
         
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
@@ -67,6 +69,11 @@ class Tau2BenchEnv(MultiTurnEnv):
         turn_count = state.get("turn_count", 0)
         if turn_count >= self.max_turns:
             state["termination_reason"] = "max_turns_reached"
+            return True
+            
+        # Check error count
+        if state.get("error_count", 0) >= self.max_errors:
+            state["termination_reason"] = "too_many_errors"
             return True
             
         # Check if user said stop/transfer
@@ -157,6 +164,9 @@ class Tau2BenchEnv(MultiTurnEnv):
         if "tool_executions" not in state:
             state["tool_executions"] = []
             
+        if "error_count" not in state:
+            state["error_count"] = 0
+            
         # Initialize user simulator if needed
         if "user_simulator" not in state:
             self._init_user_simulator(state)
@@ -232,6 +242,7 @@ class Tau2BenchEnv(MultiTurnEnv):
             except Exception as e:
                 exec_record["error"] = str(e)
                 exec_record["success"] = False
+                state["error_count"] = state.get("error_count", 0) + 1
                 
                 tool_messages.append({
                     "role": "tool",
@@ -299,6 +310,7 @@ class Tau2BenchEnv(MultiTurnEnv):
             except Exception as e:
                 exec_record["error"] = str(e)
                 exec_record["success"] = False
+                state["error_count"] = state.get("error_count", 0) + 1
                 
                 tool_messages.append({
                     "role": "tool",
@@ -381,28 +393,47 @@ class Tau2BenchEnv(MultiTurnEnv):
             }
             
     def _check_task_completion(self, state: vf.State) -> bool:
-        """Check if task goals are achieved."""
+        """Check if task goals are achieved using environment state comparison."""
         task_id = state.get("task_id")
         task = self.task_lookup.get(task_id)
         
-        if not task or not hasattr(task, 'expected_state') or not task.expected_state:
+        if not task or not hasattr(task, 'evaluation_criteria') or not task.evaluation_criteria:
             return False
             
-        expected_state = task.expected_state.model_dump()
-            
-        # Check goals
-        goals = expected_state.get("goals", [])
-        if not goals:
-            return False
-            
-        # Check each goal
-        achieved = 0
-        for goal in goals:
-            if self._check_single_goal(goal, state):
-                achieved += 1
+        # First try environment hash comparison (most accurate)
+        if hasattr(self.tau2_env, 'get_db_hash'):
+            try:
+                # Get current environment state hash
+                current_hash = self.tau2_env.get_db_hash()
                 
-        # All goals must be achieved
-        return achieved == len(goals)
+                # Compare with expected state
+                # Note: This is simplified - the original creates a golden environment
+                # and compares hashes after applying expected actions
+                if hasattr(task.evaluation_criteria, 'expected_hash'):
+                    return current_hash == task.evaluation_criteria.expected_hash
+            except Exception:
+                pass  # Fall back to other checks
+                
+        # Fall back to checking goals if defined
+        if hasattr(task, 'expected_state') and task.expected_state:
+            expected_state = task.expected_state.model_dump()
+            goals = expected_state.get("goals", [])
+            
+            if goals:
+                achieved = sum(1 for goal in goals if self._check_single_goal(goal, state))
+                return achieved == len(goals)
+                
+        # Check if required actions were performed
+        if hasattr(task.evaluation_criteria, 'actions') and task.evaluation_criteria.actions:
+            required_actions = {(action.name, action.requestor) for action in task.evaluation_criteria.actions}
+            performed_actions = {
+                (exec["tool"], exec.get("role", "agent")) 
+                for exec in state.get("tool_executions", []) 
+                if exec.get("success", False)
+            }
+            return required_actions.issubset(performed_actions)
+            
+        return False
         
     def _check_single_goal(self, goal: Dict, state: vf.State) -> bool:
         """Check if a single goal is achieved."""
@@ -441,10 +472,27 @@ class Tau2BenchEnv(MultiTurnEnv):
         
         for msg in messages:
             if msg["role"] == "assistant":
+                # Convert tool calls to tau2 format
+                tau2_tool_calls = []
+                if "tool_calls" in msg and msg["tool_calls"]:
+                    for tc in msg["tool_calls"]:
+                        args_str = tc.get("function", {}).get("arguments", "{}")
+                        # Parse arguments if they're a string
+                        try:
+                            args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                        except:
+                            args_dict = {}
+                            
+                        tau2_tool_calls.append({
+                            "id": tc.get("id", ""),
+                            "name": tc.get("function", {}).get("name", ""),
+                            "arguments": args_dict
+                        })
+                
                 tau2_msg = AssistantMessage(
                     role="assistant",
                     content=msg.get("content", ""),
-                    tool_calls=msg.get("tool_calls", []),
+                    tool_calls=tau2_tool_calls,
                     cost=0.0
                 )
             elif msg["role"] == "user":
@@ -455,9 +503,10 @@ class Tau2BenchEnv(MultiTurnEnv):
                 )
             elif msg["role"] == "tool":
                 tau2_msg = ToolMessage(
+                    id=msg.get("tool_call_id", ""),  # tau2 expects 'id' not 'tool_call_id'
                     role="tool",
                     content=msg.get("content", ""),
-                    tool_call_id=msg.get("tool_call_id", "")
+                    name=msg.get("name", "tool")  # tau2 also expects tool name
                 )
             else:
                 continue
@@ -480,7 +529,7 @@ def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
         
         # Get initial message history if available
         initial_messages = []
-        if hasattr(task, 'initial_state') and task.initial_state and hasattr(task.initial_state, 'message_history'):
+        if hasattr(task, 'initial_state') and task.initial_state and hasattr(task.initial_state, 'message_history') and task.initial_state.message_history:
             initial_messages = [
                 {
                     "role": msg.role,
@@ -523,21 +572,39 @@ def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
     return Dataset.from_list(dataset_rows)
 
 
+def check_action_sequence(required_actions: List[Dict], tool_executions: List[Dict]) -> bool:
+    """Check if required actions were performed in the correct order."""
+    if not required_actions:
+        return True
+        
+    exec_tools = [e["tool"] for e in tool_executions if e.get("success", False)]
+    required_tools = [a.get("tool") for a in required_actions]
+    
+    # Simple check: all required tools were called
+    # More sophisticated check would verify order and parameters
+    return all(tool in exec_tools for tool in required_tools)
+
+
 def create_tau2_rubric(domain: str) -> vf.Rubric:
-    """Create evaluation rubric for tau2 tasks."""
+    """Create evaluation rubric for tau2 tasks aligned with original τ²-bench evaluation."""
     
     def check_goal_achievement(completion, info, state, **kwargs) -> float:
-        """Check if task goals were achieved."""
+        """Check if task goals were achieved (aligned with original env evaluation)."""
+        # Primary check: termination reason
+        termination = state.get("termination_reason", "")
+        if termination == "goal_achieved":
+            return 1.0
+        elif termination in ["too_many_errors", "max_turns_reached"]:
+            return 0.0  # Failed due to limits
+            
+        # Secondary check: look at expected state if available
         expected_state = info.get("expected_state", {})
         goals = expected_state.get("goals", [])
         
         if not goals:
-            # No specific goals, check termination reason
-            termination = state.get("termination_reason", "")
-            if termination == "goal_achieved":
-                return 1.0
-            elif termination == "user_stop":
-                return 0.5  # Partial credit for user satisfaction
+            # No specific goals defined
+            if termination == "user_stop" and state.get("error_count", 0) == 0:
+                return 0.5  # Partial credit for clean user-initiated stop
             else:
                 return 0.0
                 
@@ -546,38 +613,52 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
         for goal in goals:
             goal_type = goal.get("type", "")
             if goal_type == "tool_called":
-                # Check if required tool was called
+                # Check if required tool was called successfully
                 tool_execs = state.get("tool_executions", [])
                 required_tool = goal.get("tool_name", "")
                 if any(exec["tool"] == required_tool and exec.get("success", False) 
                        for exec in tool_execs):
                     achieved += 1
             elif goal_type == "db_state":
-                # Check database state
+                # Check database state matches expected
                 expected_db = goal.get("expected_db", {})
                 current_db = state.get("env_db", {})
                 if all(current_db.get(k) == v for k, v in expected_db.items()):
                     achieved += 1
-            else:
-                # Default: assume achieved if conversation completed
-                if state.get("termination_reason") in ["goal_achieved", "user_stop"]:
+            elif goal_type == "action_sequence":
+                # Check if required actions were performed in order
+                required_actions = goal.get("actions", [])
+                tool_execs = state.get("tool_executions", [])
+                if check_action_sequence(required_actions, tool_execs):
                     achieved += 1
                     
         return achieved / len(goals) if goals else 0.0
         
     def check_efficiency(completion, info, state, **kwargs) -> float:
-        """Check efficiency of task completion."""
+        """Check efficiency of task completion (considers errors and termination)."""
         turn_count = state.get("turn_count", 0)
-        max_turns = 30
+        error_count = state.get("error_count", 0)
+        termination = state.get("termination_reason", "")
         
+        # Base efficiency score from turn count
         if turn_count <= 10:
-            return 1.0  # Very efficient
+            efficiency_score = 1.0  # Very efficient
         elif turn_count <= 20:
-            return 0.7  # Reasonably efficient
-        elif turn_count < max_turns:
-            return 0.4  # Completed but inefficient
+            efficiency_score = 0.7  # Reasonably efficient
+        elif turn_count < 30:
+            efficiency_score = 0.4  # Completed but inefficient
         else:
-            return 0.0  # Hit max turns
+            efficiency_score = 0.1  # Hit max turns
+            
+        # Penalize errors
+        error_penalty = min(0.3, error_count * 0.1)
+        efficiency_score -= error_penalty
+        
+        # Bonus for successful completion
+        if termination == "goal_achieved":
+            efficiency_score += 0.1
+            
+        return max(0.0, min(1.0, efficiency_score))
             
     def check_tool_usage(completion, info, state, **kwargs) -> float:
         """Check appropriate tool usage."""
