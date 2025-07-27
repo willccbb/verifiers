@@ -112,6 +112,32 @@ class Tau2BenchEnv(MultiTurnEnv):
         
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
+        
+        # Store environment configuration
+        self.env_config = {
+            "domain": domain,
+            "policy": tau2_env.policy,
+            "tools": tau2_env.tools,
+            "user_tools": getattr(tau2_env, 'user_tools', None)
+        }
+
+    def _create_fresh_env(self, initial_db_state: dict = None):
+        """Create a fresh tau2 environment instance with optional initial state."""
+        from tau2.environment.environment import Environment
+        
+        # Create fresh environment
+        env = Environment(
+            domain_name=self.env_config["domain"],
+            policy=self.env_config["policy"],
+            tools=self.env_config["tools"],
+            user_tools=self.env_config["user_tools"]
+        )
+        
+        # Set initial database state if provided
+        if initial_db_state:
+            env.set_state(initial_db_state)
+            
+        return env
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
