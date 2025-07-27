@@ -885,6 +885,8 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             tau2_messages = []
             tool_call_count = 0
             tool_message_count = 0
+            tool_call_ids = []
+            tool_message_ids = []
             
             if isinstance(completion, list):
                 # completion is already the full message history
@@ -905,6 +907,8 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                                     args_str = tc.get("function", {}).get("arguments", "{}")
                                     tc_id = tc.get("id", "")
                                     tc_name = tc.get("function", {}).get("name", "")
+                                
+                                tool_call_ids.append(tc_id)
                                 
                                 # Parse arguments
                                 try:
@@ -962,8 +966,10 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         )
                     elif msg["role"] == "tool":
                         tool_message_count += 1
+                        tm_id = msg.get("tool_call_id", "")
+                        tool_message_ids.append(tm_id)
                         tau2_msg = ToolMessage(
-                            id=msg.get("tool_call_id", ""),
+                            id=tm_id,
                             role="tool",
                             content=msg.get("content", ""),
                             name=msg.get("name", "tool")
@@ -976,6 +982,21 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             print(f"DEBUG: Found {tool_call_count} tool calls and {tool_message_count} tool messages")
             if tool_call_count != tool_message_count:
                 print(f"WARNING: Tool call/message count mismatch!")
+                
+            # Check for ID mismatches
+            missing_responses = []
+            for tc_id in tool_call_ids:
+                if tc_id not in tool_message_ids:
+                    missing_responses.append(tc_id)
+            if missing_responses:
+                print(f"WARNING: Tool calls without responses: {missing_responses}")
+                
+            orphan_responses = []
+            for tm_id in tool_message_ids:
+                if tm_id not in tool_call_ids:
+                    orphan_responses.append(tm_id)
+            if orphan_responses:
+                print(f"WARNING: Tool messages without calls: {orphan_responses}")
                     
             simulation = SimulationRun(
                 id=f"verifiers_eval_{task_id}_{datetime.now().isoformat()}",
