@@ -73,9 +73,12 @@ This implementation successfully decodes and uses both public and private test c
 
 ## Metrics
 
-This environment evaluates code generation using functional correctness:
+This environment evaluates code generation using two metrics:
 
-1. **Correctness Score**: Fraction of test cases passed (0.0 to 1.0)
+1. **Correctness Score**: Fraction of test cases passed (0.0 to 1.0) - stored but not used for final reward
+2. **Pass Score**: Binary metric (1.0 if ALL test cases pass, 0.0 otherwise) - used for final reward
+
+The final reward is based solely on `pass_score`, matching LiveCodeBench's Pass@1 metric which requires all test cases to pass.
 
 ## Security
 

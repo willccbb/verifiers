@@ -381,11 +381,12 @@ def load_environment(
     parser = vf.Parser(extract_fn=extract_code)
     
     # Define rubric functions
-    def correctness_score(completion, info, parser) -> float:
-        """Evaluate code correctness using test cases"""
+    def correctness_score(completion, info, parser, state) -> float:
+        """Evaluate code correctness using test cases - returns fraction passed"""
         code = parser.parse_answer(completion)
         
         if not code or not info.get('test_cases'):
+            state['raw_score'] = 0.0
             return 0.0
         
         # Add starter code if provided
@@ -430,14 +431,27 @@ def load_environment(
         
         # Check results
         passed = sum(1 for r in results if r['exit_code'] == 0 and r['stdout'].strip() == r['expected'])
+        score = passed / len(test_cases) if test_cases else 0.0
         
-        return passed / len(test_cases) if test_cases else 0.0
+        # Store raw score in state for pass_score to use
+        state['raw_score'] = score
+        state['total_tests'] = len(test_cases)
+        state['passed_tests'] = passed
+        
+        return score
     
-    # Create rubric
+    def pass_score(completion, info, parser, state) -> float:
+        """Returns 1.0 if ALL test cases pass, 0.0 otherwise"""
+        # Use the raw score stored by correctness_score
+        raw_score = state.get('raw_score', 0.0)
+        return 1.0 if raw_score == 1.0 else 0.0
+    
+    # Create rubric with both metrics
     rubric = vf.Rubric(
-        funcs=[correctness_score],
-        weights=[1.0],
-        parser=parser
+        funcs=[correctness_score, pass_score],
+        weights=[0.0, 1.0],  # Only pass_score contributes to final reward
+        parser=parser,
+        parallelize_scoring=False  # Important: run sequentially so pass_score can use correctness_score's state
     )
     
     # Create environment
