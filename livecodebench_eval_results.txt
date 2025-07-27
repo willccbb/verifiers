@@ -1,4 +1,3 @@
-2025-07-27 02:13:19 - verifiers.envs.SingleTurnEnv - INFO - eval_dataset is not set, falling back to train dataset
 Loading LiveCodeBench dataset: livecodebench/code_generation_lite
 Version: release_v5
 Downloading test5.jsonl from HuggingFace...
@@ -21,5 +20,881 @@ Failed to parse private test cases for abc374_e
 Failed to parse private test cases for abc375_e
 Failed to parse private test cases for abc375_b
 Failed to parse private test cases for abc375_c
-Running 50 rollouts:   0%|          | 0/50 [00:00<?, ?it/s]Running 50 rollouts:   2%|▏         | 1/50 [00:00<00:35,  1.38it/s]Running 50 rollouts:   6%|▌         | 3/50 [00:00<00:12,  3.79it/s]Running 50 rollouts:  12%|█▏        | 6/50 [00:02<00:14,  3.00it/s]Running 50 rollouts:  16%|█▌        | 8/50 [00:02<00:09,  4.34it/s]Running 50 rollouts:  20%|██        | 10/50 [00:02<00:11,  3.50it/s]Running 50 rollouts:  22%|██▏       | 11/50 [00:03<00:13,  2.83it/s]Running 50 rollouts:  26%|██▌       | 13/50 [00:04<00:11,  3.20it/s]Running 50 rollouts:  28%|██▊       | 14/50 [00:05<00:21,  1.70it/s]Running 50 rollouts:  30%|███       | 15/50 [00:06<00:20,  1.69it/s]Running 50 rollouts:  32%|███▏      | 16/50 [00:06<00:16,  2.05it/s]Running 50 rollouts:  34%|███▍      | 17/50 [00:06<00:16,  2.04it/s]Running 50 rollouts:  38%|███▊      | 19/50 [00:07<00:11,  2.62it/s]Running 50 rollouts:  40%|████      | 20/50 [00:08<00:12,  2.37it/s]Running 50 rollouts:  42%|████▏     | 21/50 [00:09<00:19,  1.49it/s]Running 50 rollouts:  44%|████▍     | 22/50 [00:09<00:17,  1.64it/s]Running 50 rollouts:  48%|████▊     | 24/50 [00:10<00:10,  2.58it/s]Running 50 rollouts:  50%|█████     | 25/50 [00:10<00:08,  2.82it/s]Running 50 rollouts:  52%|█████▏    | 26/50 [00:10<00:07,  3.07it/s]Running 50 rollouts:  54%|█████▍    | 27/50 [00:10<00:07,  2.98it/s]Running 50 rollouts:  58%|█████▊    | 29/50 [00:11<00:05,  3.86it/s]Running 50 rollouts:  60%|██████    | 30/50 [00:11<00:04,  4.04it/s]Running 50 rollouts:  62%|██████▏   | 31/50 [00:11<00:04,  4.41it/s]Running 50 rollouts:  68%|██████▊   | 34/50 [00:12<00:03,  4.36it/s]Running 50 rollouts:  72%|███████▏  | 36/50 [00:12<00:02,  5.71it/s]Running 50 rollouts:  76%|███████▌  | 38/50 [00:12<00:02,  5.46it/s]Running 50 rollouts:  78%|███████▊  | 39/50 [00:18<00:12,  1.12s/it]Running 50 rollouts:  82%|████████▏ | 41/50 [00:18<00:06,  1.29it/s]Running 50 rollouts:  88%|████████▊ | 44/50 [00:18<00:02,  2.12it/s]Running 50 rollouts:  94%|█████████▍| 47/50 [00:19<00:01,  2.39it/s]Running 50 rollouts:  96%|█████████▌| 48/50 [00:26<00:02,  1.36s/it]Running 50 rollouts: 100%|██████████| 50/50 [00:26<00:00,  1.92it/s]
-Evaluating 50 rollouts:   0%|          | 0/50 [00:00<?, ?it/s]
+
+=== Test case 1 ===
+Input: abcde
+abedc
+...
+Expected: 3...
+Got stdout: 3
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: abcde
+abedc
+...
+Expected: 3...
+Got stdout: 3
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 7
+AB
+BC
+CA
+CD
+DE
+DF
+XX
+...
+Expected: 3...
+Got stdout: 2
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: abcde
+abedc
+...
+Expected: 3...
+Got stdout: 3
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 2 1
+1 3 2 1
+0 2 0 0
+3 0 2 0
+...
+Expected: 6.44317475868633722080...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 3 2 1
+1 3 2 1
+0 2 0 0
+3 0 2 0
+...
+Expected: 6.44317475868633722080...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 3 2 1
+1 3 2 1
+0 2 0 0
+3 0 2 0
+...
+Expected: 6.44317475868633722080...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: takahashisan
+...
+Expected: Yes...
+Got stdout: Yes
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 2 1
+1 3 2 1
+0 2 0 0
+3 0 2 0
+...
+Expected: 6.44317475868633722080...
+Got stdout: ...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 2 1
+1 3 2 1
+0 2 0 0
+3 0 2 0
+...
+Expected: 6.44317475868633722080...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 5 2 3
+1 5 6 10 12
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 7
+AB
+BC
+CA
+CD
+DE
+DF
+XX
+...
+Expected: 3...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 7
+AB
+BC
+CA
+CD
+DE
+DF
+XX
+...
+Expected: 3...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 7
+AB
+BC
+CA
+CD
+DE
+DF
+XX
+...
+Expected: 3...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 3 22
+2 5 3 6
+1 1 3 3
+1 3 2 4
+...
+Expected: 4...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 7
+AB
+BC
+CA
+CD
+DE
+DF
+XX
+...
+Expected: 3...
+Got stdout: 2
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: takahashisan
+...
+Expected: Yes...
+Got stdout: Yes
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: takahashisan
+...
+Expected: Yes...
+Got stdout: Yes
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: takahashisan
+...
+Expected: Yes...
+Got stdout: Yes
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 6
+1 2
+2 5
+1 5
+3 3
+1 3
+3 6
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: takahashisan
+...
+Expected: Yes...
+Got stdout: Yes
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 22
+2 5 3 6
+1 1 3 3
+1 3 2 4
+...
+Expected: 4...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 3 22
+2 5 3 6
+1 1 3 3
+1 3 2 4
+...
+Expected: 4...
+Got stdout: ...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 22
+2 5 3 6
+1 1 3 3
+1 3 2 4
+...
+Expected: 4...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 2
+1 2
+-1 0
+...
+Expected: 6.06449510224597979401...
+Got stdout: 6.06449510224598
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 3 22
+2 5 3 6
+1 1 3 3
+1 3 2 4
+...
+Expected: 4...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 6
+1 2
+2 5
+1 5
+3 3
+1 3
+3 6
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 6
+1 2
+2 5
+1 5
+3 3
+1 3
+3 6
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 6
+1 2
+2 5
+1 5
+3 3
+1 3
+3 6
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 8
+.......#
+.......#
+.####..#
+.####..#
+.##....#
+.##....#
+.#######
+.#######
+...
+Expected: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########...
+Got stdout: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 6
+1 2
+2 5
+1 5
+3 3
+1 3
+3 6
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 2
+1 2
+-1 0
+...
+Expected: 6.06449510224597979401...
+Got stdout: 6.06449510224598
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 2
+1 2
+-1 0
+...
+Expected: 6.06449510224597979401...
+Got stdout: 6.06449510224598
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 2
+1 2
+-1 0
+...
+Expected: 6.06449510224597979401...
+Got stdout: 6.06449510224598
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 2
+1 2
+-1 0
+...
+Expected: 6.06449510224597979401...
+Got stdout: 6.06449510224598
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 8
+.......#
+.......#
+.####..#
+.####..#
+.##....#
+.##....#
+.#######
+.#######
+...
+Expected: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########...
+Got stdout: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 8
+.......#
+.......#
+.####..#
+.####..#
+.##....#
+.##....#
+.#######
+.#######
+...
+Expected: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########...
+Got stdout: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 8
+.......#
+.......#
+.####..#
+.####..#
+.##....#
+.##....#
+.#######
+.#######
+...
+Expected: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########...
+Got stdout: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 8
+.......#
+.......#
+.####..#
+.####..#
+.##....#
+.##....#
+.#######
+.#######
+...
+Expected: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########...
+Got stdout: ........
+#######.
+#.....#.
+#.###.#.
+#.#...#.
+#.#####.
+#.......
+########
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: abcde
+abedc
+...
+Expected: 3...
+Got stdout: 3
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5 2 3
+1 5 6 10 12
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 5
+2 3 5 10 12
+...
+Expected: 17...
+Got stdout: 17
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5
+2 3 5 10 12
+...
+Expected: 17...
+Got stdout: ...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5
+2 3 5 10 12
+...
+Expected: 17...
+Got stdout: 17
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5
+2 3 5 10 12
+...
+Expected: 17...
+Got stdout: 17
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5
+2 3 5 10 12
+...
+Expected: 17...
+Got stdout: 17
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5 2 3
+1 5 6 10 12
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: 5 2 3
+1 5 6 10 12
+...
+Expected: 2...
+Got stdout: 0
+...
+Got stderr: ...
+Exit code: 0
+
+=== Test case 1 ===
+Input: 5 2 3
+1 5 6 10 12
+...
+Expected: 2...
+Got stdout: Traceback (most recent call last):
+  File "/code/wrapper.py", line 4, in <module>
+    exec(open('/co...
+Got stderr: ...
+Exit code: 1
+
+=== Test case 1 ===
+Input: abcde
+abedc
+...
+Expected: 3...
+Got stdout: 3
+...
+Got stderr: ...
+Exit code: 0
+--- Evaluation ---
+Environment: livecodebench
+Model: gpt-4.1-mini
+Provider: https://api.openai.com/v1
+Examples: 10
+Rollouts per example: 5
+--- Example ---
+╭─────────────────────────────────── Step 0 ───────────────────────────────────╮
+│ ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓ │
+│ ┃ Prompt                         ┃ Completion                     ┃ Reward ┃ │
+│ ┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━┩ │
+│ │ As KEYENCE headquarters have   │ assistant: This problem is     │   1.00 │ │
+│ │ more and more workers, they    │ essentially about partitioning │        │ │
+│ │ decided to divide the          │ the list of department sizes   │        │ │
+│ │ departments in the             │ into two groups such that the  │        │ │
+│ │ headquarters into two groups   │ maximum sum of either group is │        │ │
+│ │ and stagger their lunch        │ minimized. This is a classic   │        │ │
+│ │ breaks.                        │ partition problem, which can   │        │ │
+│ │ KEYENCE headquarters have N    │ be solved using bitmask        │        │ │
+│ │ departments, and the number of │ enumeration or dynamic         │        │ │
+│ │ people in the i-th department  │ programming.                   │        │ │
+│ │ (1\leq i\leq N) is K_i.        │                                │        │ │
+│ │ When assigning each department │ Since \( N \leq 20 \), we can  │        │ │
+│ │ to Group A or Group B, having  │ use a bitmask approach to      │        │ │
+│ │ each group take lunch breaks   │ enumerate all subsets and keep │        │ │
+│ │ at the same time, and ensuring │ track of the sums. The total   │        │ │
+│ │ that the lunch break times of  │ sum of all departments is \( S │        │ │
+│ │ Group A and Group B do not     │ \). For each subset            │        │ │
+│ │ overlap, find the minimum      │ (corresponding to group A),    │        │ │
+│ │ possible value of the maximum  │ the other departments form     │        │ │
+│ │ number of people taking a      │ group B. The goal is to        │        │ │
+│ │ lunch break at the same time.  │ minimize:                      │        │ │
+│ │ In other words, find the       │                                │        │ │
+│ │ minimum possible value of the  │ \[                             │        │ │
+│ │ larger of the following: the   │ \max(\text{sum of group A},    │        │ │
+│ │ total number of people in      │ \text{sum of group B}) =       │        │ │
+│ │ departments assigned to Group  │ \max(\text{sum of subset}, S - │        │ │
+│ │ A, and the total number of     │ \text{sum of subset})          │        │ │
+│ │ people in departments assigned │ \]                             │        │ │
+│ │ to Group B.                    │                                │        │ │
+│ │                                │ We want to find the subset sum │        │ │
+│ │ Input                          │ closest to \( S/2 \).          │        │ │
+│ │                                │                                │        │ │
+│ │ The input is given from        │ ---                            │        │ │
+│ │ Standard Input in the          │                                │        │ │
+│ │ following format:              │ ### Approach                   │        │ │
+│ │ N                              │                                │        │ │
+│ │ K_1 K_2 \ldots K_N             │ - Calculate the total sum \( S │        │ │
+│ │                                │ \).                            │        │ │
+│ │ Output                         │ - Enumerate all subsets using  │        │ │
+│ │                                │ bitmask from 0 to \( 2^N - 1   │        │ │
+│ │ Print the minimum possible     │ \).                            │        │ │
+│ │ value of the maximum number of │ - Calculate the sum of the     │        │ │
+│ │ people taking a lunch break at │ current subset.                │        │ │
+│ │ the same time.                 │ - Calculate the maximum        │        │ │
+│ │                                │ between the subset sum and \(  │        │ │
+│ │ Constraints                    │ S - \text{subset sum} \).      │        │ │
+│ │                                │ - Track the minimum of these   │        │ │
+│ │                                │ maximum values.                │        │ │
+│ │ - 2 \leq N \leq 20             │                                │        │ │
+│ │ - 1 \leq K_i \leq 10^8         │ ---                            │        │ │
+│ │ - All input values are         │                                │        │ │
+│ │ integers.                      │ ### Code Implementation        │        │ │
+│ │                                │                                │        │ │
+│ │ Sample Input 1                 │ ```python                      │        │ │
+│ │                                │ def main():                    │        │ │
+│ │ 5                              │     import sys                 │        │ │
+│ │ 2 3 5 10 12                    │     input = sys.stdin.readline │        │ │
+│ │                                │                                │        │ │
+│ │ Sample Output 1                │     N = int(input())           │        │ │
+│ │                                │     K = list(map(int,          │        │ │
+│ │ 17                             │ input().split()))              │        │ │
+│ │                                │                                │        │ │
+│ │ When assigning departments 1,  │     total = sum(K)             │        │ │
+│ │ 2, and 5 to Group A, and       │     min_max = total  #         │        │ │
+│ │ departments 3 and 4 to Group   │ Initialize with total sum      │        │ │
+│ │ B, Group A has a total of      │ (worst case)                   │        │ │
+│ │ 2+3+12=17 people, and Group B  │                                │        │ │
+│ │ has a total of 5+10=15 people. │     # Enumerate all subsets    │        │ │
+│ │ Thus, the maximum number of    │     for mask in range(1 << N): │        │ │
+│ │ people taking a lunch break at │         subset_sum = 0         │        │ │
+│ │ the same time is 17.           │         for i in range(N):     │        │ │
+│ │ It is impossible to assign the │             if mask & (1 <<    │        │ │
+│ │ departments so that both       │ i):                            │        │ │
+│ │ groups have 16 or fewer        │                 subset_sum +=  │        │ │
+│ │ people, so print 17.           │ K[i]                           │        │ │
+│ │                                │         # Calculate the max    │        │ │
+│ │ Sample Input 2                 │ group sum                      │        │ │
+│ │                                │         current_max =          │        │ │
+│ │ 2                              │ max(subset_sum, total -        │        │ │
+│ │ 1 1                            │ subset_sum)                    │        │ │
+│ │                                │         if current_max <       │        │ │
+│ │ Sample Output 2                │ min_max:                       │        │ │
+│ │                                │             min_max =          │        │ │
+│ │ 1                              │ current_max                    │        │ │
+│ │                                │                                │        │ │
+│ │ Multiple departments may have  │     print(min_max)             │        │ │
+│ │ the same number of people.     │                                │        │ │
+│ │                                │ if __name__ == "__main__":     │        │ │
+│ │ Sample Input 3                 │     main()                     │        │ │
+│ │                                │ ```                            │        │ │
+│ │ 6                              │                                │        │ │
+│ │ 22 25 26 45 22 31              │ ---                            │        │ │
+│ │                                │                                │        │ │
+│ │ Sample Output 3                │ ### Explanation                │        │ │
+│ │                                │                                │        │ │
+│ │ 89                             │ - We try all possible ways to  │        │ │
+│ │                                │ split departments.             │        │ │
+│ │ For example, when assigning    │ - For each way, we calculate   │        │ │
+│ │ departments 1, 4, and 5 to     │ the sum of one group.          │        │ │
+│ │ Group A, and departments 2, 3, │ - Using that, we get the sum   │        │ │
+│ │ and 6 to Group B, the maximum  │ of the other group.            │        │ │
+│ │ number of people taking a      │ - We keep track of the minimum │        │ │
+│ │ lunch break at the same time   │ maximum sum achievable.        │        │ │
+│ │ is 89.                         │                                │        │ │
+│ │                                │ ---                            │        │ │
+│ │ Write a complete Python        │                                │        │ │
+│ │ solution:                      │ ### Testing with Sample Inputs │        │ │
+│ │                                │                                │        │ │
+│ │                                │ - Input:                       │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   5                            │        │ │
+│ │                                │   2 3 5 10 12                  │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   Output:                      │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   17                           │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │                                │        │ │
+│ │                                │ - Input:                       │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   2                            │        │ │
+│ │                                │   1 1                          │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   Output:                      │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   1                            │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │                                │        │ │
+│ │                                │ - Input:                       │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   6                            │        │ │
+│ │                                │   22 25 26 45 22 31            │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   Output:                      │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │   89                           │        │ │
+│ │                                │   ```                          │        │ │
+│ │                                │                                │        │ │
+│ │                                │ All match the expected         │        │ │
+│ │                                │ outputs.                       │        │ │
+│ │                                │                                │        │ │
+│ │                                │ This solution is efficient     │        │ │
+│ │                                │ enough for \( N \leq 20 \), as │        │ │
+│ │                                │ it performs at most \( 2^{20}  │        │ │
+│ │                                │ \approx 1,000,000 \)           │        │ │
+│ │                                │ iterations, which is feasible  │        │ │
+│ │                                │ within typical time            │        │ │
+│ │                                │ constraints.                   │        │ │
+│ └────────────────────────────────┴────────────────────────────────┴────────┘ │
+╰──────────────────────────────────────────────────────────────────────────────╯
+--- All ---
+Rewards:
+correctness_score: avg - 0.387, std - 0.482
+r1: [1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+r2: [1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0]
+r3: [1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+r4: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.333, 1.0, 0.0, 0.0]
+r5: [0.0, 0.333, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+execution_success: avg - 0.060, std - 0.237
+r1: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+r2: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+r3: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+r4: [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+r5: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+reward: avg - 0.387, std - 0.482
+r1: [1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+r2: [1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0]
+r3: [1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+r4: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.333, 1.0, 0.0, 0.0]
+r5: [0.0, 0.333, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
