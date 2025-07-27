@@ -195,10 +195,6 @@ def load_livecodebench_dataset(
                         example = json.loads(line)
                         examples.append(example)
                         
-                        # Print progress every 100 examples
-                        if (line_num + 1) % 100 == 0:
-                            print(f"Loading progress: {line_num + 1} examples...")
-                            
                         # Stop if we've reached the desired number
                         if num_examples > 0 and len(examples) >= num_examples:
                             break
