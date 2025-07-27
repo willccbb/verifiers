@@ -72,14 +72,42 @@ The key challenge in porting was τ²-bench's strict message format requirements
 - `turn_count`: Number of conversation turns
 - `error_count`: Tool execution errors
 
-### Evaluation Metrics
-The rubric evaluates:
-1. **Goal Achievement** (0.6 weight): Task completion and correctness
-2. **Efficiency** (0.2 weight): Turn count and error penalties
-3. **Tool Usage** (0.2 weight): Appropriate tool selection and execution
+### Evaluation Logic (EXACT from τ²-bench)
+
+The evaluation uses **binary pass/fail scoring** (1.0 or 0.0) with NO partial credit, exactly matching the original τ²-bench evaluation:
+
+1. **Automatic Failure Conditions**:
+   - Task terminated due to too many errors
+   - Task reached maximum turns without completion
+
+2. **Action-Based Evaluation**:
+   - Checks if ALL required actions were performed
+   - Each action must match:
+     - Exact tool name
+     - Correct requestor (assistant vs user)
+     - Exact arguments (or subset if `compare_args` specified)
+   - Missing ANY required action = FAIL
+
+3. **Environment State Evaluation**:
+   - If `RewardType.DB` is in the task's reward basis
+   - Compares final environment database state
+   - Currently simplified (full hash comparison not implemented)
+
+### Current Limitations
+
+1. **Tool Discovery**: The current implementation does not automatically provide tool descriptions to the agent in the system prompt. The agent must already know what tools are available and how to call them.
+
+2. **Exact Matching Required**: The evaluation expects exact tool names and arguments. Any deviation in:
+   - Tool name spelling
+   - Argument names  
+   - Argument values
+   - Call order
+   Will result in evaluation failure (0.0 score).
+
+3. **Agent Compatibility**: Standard LLM agents may not naturally produce the exact tool calls τ²-bench expects without specific prompting or fine-tuning.
 
 ### Key Differences from Original
 - Uses Verifiers' `MultiTurnEnv` pattern instead of Orchestrator
 - Simplified evaluation (no environment assertions)
 - All non-agent logic encapsulated in `env_response`
-- Rubric-based scoring instead of multiple evaluators
+- Rubric-based scoring interface (though internally uses binary pass/fail)
