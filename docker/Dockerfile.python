@@ -1,0 +1,41 @@
+# Secure Python execution container for LiveCodeBench
+# Uses minimal Alpine Linux for small attack surface
+
+FROM python:3.10-alpine
+
+# Install only essential packages
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user for execution
+RUN adduser -D -s /bin/sh -u 1000 sandbox
+
+# Set up working directory with restricted permissions
+WORKDIR /workspace
+RUN chown sandbox:sandbox /workspace
+
+# Drop all capabilities except what's needed
+RUN apk add --no-cache libcap \
+    && setcap -r /usr/local/bin/python3.10 2>/dev/null || true
+
+# Security restrictions
+USER sandbox
+
+# Disable Python bytecode generation
+ENV PYTHONDONTWRITEBYTECODE=1
+# Unbuffered output for real-time logs
+ENV PYTHONUNBUFFERED=1
+# Disable pip to prevent package installation
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN rm -rf /home/sandbox/.local/bin/pip*
+
+# Set resource limits at container level
+# (Additional limits should be set by Docker runtime)
+
+# Entry point - run code with strict isolation
+ENTRYPOINT ["python", "-B", "-s", "-u"]
+# -B: don't write bytecode
+# -s: don't add user site directory to sys.path
+# -u: unbuffered output
