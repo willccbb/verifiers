@@ -63,16 +63,13 @@ The implementation downloads JSONL files directly from HuggingFace due to the de
 - `release_v1` through `release_v5`
 - `release_v2.1`
 
-### Private Test Cases
+### Test Cases
 
-**Important**: LiveCodeBench uses a proprietary encoding scheme for private test cases to prevent data contamination and maintain benchmark integrity. This is an intentional design choice by the LiveCodeBench team to ensure models cannot be trained on the test data.
+LiveCodeBench includes both public and private test cases:
+- **Public test cases**: Provided as examples in the problem statement
+- **Private test cases**: Encoded using base64, zlib compression, and pickle serialization
 
-As an external port, we do not have access to the decoding key for these private test cases. Therefore:
-- The environment uses only public test cases for evaluation
-- This may result in less comprehensive testing compared to the official LiveCodeBench infrastructure
-- The core functionality and evaluation methodology remain faithful to the original benchmark
-
-This limitation affects all problems in the dataset but does not prevent meaningful evaluation - public test cases are sufficient for assessing model performance.
+This implementation successfully decodes and uses both public and private test cases, providing comprehensive evaluation that matches the official LiveCodeBench methodology.
 
 ### Evaluation Metrics
 
@@ -88,9 +85,8 @@ This limitation affects all problems in the dataset but does not prevent meaning
 
 ## Known Limitations
 
-1. **Private test cases**: Private test cases use a proprietary encoding scheme and cannot be decoded without the official key. The environment uses public test cases only.
-2. Network DNS resolution issues may temporarily prevent dataset downloading
-3. The environment requires Docker and cannot fall back to subprocess execution
+1. Network DNS resolution issues may temporarily prevent dataset downloading
+2. The environment requires Docker and cannot fall back to subprocess execution
 
 ## Debugging
 

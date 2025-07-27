@@ -17,6 +17,7 @@ import urllib.error
 import base64
 import zlib
 import gzip
+import pickle
 from typing import Dict, List, Any, Optional, Tuple
 
 import verifiers as vf
@@ -244,22 +245,36 @@ def load_livecodebench_dataset(
 
 def decode_private_test_cases(encoded_str: str) -> Optional[List[Dict[str, Any]]]:
     """
-    Attempt to decode base64-encoded and compressed private test cases.
+    Decode private test cases using the official LiveCodeBench decoding method.
     
-    The LiveCodeBench dataset uses a proprietary encoding scheme for private test cases
-    to prevent data contamination. Without the official decoding key, we cannot
-    access these test cases. This is an intentional design choice by LiveCodeBench
-    to maintain benchmark integrity.
+    The private test cases are encoded using:
+    1. JSON -> 2. Pickle -> 3. Zlib compression -> 4. Base64 encoding
     
     Args:
         encoded_str: Base64-encoded and compressed string
         
     Returns:
-        None - we cannot decode without the official key
+        List of test cases or None if decoding fails
     """
-    # The private test cases use a proprietary encoding scheme
-    # We cannot decode them without the official LiveCodeBench key
-    return None
+    try:
+        # Follow the exact decoding steps from LiveCodeBench
+        # 1. Base64 decode
+        decoded = base64.b64decode(encoded_str.encode("utf-8"))
+        
+        # 2. Zlib decompress
+        decompressed = zlib.decompress(decoded)
+        
+        # 3. Pickle loads
+        unpickled = pickle.loads(decompressed)
+        
+        # 4. JSON loads (unpickled is already a string)
+        test_cases = json.loads(unpickled)
+        
+        return test_cases if isinstance(test_cases, list) else None
+        
+    except Exception as e:
+        # If decoding fails, return None
+        return None
 
 
 def load_environment(
@@ -323,43 +338,45 @@ def load_environment(
                     if isinstance(private_tests, list):
                         test_cases.extend(private_tests)
                 except json.JSONDecodeError:
-                    # The private test cases use proprietary encoding
-                    # We cannot decode them without the official key
-                    pass
+                    # Try to decode using the official LiveCodeBench method
+                    decoded_tests = decode_private_test_cases(private_raw)
+                    if decoded_tests:
+                        test_cases.extend(decoded_tests)
             
         # Format the prompt
         prompt = f"{problem_desc}\n\n"
         if starter_code:
             prompt += f"Starter code:\n```python\n{starter_code}\n```\n\n"
-        prompt += "Write a complete Python solution:"
+        if example.get('public_tests'):
+            prompt += f"Example test cases:\n{example['public_tests']}\n\n"
         
-        # Store test cases and other info
-        info = {
-            'problem_id': problem_id,
-            'test_cases': test_cases,
-            'starter_code': starter_code,
-            'difficulty': example.get('difficulty', 'unknown')
-        }
-        
-        # Debug: print first problem structure
-        if idx == 0:
-            print(f"\n=== Problem {problem_id} structure ===")
-            print(f"Test cases type: {type(test_cases)}")
-            print(f"Number of test cases: {len(test_cases)}")
-            if test_cases:
-                print(f"First test case: {test_cases[0]}")
-                print(f"Test case keys: {list(test_cases[0].keys()) if isinstance(test_cases[0], dict) else 'Not a dict'}")
-            print(f"Keys in example: {list(example.keys())}")
+        # Parse the test cases into the expected format
+        parsed_tests = []
+        for test in test_cases:
+            if isinstance(test, dict) and 'input' in test and 'output' in test:
+                parsed_tests.append({
+                    'input': test['input'],
+                    'output': test['output'],
+                    'testtype': test.get('testtype', 'public')
+                })
         
         converted_dataset.append({
             'prompt': [{'role': 'user', 'content': prompt}],
-            'info': info
+            'answer': '',  # Will be filled by the model
+            'info': {
+                'problem_id': problem_id,
+                'problem_desc': problem_desc,
+                'starter_code': starter_code,
+                'test_cases': parsed_tests,
+                'difficulty': example.get('difficulty', 'unknown'),
+                'contest_date': example.get('contest_date', ''),
+            }
         })
     
     # Create dataset
-    dataset = Dataset.from_list(converted_dataset)
+    dataset = vf.Dataset(data=converted_dataset)
     
-    # Define answer parser
+    # Create parser and rubric
     def extract_code(completion: str) -> str:
         """Extract code from model completion"""
         if not completion:
