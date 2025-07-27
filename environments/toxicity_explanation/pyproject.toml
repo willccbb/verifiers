@@ -1,13 +1,15 @@
+[project]
+name = "toxicity-explanation"
+version = "0.1.0"
+dependencies = [
+    "datasets>=4.0.0",
+    "openai>=1.97.1",
+    "verifiers",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[project]
-name = "toxicity_explanation"
-version = "0.1.0"
-description = "Toxicity detection with context-aware explanations using JudgeRubric"
-dependencies = [
-    "verifiers",
-    "datasets",
-    "openai",
-]
+[tool.hatch.build]
+include = ["toxicity_explanation.py"]
