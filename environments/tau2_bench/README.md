@@ -1,32 +1,39 @@
 # τ²-bench Environment for Verifiers
 
-Implementation of the τ²-bench (tau2-bench) dual-control agent benchmark for the Verifiers framework.
+**⚠️ IN-PROGRESS PORT - PARITY NOT YET ACHIEVED ⚠️**
 
-## Current Project Status
+This is an in-progress implementation of the τ²-bench (tau2-bench) dual-control agent benchmark for the Verifiers framework. While the core functionality is implemented, full parity with the original benchmark has not yet been achieved.
 
-### What We've Achieved
-1. **Full Dual-Control Implementation**: Successfully implemented τ²-bench's unique dual-control environment where both agent and user can execute tools
-2. **Native τ² Integration**: Refactored to use τ²-bench's native functions directly rather than reimplementing:
-   - Using `tau2` tool execution directly (tools raise `ValueError` exceptions for errors)
-   - Using `tau2`'s `get_tasks()` functions for each domain
-   - Using `tau2`'s exact prompts from `AGENT_INSTRUCTION` and `SYSTEM_PROMPT`
-   - Using `tau2`'s `evaluate_simulation()` for scoring
-3. **Strict Evaluation Matching**: Implemented exact matching of τ²-bench's evaluation logic including all four evaluators (Action, Environment, Communicate, NLAssertions)
-4. **Error Format Compliance**: Tool errors are formatted as `Error executing {tool_name}: {message}` to match τ²-bench's expectations
-5. **Per-Rollout State Isolation**: Each evaluation rollout gets a fresh `tau2.environment.Environment` instance to prevent state leakage
+## Current Status
 
-### Current Performance
-- **GPT-4.1-mini on retail domain**: ~13-17% (vs expected 40%+)
-- **Primary issue**: `CommunicateEvaluator` failures - the agent performs correct actions but doesn't communicate required information strings
+### What's Working
+- ✅ Full dual-control environment implementation (both agent and user can execute tools)
+- ✅ All three domains supported (retail, airline, telecom)
+- ✅ Native τ²-bench integration using original functions
+- ✅ Proper error handling and formatting
+- ✅ Per-rollout state isolation
+- ✅ Tool execution tracking
 
 ### Known Issues
-1. **Low scores due to CommunicateEvaluator**: τ²-bench checks if specific strings (from `communicate_info`) appear in agent messages. Even when agents perform all correct actions and achieve the correct DB state, they get 0.0 if they don't say the exact required phrases.
-2. **Occasional state synchronization issues**: Sometimes tools succeed when τ²-bench expects them to fail, suggesting potential timing or state management edge cases
+- ❌ **Lower than expected scores**: GPT-4.1-mini achieves ~13-17% on retail (expected 40%+)
+- ❌ **CommunicateEvaluator failures**: Agents don't communicate required information strings
+- ❌ **Tool message pairing errors**: Some rollouts fail with "Tool message expected" errors
+- ❌ **State synchronization issues**: Occasional mismatches between expected and actual states
 
-### Next Steps
-1. **Investigate communication requirements**: Deep dive into what specific phrases τ²-bench expects agents to communicate
-2. **Consider prompt engineering**: May need to add guidance for agents to communicate specific information
-3. **Debug remaining state issues**: Ensure perfect alignment between our environment state and τ²-bench's expectations
+### Technical Details
+
+The implementation:
+- Uses τ²-bench's native functions directly via `tau2` package
+- Implements exact evaluation logic including all four evaluators
+- Follows Verifiers' `MultiTurnEnv` pattern
+- Encapsulates all logic in `env_response` method
+- Handles complex message format conversions
+
+Key challenges addressed:
+- Tool error formatting as `Error executing {tool_name}: {message}`
+- JSON serialization of tool schemas to avoid HuggingFace conflicts
+- Proper handling of `ChatCompletionMessageToolCall` objects
+- Turn handoff between agent → tool → agent → user
 
 ## Installation
 
