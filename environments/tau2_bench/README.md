@@ -15,7 +15,7 @@ This is a complete implementation of τ²-bench (tau2-bench) for the verifiers f
 
 Install this environment using:
 ```bash
-uv pip install -e environments/tau2_bench
+vf-install tau2_bench
 ```
 
 The τ²-bench dependency will be automatically installed from the GitHub repository.
