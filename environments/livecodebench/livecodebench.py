@@ -197,7 +197,7 @@ def load_livecodebench_dataset(
                         
                         # Print progress every 100 examples
                         if (line_num + 1) % 100 == 0:
-                            print(f"Loaded {line_num + 1} examples...")
+                            print(f"Loading progress: {line_num + 1} examples...")
                             
                         # Stop if we've reached the desired number
                         if num_examples > 0 and len(examples) >= num_examples:
@@ -206,7 +206,7 @@ def load_livecodebench_dataset(
                         print(f"Error parsing line {line_num}: {e}")
                         continue
         
-        print(f"Successfully loaded {len(examples)} problems from LiveCodeBench")
+        print(f"Dataset loaded: {len(examples)} total problems")
         
         # Convert to HuggingFace Dataset
         dataset = Dataset.from_list(examples)
@@ -425,15 +425,6 @@ def load_environment(
             
             # Execute code with test input
             stdout, stderr, exit_code = sandbox.execute(code, test_input)
-            
-            # Debug logging
-            if i == 0:  # Log first test case for debugging
-                print(f"\n=== Test case {i+1} ===")
-                print(f"Input: {test_input[:100]}...")
-                print(f"Expected: {expected_output[:100]}...")
-                print(f"Got stdout: {stdout[:100]}...")
-                print(f"Got stderr: {stderr[:100]}...")
-                print(f"Exit code: {exit_code}")
             
             if exit_code == 0 and stdout.strip() == expected_output:
                 passed += 1

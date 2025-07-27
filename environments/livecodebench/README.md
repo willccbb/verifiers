@@ -77,6 +77,17 @@ This implementation successfully decodes and uses both public and private test c
 2. **Correctness Score**: Fraction of test cases passed
 3. **Execution Success**: Whether the code executes without errors
 
+## Security
+
+This implementation uses Docker-based sandboxing for secure code execution, featuring:
+- Network isolation
+- Resource limits (CPU, memory, processes)
+- Non-root execution (uid 1000)
+- Read-write filesystem for temporary files
+- Dropped capabilities
+
+**Performance Note**: Each test case execution requires creating a new Docker container, which adds overhead. With LiveCodeBench problems typically having 25-45 test cases each, evaluation can take 15-45 seconds per problem. This is a tradeoff for the security benefits of Docker isolation.
+
 ## Requirements
 
 - Docker must be installed and running
