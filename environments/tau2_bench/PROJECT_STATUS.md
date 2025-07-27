@@ -61,6 +61,15 @@ The initial implementation had 0.0 scores because:
 
 **Solution**: Now using `tau2.evaluator.evaluator.evaluate_simulation` directly with proper message conversion to ensure exact match with original evaluation logic.
 
+### Debug Logging Added (NEW)
+Added comprehensive evaluation debug output that shows:
+- **Expected actions**: All required tool calls with their arguments
+- **Actual tool calls**: What the agent actually called
+- **Detailed comparison**: Shows exactly why evaluations fail
+- **Evaluation results**: Final scores and breakdowns by evaluation type
+
+This helps identify why agents score 0.0 - typically they're calling different tools than expected.
+
 ## Project Goals
 
 ### Primary Objective
