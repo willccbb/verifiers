@@ -33,6 +33,9 @@ try:
     from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
     from tau2.data_model.simulation import SimulationRun, TerminationReason
     from tau2.data_model.tasks import RewardType
+    from tau2.environment.environment import Environment as Tau2Environment
+    from tau2.utils.llm_utils import get_llm_completions
+    import tau2_utils
     TAU2_AVAILABLE = True
 except ImportError:
     TAU2_AVAILABLE = False
@@ -104,7 +107,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Initialize parent class
         super().__init__(dataset=dataset, rubric=rubric, **kwargs)
         self.domain = domain
-        self.tau2_env = tau2_env
         self.tau2_tasks = tau2_tasks
         self.user_llm = user_llm
         self.max_turns = max_turns
@@ -123,10 +125,8 @@ class Tau2BenchEnv(MultiTurnEnv):
 
     def _create_fresh_env(self, initial_db_state: dict = None):
         """Create a fresh tau2 environment instance with optional initial state."""
-        from tau2.environment.environment import Environment
-        
         # Create fresh environment
-        env = Environment(
+        env = Tau2Environment(
             domain_name=self.env_config["domain"],
             policy=self.env_config["policy"],
             tools=self.env_config["tools"],
@@ -252,7 +252,11 @@ class Tau2BenchEnv(MultiTurnEnv):
             state["turn_count"] = 0
             
         if "tau2_env" not in state:
-            state["tau2_env"] = self.tau2_env
+            # Get initial database state from task
+            initial_db_state = None
+            if "env_db" in state:
+                initial_db_state = state["env_db"]
+            state["tau2_env"] = self._create_fresh_env(initial_db_state)
             
         if "tool_executions" not in state:
             state["tool_executions"] = []
@@ -273,9 +277,10 @@ class Tau2BenchEnv(MultiTurnEnv):
             print(f"WARNING: Empty user instructions for task {state.get('task_id')}")
             print(f"User state: {state['user_state']}")
         
-        if self.domain == "telecom" and hasattr(self.tau2_env, 'user_tools'):
+        tau2_env = state.get("tau2_env")
+        if self.domain == "telecom" and tau2_env and hasattr(tau2_env, 'user_tools'):
             # User with tools for telecom
-            user_tools = list(self.tau2_env.user_tools.get_tools().values())
+            user_tools = list(tau2_env.user_tools.get_tools().values())
             state["user_simulator"] = UserSimulator(
                 tools=user_tools,
                 instructions=user_instructions,
@@ -315,8 +320,9 @@ class Tau2BenchEnv(MultiTurnEnv):
             
             try:
                 # Execute tool through tau2 environment
-                if hasattr(self.tau2_env.tools, tool_name):
-                    tool_func = getattr(self.tau2_env.tools, tool_name)
+                tau2_env = state["tau2_env"]
+                if hasattr(tau2_env.tools, tool_name):
+                    tool_func = getattr(tau2_env.tools, tool_name)
                     result = tool_func(**tool_args)
                     
                     # Check if the result is an error string from tau2
@@ -335,19 +341,19 @@ class Tau2BenchEnv(MultiTurnEnv):
                         exec_record["result"] = result
                         exec_record["success"] = True
                         
-                        # Sync agent's environment state  
-                        if hasattr(self.tau2_env.tools, 'db'):
-                            state["env_db"]["agent_db"] = self.tau2_env.tools.db.model_dump()
-                        if hasattr(self.tau2_env, 'sync_tools'):
-                            self.tau2_env.sync_tools()
-                        
-                        # Create tool message - use tau2's to_json_str method for consistency
-                        content = self.tau2_env.to_json_str(result)
-                        tool_messages.append({
-                            "role": "tool",
-                            "content": content,
-                            "tool_call_id": tool_id
-                        })
+                    # Sync agent's environment state
+                    if hasattr(tau2_env.tools, 'db'):
+                        state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
+                    if hasattr(tau2_env, 'sync_tools'):
+                        tau2_env.sync_tools()
+                    
+                    # Create tool message - use tau2's to_json_str method for consistency
+                    content = tau2_env.to_json_str(result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": tool_id
+                    })
                 else:
                     exec_record["error"] = f"Tool {tool_name} not found"
                     exec_record["success"] = False
@@ -403,8 +409,9 @@ class Tau2BenchEnv(MultiTurnEnv):
             
             try:
                 # Execute tool through tau2 environment
-                if hasattr(self.tau2_env.user_tools, tool_name):
-                    tool_func = getattr(self.tau2_env.user_tools, tool_name)
+                tau2_env = state["tau2_env"]
+                if hasattr(tau2_env.user_tools, tool_name):
+                    tool_func = getattr(tau2_env.user_tools, tool_name)
                     result = tool_func(**tool_args)
                     
                     # Check if the result is an error string from tau2
@@ -424,20 +431,20 @@ class Tau2BenchEnv(MultiTurnEnv):
                         exec_record["result"] = result
                         exec_record["success"] = True
                         
-                        # Sync user's environment state
-                        if hasattr(self.tau2_env.user_tools, 'db'):
-                            state["env_db"]["user_db"] = self.tau2_env.user_tools.db.model_dump()
-                        if hasattr(self.tau2_env, 'sync_tools'):
-                            self.tau2_env.sync_tools()
-                        
-                        # Create tool message - use tau2's to_json_str method for consistency
-                        content = self.tau2_env.to_json_str(result)
-                        tool_messages.append({
-                            "role": "tool", 
-                            "content": content,
-                            "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
-                            "name": f"user_{tool_name}"  # Prefix to distinguish user tools
-                        })
+                    # Sync user's environment state
+                    if hasattr(tau2_env.user_tools, 'db'):
+                        state["env_db"]["user_db"] = tau2_env.user_tools.db.model_dump()
+                    if hasattr(tau2_env, 'sync_tools'):
+                        tau2_env.sync_tools()
+                    
+                    # Create tool message - use tau2's to_json_str method for consistency
+                    content = tau2_env.to_json_str(result)
+                    tool_messages.append({
+                        "role": "tool", 
+                        "content": content,
+                        "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                        "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                    })
                 else:
                     exec_record["error"] = f"User tool {tool_name} not found"
                     exec_record["success"] = False
@@ -568,10 +575,11 @@ class Tau2BenchEnv(MultiTurnEnv):
             return False
             
         # First try environment hash comparison (most accurate)
-        if hasattr(self.tau2_env, 'get_db_hash'):
+        tau2_env = state.get("tau2_env")
+        if tau2_env and hasattr(tau2_env, 'get_db_hash'):
             try:
                 # Get current environment state hash
-                current_hash = self.tau2_env.get_db_hash()
+                current_hash = tau2_env.get_db_hash()
                 
                 # Compare with expected state
                 # Note: This is simplified - the original creates a golden environment
