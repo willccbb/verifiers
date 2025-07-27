@@ -345,19 +345,45 @@ class Tau2BenchEnv(MultiTurnEnv):
         if not user_sim:
             return None
             
-        # Convert messages to tau2 format
+        # Get last message to respond to
+        if not messages:
+            return None
+        last_msg = messages[-1]
+        
+        # Convert to tau2 format
         tau2_messages = self._convert_to_tau2_messages(messages)
+        if not tau2_messages:
+            return None
+            
+        # Get or create user state
+        if "tau2_user_state" not in state:
+            # Initialize user state with message history (excluding tool messages)
+            # Filter out tool messages and messages with tool_calls
+            history_for_user = []
+            for msg in tau2_messages[:-1]:
+                if msg.role == "tool":
+                    continue
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    # Skip messages with tool calls as they cause issues
+                    continue
+                history_for_user.append(msg)
+                
+            state["tau2_user_state"] = user_sim.get_init_state(
+                message_history=history_for_user
+            )
         
         try:
-            # Generate user response
+            # Generate user response - pass ONLY the last message
+            last_tau2_msg = tau2_messages[-1]
+
+            
             user_msg, new_user_state = user_sim.generate_next_message(
-                message_history=tau2_messages,
-                user_state=state["user_state"]
+                message=last_tau2_msg,
+                state=state["tau2_user_state"]
             )
             
             # Update user state
-            if new_user_state:
-                state["user_state"].update(new_user_state)
+            state["tau2_user_state"] = new_user_state
                 
             # Handle special responses
             if user_msg.content == STOP:
@@ -505,12 +531,20 @@ class Tau2BenchEnv(MultiTurnEnv):
                             "arguments": args_dict
                         })
                 
-                tau2_msg = AssistantMessage(
-                    role="assistant",
-                    content=msg.get("content", ""),
-                    tool_calls=tau2_tool_calls,
-                    cost=0.0
-                )
+                # Only include tool_calls if there are any
+                if tau2_tool_calls:
+                    tau2_msg = AssistantMessage(
+                        role="assistant",
+                        content=msg.get("content", ""),
+                        tool_calls=tau2_tool_calls,
+                        cost=0.0
+                    )
+                else:
+                    tau2_msg = AssistantMessage(
+                        role="assistant",
+                        content=msg.get("content", ""),
+                        cost=0.0
+                    )
             elif msg["role"] == "user":
                 tau2_msg = UserMessage(
                     role="user",
