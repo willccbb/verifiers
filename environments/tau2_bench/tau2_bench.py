@@ -50,11 +50,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                  user_llm: str = "gpt-4.1-mini",
                  max_turns: int = 30,
                  **kwargs):
-        # Initialize with message_type="chat" for multi-turn conversations
-        # Remove any existing message_type from kwargs to avoid conflicts
-        kwargs.pop('message_type', None)
-        kwargs.pop('max_turns', None)
-        super().__init__(dataset, rubric, message_type="chat", max_turns=max_turns, **kwargs)
+        # Initialize parent class
+        super().__init__(dataset=dataset, rubric=rubric, **kwargs)
         self.domain = domain
         self.tau2_env = tau2_env
         self.tau2_tasks = tau2_tasks
@@ -667,12 +664,9 @@ def load_environment(
     # Create rubric
     rubric = create_tau2_rubric(domain)
     
-    # Create environment
-    # Remove any verifiers-specific kwargs that might conflict
-    env_kwargs = kwargs.copy()
-    env_kwargs.pop('message_type', None)
-    env_kwargs.pop('max_turns', None)
+
     
+    # Create environment
     env = Tau2BenchEnv(
         dataset=train_dataset,
         eval_dataset=eval_dataset,
@@ -681,7 +675,7 @@ def load_environment(
         tau2_env=tau2_env,
         tau2_tasks=tau2_tasks,
         user_llm=user_llm,
-        **env_kwargs
+        **kwargs
     )
     
     return env
