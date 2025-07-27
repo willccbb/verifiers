@@ -18,12 +18,11 @@ LiveCodeBench is a holistic and contamination-free benchmark for evaluating Larg
 ## Installation
 
 ```bash
-# From the workspace root
-uv run vf-init livecodebench
-cd environments/livecodebench
-uv sync
-cd ../..
-uv run vf-install livecodebench
+# Install the environment (from workspace root)
+vf-install livecodebench
+
+# Or if you're in a different directory, specify the path
+vf-install livecodebench -p /path/to/environments
 ```
 
 ## Usage
