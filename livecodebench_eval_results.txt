@@ -1,0 +1,25 @@
+2025-07-27 02:13:19 - verifiers.envs.SingleTurnEnv - INFO - eval_dataset is not set, falling back to train dataset
+Loading LiveCodeBench dataset: livecodebench/code_generation_lite
+Version: release_v5
+Downloading test5.jsonl from HuggingFace...
+Successfully loaded 10 problems from LiveCodeBench
+Docker sandbox initialized successfully
+Failed to parse private test cases for abc374_c
+
+=== Problem abc374_c structure ===
+Test cases type: <class 'list'>
+Number of test cases: 3
+First test case: {'input': '5\n2 3 5 10 12\n', 'output': '17\n', 'testtype': 'stdin'}
+Test case keys: ['input', 'output', 'testtype']
+Keys in example: ['question_title', 'question_content', 'platform', 'question_id', 'contest_id', 'contest_date', 'starter_code', 'difficulty', 'public_test_cases', 'private_test_cases', 'metadata']
+Failed to parse private test cases for abc374_f
+Failed to parse private test cases for abc374_b
+Failed to parse private test cases for abc374_d
+Failed to parse private test cases for abc374_g
+Failed to parse private test cases for abc374_a
+Failed to parse private test cases for abc374_e
+Failed to parse private test cases for abc375_e
+Failed to parse private test cases for abc375_b
+Failed to parse private test cases for abc375_c
+Running 50 rollouts:   0%|          | 0/50 [00:00<?, ?it/s]Running 50 rollouts:   2%|▏         | 1/50 [00:00<00:35,  1.38it/s]Running 50 rollouts:   6%|▌         | 3/50 [00:00<00:12,  3.79it/s]Running 50 rollouts:  12%|█▏        | 6/50 [00:02<00:14,  3.00it/s]Running 50 rollouts:  16%|█▌        | 8/50 [00:02<00:09,  4.34it/s]Running 50 rollouts:  20%|██        | 10/50 [00:02<00:11,  3.50it/s]Running 50 rollouts:  22%|██▏       | 11/50 [00:03<00:13,  2.83it/s]Running 50 rollouts:  26%|██▌       | 13/50 [00:04<00:11,  3.20it/s]Running 50 rollouts:  28%|██▊       | 14/50 [00:05<00:21,  1.70it/s]Running 50 rollouts:  30%|███       | 15/50 [00:06<00:20,  1.69it/s]Running 50 rollouts:  32%|███▏      | 16/50 [00:06<00:16,  2.05it/s]Running 50 rollouts:  34%|███▍      | 17/50 [00:06<00:16,  2.04it/s]Running 50 rollouts:  38%|███▊      | 19/50 [00:07<00:11,  2.62it/s]Running 50 rollouts:  40%|████      | 20/50 [00:08<00:12,  2.37it/s]Running 50 rollouts:  42%|████▏     | 21/50 [00:09<00:19,  1.49it/s]Running 50 rollouts:  44%|████▍     | 22/50 [00:09<00:17,  1.64it/s]Running 50 rollouts:  48%|████▊     | 24/50 [00:10<00:10,  2.58it/s]Running 50 rollouts:  50%|█████     | 25/50 [00:10<00:08,  2.82it/s]Running 50 rollouts:  52%|█████▏    | 26/50 [00:10<00:07,  3.07it/s]Running 50 rollouts:  54%|█████▍    | 27/50 [00:10<00:07,  2.98it/s]Running 50 rollouts:  58%|█████▊    | 29/50 [00:11<00:05,  3.86it/s]Running 50 rollouts:  60%|██████    | 30/50 [00:11<00:04,  4.04it/s]Running 50 rollouts:  62%|██████▏   | 31/50 [00:11<00:04,  4.41it/s]Running 50 rollouts:  68%|██████▊   | 34/50 [00:12<00:03,  4.36it/s]Running 50 rollouts:  72%|███████▏  | 36/50 [00:12<00:02,  5.71it/s]Running 50 rollouts:  76%|███████▌  | 38/50 [00:12<00:02,  5.46it/s]Running 50 rollouts:  78%|███████▊  | 39/50 [00:18<00:12,  1.12s/it]Running 50 rollouts:  82%|████████▏ | 41/50 [00:18<00:06,  1.29it/s]Running 50 rollouts:  88%|████████▊ | 44/50 [00:18<00:02,  2.12it/s]Running 50 rollouts:  94%|█████████▍| 47/50 [00:19<00:01,  2.39it/s]Running 50 rollouts:  96%|█████████▌| 48/50 [00:26<00:02,  1.36s/it]Running 50 rollouts: 100%|██████████| 50/50 [00:26<00:00,  1.92it/s]
+Evaluating 50 rollouts:   0%|          | 0/50 [00:00<?, ?it/s]
