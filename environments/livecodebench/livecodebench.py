@@ -26,12 +26,13 @@ import docker
 from queue import Queue, Empty
 from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from verifiers.env import SingleTurnEnv
 
 
 class SecureSandboxExecutor:
     """Secure Docker-based code execution with container pooling"""
     
-    def __init__(self):
+    def __init__(self, pool_size: int = 20):
         """Initialize Docker-only sandbox with container pool"""
         try:
             self.docker_client = docker.from_env()
@@ -47,7 +48,7 @@ class SecureSandboxExecutor:
                 self.docker_client.images.pull('python:3.11-slim')
             
             # Initialize container pool
-            self.container_pool = ContainerPool(self.docker_client, pool_size=20)
+            self.container_pool = ContainerPool(self.docker_client, pool_size=pool_size)
             
             print("Docker sandbox with container pool initialized successfully")
                 
@@ -255,28 +256,27 @@ def decode_private_test_cases(encoded_str: str) -> Optional[List[Dict[str, Any]]
 
 
 def load_environment(
+    dataset_name: str = "livecodebench/code_generation_lite",
     version_tag: str = "release_v5",
-    split: str = "test",
-    num_examples: int = -1,
-    **kwargs
-) -> vf.Environment:
-    """Load LiveCodeBench environment for evaluation
+    num_examples: int = -1,  # -1 means use all examples
+    pool_size: int = 20,  # Configurable container pool size
+) -> SingleTurnEnv:
+    """Load LiveCodeBench environment
     
     Args:
-        version_tag: LiveCodeBench version to load
-        split: Dataset split (always "test" for LiveCodeBench)
+        dataset_name: Name of the dataset to load
+        version_tag: Version of the dataset to use
         num_examples: Number of examples to load (-1 for all)
-        **kwargs: Additional arguments (ignored)
+        pool_size: Number of pre-allocated Docker containers
+    
+    Returns:
+        SingleTurnEnv: Configured environment
     """
-    # Load the actual LiveCodeBench dataset
-    dataset = load_livecodebench_dataset(
-        version_tag=version_tag,
-        split=split,
-        num_examples=num_examples
-    )
+    # Load dataset
+    dataset = load_livecodebench_dataset(dataset_name, version_tag, num_examples)
     
     # Initialize sandbox executor
-    sandbox = SecureSandboxExecutor()
+    sandbox = SecureSandboxExecutor(pool_size=pool_size)
     
     # Track unique warning types to avoid spam
     logged_warnings = set()

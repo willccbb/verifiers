@@ -27,24 +27,24 @@ vf-install livecodebench -p /path/to/environments
 
 ## Usage
 
-### Basic Evaluation
+The environment can be used with the verifiers evaluation framework:
 
 ```bash
-# Evaluate with default settings (all problems, 1 rollout each)
-uv run vf-eval livecodebench -m gpt-4.1
+# Basic evaluation with default settings
+vf-eval livecodebench -m gpt-4.1-mini -n 5
 
-# Evaluate with specific number of problems and rollouts
-uv run vf-eval livecodebench -m gpt-4.1 -n 20 -r 5 --env-args '{"num_examples": 20}'
+# Evaluation with custom container pool size
+vf-eval livecodebench -m gpt-4.1-mini -n 5 --env-args '{"pool_size": 30}'
 
-# Use a different dataset version
-uv run vf-eval livecodebench -m gpt-4.1 --env-args '{"version_tag": "release_v4"}'
+# Note: Use the -n flag to control number of problems evaluated
+# The full dataset is loaded regardless (parsing is cheap)
 ```
 
-### Available Parameters
+### Configuration Options
 
-- `num_examples`: Number of problems to evaluate (default: all)
-- `version_tag`: LiveCodeBench version to use (default: "release_v5")
-- `seed`: Random seed for problem selection (default: 42)
+- `dataset_name`: Dataset to use (default: "livecodebench/code_generation_lite")
+- `version_tag`: Dataset version (default: "release_v5")
+- `pool_size`: Number of pre-allocated Docker containers (default: 20)
 
 ## Implementation Details
 
