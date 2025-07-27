@@ -31,13 +31,13 @@ vf-install livecodebench -p /path/to/environments
 
 ```bash
 # Evaluate with default settings (all problems, 1 rollout each)
-uv run vf-eval livecodebench -m gpt-4
+uv run vf-eval livecodebench -m gpt-4.1
 
 # Evaluate with specific number of problems and rollouts
-uv run vf-eval livecodebench -m gpt-4 -n 20 -r 5 --env-args '{"num_examples": 20}'
+uv run vf-eval livecodebench -m gpt-4.1 -n 20 -r 5 --env-args '{"num_examples": 20}'
 
 # Use a different dataset version
-uv run vf-eval livecodebench -m gpt-4 --env-args '{"version_tag": "release_v4"}'
+uv run vf-eval livecodebench -m gpt-4.1 --env-args '{"version_tag": "release_v4"}'
 ```
 
 ### Available Parameters

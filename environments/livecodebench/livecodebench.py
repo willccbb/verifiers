@@ -242,7 +242,7 @@ def load_environment(
     split: str = "test",
     num_examples: int = -1,
     **kwargs
-) -> vf.SingleTurnEnv:
+) -> vf.Environment:
     """Load LiveCodeBench environment for evaluation
     
     Args:
