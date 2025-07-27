@@ -108,16 +108,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
-        
-    def get_dataset_row(self, idx):
-        """Override to reconstruct oai_tools from JSON."""
-        row = super().get_dataset_row(idx)
-        # Reconstruct oai_tools if stored as JSON
-        if "info" in row and "_oai_tools_json" in row["info"]:
-            row["info"]["oai_tools"] = json.loads(row["info"]["_oai_tools_json"])
-            # Remove the temporary field
-            row["info"].pop("_oai_tools_json", None)
-        return row
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
@@ -723,7 +713,7 @@ Try to be helpful and always follow the policy. Always make sure you generate va
                 "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
                 "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
                 "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
-                "oai_tools": oai_tools  # Pass tools directly as JSON schema
+                "oai_tools": json.dumps(oai_tools) if oai_tools else "[]"  # Store as JSON string to avoid HF Dataset schema conflicts
             },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
@@ -890,22 +880,7 @@ def load_environment(
     # Convert tasks to dataset
     full_dataset = create_tau2_dataset(tau2_tasks, domain, tau2_env)
     
-    # Fix oai_tools after dataset creation to handle HF Dataset schema inference issues
-    # HuggingFace Dataset merges schemas across all tools, adding None fields
-    # We need to store the tools separately and reconstruct them
-    if hasattr(tau2_env, 'get_tools'):
-        tools = tau2_env.get_tools()
-        clean_oai_tools = [tool.openai_schema for tool in tools] if tools else []
-        
-        # Store tools as a JSON string to prevent HF Dataset from corrupting them
-        def fix_oai_tools(example):
-            # Store as JSON string in a special field
-            example["info"]["_oai_tools_json"] = json.dumps(clean_oai_tools)
-            # Remove the corrupted oai_tools
-            example["info"].pop("oai_tools", None)
-            return example
-            
-        full_dataset = full_dataset.map(fix_oai_tools)
+
     
     # Split into train/eval
     total_tasks = len(full_dataset)
