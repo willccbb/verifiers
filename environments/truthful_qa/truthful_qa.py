@@ -38,8 +38,9 @@ def load_environment(
             # Use first correct answer
             answer = example["correct_answers"][0] if example["correct_answers"] else example["best_answer"]
         
-        # Create a formatted prompt with the question
-        prompt = f"Question: {example['question']}\n\nProvide a truthful and accurate answer."
+        # Create a formatted prompt in ChatMessage format
+        question_text = f"Question: {example['question']}\n\nProvide a truthful and accurate answer."
+        prompt = [{"role": "user", "content": question_text}]
         
         # Store additional info for evaluation
         info = {
