@@ -158,9 +158,12 @@ class Tau2BenchEnv(MultiTurnEnv):
             if "tool_calls" in last_msg and last_msg["tool_calls"]:
                 tool_results = self._execute_agent_tools(last_msg["tool_calls"], state)
                 response_messages.extend(tool_results)
+                # Return tool results only - let agent respond to them first
+                return response_messages, state
                 
-            # Generate user response after agent message/tools
-            user_response = self._generate_user_response(messages + response_messages, state)
+            # Generate user response only if no tool calls
+            # (or this will be called after agent responds to tool results)
+            user_response = self._generate_user_response(messages, state)
             if user_response:
                 response_messages.append(user_response)
                 
