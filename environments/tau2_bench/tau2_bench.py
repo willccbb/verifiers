@@ -35,7 +35,6 @@ try:
     from tau2.data_model.tasks import RewardType
     from tau2.environment.environment import Environment as Tau2Environment
     from tau2.utils.llm_utils import get_llm_completions
-    import tau2_utils
     TAU2_AVAILABLE = True
 except ImportError:
     TAU2_AVAILABLE = False
