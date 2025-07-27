@@ -2,6 +2,8 @@
 
 This environment implements the standard TruthfulQA evaluation methodology for measuring how models mimic human falsehoods.
 
+> **Note**: This evaluation environment was created by Claude 4 Opus. While it aims to faithfully implement the TruthfulQA methodology, users should carefully review and validate the evaluation logic before relying on it for downstream evaluations.
+
 ## Overview
 
 TruthfulQA is a benchmark to measure whether a language model is truthful in generating answers to questions. The benchmark comprises 817 questions that span 38 categories, including health, law, finance and politics. Questions are crafted so that some humans would answer falsely due to a false belief or misconception.
