@@ -298,6 +298,7 @@ class Tau2BenchEnv(MultiTurnEnv):
             
     def _execute_agent_tools(self, tool_calls: List[Any], state: vf.State) -> List[Dict]:
         """Execute agent tool calls and return tool messages."""
+        print(f"\nDEBUG: _execute_agent_tools called with {len(tool_calls)} tool calls")
         tool_messages = []
         
         for tool_call in tool_calls:
@@ -371,23 +372,26 @@ class Tau2BenchEnv(MultiTurnEnv):
                     
                     tool_messages.append({
                         "role": "tool",
-                        "content": f"Error: Tool {tool_name} not found",
+                        "content": f"Error executing {tool_name}: Tool not found",
                         "tool_call_id": tool_id
                     })
                     
             except Exception as e:
                 # Format error to match tau2's expected format
+                print(f"DEBUG: Caught exception for tool {tool_name}: {type(e).__name__}: {str(e)}")
                 error_msg = str(e)
                 exec_record["error"] = error_msg
                 exec_record["success"] = False
                 state["error_count"] = state.get("error_count", 0) + 1
                 
                 # Format as tau2 expects
-                tool_messages.append({
+                tool_msg = {
                     "role": "tool",
                     "content": f"Error executing {tool_name}: {error_msg}",
                     "tool_call_id": tool_id
-                })
+                }
+                print(f"DEBUG: Creating error tool message: {tool_msg}")
+                tool_messages.append(tool_msg)
                 
             # Track execution
             state["tool_executions"].append(exec_record)
@@ -475,7 +479,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     
                     tool_messages.append({
                         "role": "tool",
-                        "content": f"Error: User tool {tool_name} not found", 
+                        "content": f"Error executing {tool_name}: User tool not found", 
                         "tool_call_id": tool_id,
                         "name": f"user_{tool_name}"
                     })
