@@ -374,7 +374,7 @@ def load_environment(
         })
     
     # Create dataset
-    dataset = vf.Dataset(data=converted_dataset)
+    dataset = Dataset.from_list(converted_dataset)
     
     # Create parser and rubric
     def extract_code(completion: str) -> str:
