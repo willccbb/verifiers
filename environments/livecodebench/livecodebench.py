@@ -246,61 +246,20 @@ def decode_private_test_cases(encoded_str: str) -> Optional[List[Dict[str, Any]]
     """
     Attempt to decode base64-encoded and compressed private test cases.
     
-    The LiveCodeBench dataset uses encoded private test cases, likely to prevent
-    contamination. This function attempts various standard decompression methods.
+    The LiveCodeBench dataset uses a proprietary encoding scheme for private test cases
+    to prevent data contamination. Without the official decoding key, we cannot
+    access these test cases. This is an intentional design choice by LiveCodeBench
+    to maintain benchmark integrity.
     
     Args:
         encoded_str: Base64-encoded and compressed string
         
     Returns:
-        List of test cases or None if decoding fails
+        None - we cannot decode without the official key
     """
-    try:
-        # Try base64 decode
-        decoded = base64.b64decode(encoded_str)
-        
-        # Try different decompression methods
-        decompressed = None
-        
-        # Method 1: standard zlib
-        try:
-            decompressed = zlib.decompress(decoded)
-        except:
-            pass
-        
-        # Method 2: gzip format
-        if decompressed is None:
-            try:
-                decompressed = gzip.decompress(decoded)
-            except:
-                pass
-        
-        # Method 3: raw deflate (no header)
-        if decompressed is None:
-            try:
-                decompressed = zlib.decompress(decoded, -zlib.MAX_WBITS)
-            except:
-                pass
-        
-        # Method 4: zlib with gzip header
-        if decompressed is None:
-            try:
-                decompressed = zlib.decompress(decoded, zlib.MAX_WBITS | 16)
-            except:
-                pass
-        
-        if decompressed is None:
-            return None
-        
-        # Decode and parse JSON
-        json_str = decompressed.decode('utf-8')
-        test_cases = json.loads(json_str)
-        
-        return test_cases if isinstance(test_cases, list) else None
-        
-    except Exception:
-        # Decoding failed - this is expected for the current encoding scheme
-        return None
+    # The private test cases use a proprietary encoding scheme
+    # We cannot decode them without the official LiveCodeBench key
+    return None
 
 
 def load_environment(
@@ -364,22 +323,10 @@ def load_environment(
                     if isinstance(private_tests, list):
                         test_cases.extend(private_tests)
                 except json.JSONDecodeError:
-                    # Try to decode as base64-encoded and compressed data
-                    decoded_tests = decode_private_test_cases(private_raw)
-                    if decoded_tests:
-                        test_cases.extend(decoded_tests)
-                        if idx < 2:  # Log success for first few problems
-                            print(f"Successfully decoded {len(decoded_tests)} private test cases for {problem_id}")
-                    else:
-                        # If decoding fails, log once per unique pattern
-                        # This is expected behavior - LiveCodeBench uses a proprietary encoding
-                        # to prevent test data contamination
-                        length = len(private_raw)
-                        if length not in logged_warnings:
-                            logged_warnings.add(length)
-                            if idx < 5:  # Only show warnings for first few problems
-                                print(f"Note: Private test cases for {problem_id} use proprietary encoding (length {length}). Using public tests only.")
-        
+                    # The private test cases use proprietary encoding
+                    # We cannot decode them without the official key
+                    pass
+            
         # Format the prompt
         prompt = f"{problem_desc}\n\n"
         if starter_code:

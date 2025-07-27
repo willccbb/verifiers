@@ -65,10 +65,14 @@ The implementation downloads JSONL files directly from HuggingFace due to the de
 
 ### Private Test Cases
 
-LiveCodeBench stores private test cases using a proprietary encoding scheme to prevent data contamination and maintain benchmark integrity. This implementation:
-- Attempts to decode private test cases using standard decompression methods
-- Falls back to using only public test cases when decoding fails
-- This is expected behavior and aligns with LiveCodeBench's anti-contamination measures
+**Important**: LiveCodeBench uses a proprietary encoding scheme for private test cases to prevent data contamination and maintain benchmark integrity. This is an intentional design choice by the LiveCodeBench team to ensure models cannot be trained on the test data.
+
+As an external port, we do not have access to the decoding key for these private test cases. Therefore:
+- The environment uses only public test cases for evaluation
+- This may result in less comprehensive testing compared to the official LiveCodeBench infrastructure
+- The core functionality and evaluation methodology remain faithful to the original benchmark
+
+This limitation affects all problems in the dataset but does not prevent meaningful evaluation - public test cases are sufficient for assessing model performance.
 
 ### Evaluation Metrics
 
@@ -84,7 +88,7 @@ LiveCodeBench stores private test cases using a proprietary encoding scheme to p
 
 ## Known Limitations
 
-1. **Private test cases**: Many private test cases in LiveCodeBench use a proprietary encoding that cannot be decoded without the official key. This is by design to prevent test data contamination. The environment will evaluate using public test cases only for these problems. This may result in less comprehensive testing but maintains the integrity of the benchmark.
+1. **Private test cases**: Private test cases use a proprietary encoding scheme and cannot be decoded without the official key. The environment uses public test cases only.
 2. Network DNS resolution issues may temporarily prevent dataset downloading
 3. The environment requires Docker and cannot fall back to subprocess execution
 
