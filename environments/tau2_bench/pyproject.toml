@@ -1,15 +1,15 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "tau2_bench"
 version = "0.1.0"
-description = "τ²-bench implementation for verifiers"
 dependencies = [
     "pydantic>=2.0.0",
     "datasets>=2.0.0",
+    "verifiers>=0.1.2",
 ]
 
-[tool.setuptools]
-py-modules = ["tau2_bench"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["tau2_bench.py"]
