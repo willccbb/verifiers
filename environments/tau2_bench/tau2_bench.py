@@ -738,55 +738,44 @@ class Tau2BenchEnv(MultiTurnEnv):
         return tau2_messages
 
 
-def create_tau2_dataset(tau2_tasks: List[Any], domain: str, tau2_env: Any) -> Dataset:
-    """Convert tau2 tasks to verifiers dataset format with exact original prompts and tools."""
-    dataset_rows = []
+def create_tau2_dataset(domain: str = "retail") -> Dataset:
+    """Create a dataset from tau2 tasks using tau2's native functions."""
+    from tau2.domains.retail.environment import get_tasks as get_retail_tasks
+    from tau2.domains.airline.environment import get_tasks as get_airline_tasks
+    from tau2.domains.telecom.environment import get_tasks as get_telecom_tasks
+    from tau2.agent.llm_agent import AGENT_INSTRUCTION, SYSTEM_PROMPT
     
-    # Load the domain policy
-    import os
+    # Get tasks using tau2's native functions
+    if domain == "retail":
+        tau2_tasks = get_retail_tasks()
+        tau2_env = get_retail_env()
+    elif domain == "airline":
+        tau2_tasks = get_airline_tasks()
+        tau2_env = get_airline_env()
+    elif domain == "telecom":
+        tau2_tasks = get_telecom_tasks()
+        tau2_env = get_telecom_env(solo_mode=False)
+    else:
+        raise ValueError(f"Unknown domain: {domain}")
     
-    policy_path = os.path.join(DATA_DIR, "tau2", "domains", domain, "policy.md")
-    try:
-        with open(policy_path, 'r') as f:
-            domain_policy = f.read()
-    except:
-        # Fallback if policy file not found
-        domain_policy = f"Policy for {domain} domain"
+    # Get tools and prompts directly from tau2
+    tools_dict = tau2_env.tools.get_tools() if hasattr(tau2_env.tools, 'get_tools') else {}
+    tools = list(tools_dict.values()) if tools_dict else []
     
-    # Agent instruction from original
-    AGENT_INSTRUCTION = """You are a customer service agent that helps the user according to the <policy> provided below.
-In each turn you can either:
-- Send a message to the user.
-- Make a tool call.
-You cannot do both at the same time.
-
-Try to be helpful and always follow the policy. Always make sure you generate valid JSON only."""
+    # Get policy from environment
+    policy = tau2_env.policy
     
-    # System prompt template from original
-    system_prompt = f"""<instructions>
-{AGENT_INSTRUCTION}
-</instructions>
-<policy>
-{domain_policy}
-</policy>"""
+    # Build the system prompt exactly as tau2 does
+    system_prompt = SYSTEM_PROMPT.format(
+        agent_instruction=AGENT_INSTRUCTION,
+        domain_policy=policy
+    )
     
-    # Get tools from the environment
-    tools = tau2_env.get_tools() if hasattr(tau2_env, 'get_tools') else []
-    # Convert to OpenAI format - we'll store as a JSON string to avoid HF Dataset schema inference issues
+    # Convert to OpenAI format - store as JSON string to avoid HF Dataset schema inference issues
     oai_tools = [tool.openai_schema for tool in tools] if tools else []
     
+    dataset_rows = []
     for task in tau2_tasks:
-        # Extract key information with null checks
-        task_id = task.id if hasattr(task, 'id') else ""
-        user_scenario = task.user_scenario if hasattr(task, 'user_scenario') else None
-        
-        # Get scenario description
-        scenario = ""
-        if user_scenario and hasattr(user_scenario, 'scenario'):
-            scenario = user_scenario.scenario
-        elif user_scenario and hasattr(user_scenario, 'model_dump'):
-            scenario = user_scenario.model_dump().get('scenario', '')
-            
         # Get initial messages from task
         initial_messages = []
         if hasattr(task, 'initial_state') and task.initial_state:
@@ -802,26 +791,37 @@ Try to be helpful and always follow the policy. Always make sure you generate va
         # Always start with the exact system prompt from original
         initial_messages = [{"role": "system", "content": system_prompt}] + initial_messages
         
+        # Get scenario description
+        scenario = ""
+        if hasattr(task, 'user_scenario') and task.user_scenario:
+            if hasattr(task.user_scenario, 'scenario'):
+                scenario = task.user_scenario.scenario
+            elif hasattr(task.user_scenario, 'instructions'):
+                scenario = task.user_scenario.instructions
+            # Handle StructuredUserInstructions or any object with string representation
+            if not isinstance(scenario, str) and scenario is not None:
+                scenario = str(scenario)
+        
         # Create dataset row
         row = {
             "prompt": initial_messages,
             "question": scenario if scenario else "Help the customer with their request.",
             "info": {
-                "task_id": task_id,
+                "task_id": task.id,
                 "domain": domain,
                 "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
                 "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
-                "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
+                "user_scenario": task.user_scenario.model_dump() if hasattr(task, 'user_scenario') and task.user_scenario else {},
                 "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
-                "oai_tools": json.dumps(oai_tools) if oai_tools else "[]"  # Store as JSON string to avoid HF Dataset schema conflicts
+                "oai_tools": json.dumps(oai_tools)  # Store as JSON string to avoid HF Dataset schema conflicts
             },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
-            # Store task_id in state for easy lookup
-            "task_id": task_id
+            # Store task_id in state for easy lookup  
+            "task_id": task.id
         }
         dataset_rows.append(row)
-        
+    
     return Dataset.from_list(dataset_rows)
 
 
@@ -1160,32 +1160,26 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
 
 
 def load_environment(
+    dataset_name: str = "tau2-bench",
+    dataset_config: str = "retail",
+    dataset_split: str = "train", 
+    subset_size: Optional[int] = None,
+    seed: int = 42,
     domain: str = "retail",
-    num_train_examples: int = -1,
-    num_eval_examples: int = 10,
-    user_llm: str = "gpt-4.1-mini",
+    use_cache: bool = True,
     **kwargs
-) -> vf.Environment:
-    """
-    Load τ²-bench environment with full dual-control support.
-    
-    Args:
-        domain: One of "retail", "airline", or "telecom"
-        num_train_examples: Number of training examples (-1 for all)
-        num_eval_examples: Number of evaluation examples
-        user_llm: LLM to use for user simulation
-        **kwargs: Additional arguments
-        
-    Returns:
-        Configured tau2-bench environment
-    """
+) -> vf.MultiTurnEnv:
+    """Load tau2-bench environment using tau2's native functions."""
     if not TAU2_AVAILABLE:
         raise ImportError("tau2-bench is not installed. Please install it first.")
-        
-    # Setup tau2 data if not already present
+    
+    # Ensure data is set up
     setup_tau2_data()
-
-    # Load tau2 environment and tasks based on domain
+    
+    # Create dataset using tau2's native functions
+    full_dataset = create_tau2_dataset(domain)
+    
+    # Get environment and tasks for the domain
     if domain == "retail":
         tau2_env = get_retail_env()
         tau2_tasks = get_retail_tasks()
@@ -1193,41 +1187,29 @@ def load_environment(
         tau2_env = get_airline_env()
         tau2_tasks = get_airline_tasks()
     elif domain == "telecom":
-        tau2_env = get_telecom_env(solo_mode=False)  # Important: dual-control
+        tau2_env = get_telecom_env(solo_mode=False)
         tau2_tasks = get_telecom_tasks()
     else:
         raise ValueError(f"Unknown domain: {domain}")
-        
-    # Convert tasks to dataset
-    full_dataset = create_tau2_dataset(tau2_tasks, domain, tau2_env)
     
-
+    # Handle subset if requested
+    if subset_size is not None and subset_size < len(full_dataset):
+        indices = list(range(len(full_dataset)))
+        import random
+        random.seed(seed)
+        random.shuffle(indices)
+        full_dataset = full_dataset.select(indices[:subset_size])
     
-    # Split into train/eval
-    total_tasks = len(full_dataset)
-    if num_train_examples == -1:
-        num_train_examples = max(0, total_tasks - num_eval_examples)
-        
-    train_dataset = full_dataset.select(range(min(num_train_examples, total_tasks)))
-    eval_dataset = full_dataset.select(range(
-        num_train_examples,
-        min(num_train_examples + num_eval_examples, total_tasks)
-    ))
-    
-    # Create rubric
+    # Create rubric using tau2's evaluation
     rubric = create_tau2_rubric(domain)
     
-
-    
-    # Create environment
+    # Create environment instance
     env = Tau2BenchEnv(
-        dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        dataset=full_dataset,
         rubric=rubric,
-        domain=domain,
         tau2_env=tau2_env,
         tau2_tasks=tau2_tasks,
-        user_llm=user_llm,
+        domain=domain,
         **kwargs
     )
     

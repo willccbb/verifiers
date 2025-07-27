@@ -1,92 +1,34 @@
-# τ²-bench Implementation Status
+# τ²-bench Environment for Verifiers
 
-## Overview
-This is a complete implementation of τ²-bench (tau2-bench) for the verifiers framework. τ²-bench is an advanced LLM agent benchmark that tests dual-control environments where both agents and users can execute tools.
+Implementation of the τ²-bench (tau2-bench) dual-control agent benchmark for the Verifiers framework.
 
-## Current State
+## Current Project Status
 
-### ✅ Completed Features
+### What We've Achieved
+1. **Full Dual-Control Implementation**: Successfully implemented τ²-bench's unique dual-control environment where both agent and user can execute tools
+2. **Native τ² Integration**: Refactored to use τ²-bench's native functions directly rather than reimplementing:
+   - Using `tau2` tool execution directly (tools raise `ValueError` exceptions for errors)
+   - Using `tau2`'s `get_tasks()` functions for each domain
+   - Using `tau2`'s exact prompts from `AGENT_INSTRUCTION` and `SYSTEM_PROMPT`
+   - Using `tau2`'s `evaluate_simulation()` for scoring
+3. **Strict Evaluation Matching**: Implemented exact matching of τ²-bench's evaluation logic including all four evaluators (Action, Environment, Communicate, NLAssertions)
+4. **Error Format Compliance**: Tool errors are formatted as `Error executing {tool_name}: {message}` to match τ²-bench's expectations
+5. **Per-Rollout State Isolation**: Each evaluation rollout gets a fresh `tau2.environment.Environment` instance to prevent state leakage
 
-1.  **Full Dual-Control Environment**
-    - Both agents and users can execute tools
-    - User simulator from τ²-bench integrated for realistic interactions
-    - Proper turn handoff between agent → tool → agent → user
+### Current Performance
+- **GPT-4.1-mini on retail domain**: ~13-17% (vs expected 40%+)
+- **Primary issue**: `CommunicateEvaluator` failures - the agent performs correct actions but doesn't communicate required information strings
 
-2.  **All Domains Supported**
-    - `retail`: Customer service with agent-only tools
-    - `airline`: Flight booking with agent-only tools
-    - `telecom`: Technical support with dual-control (both agent and user tools)
+### Known Issues
+1. **Low scores due to CommunicateEvaluator**: τ²-bench checks if specific strings (from `communicate_info`) appear in agent messages. Even when agents perform all correct actions and achieve the correct DB state, they get 0.0 if they don't say the exact required phrases.
+2. **Occasional state synchronization issues**: Sometimes tools succeed when τ²-bench expects them to fail, suggesting potential timing or state management edge cases
 
-3.  **Exact Original Prompts & Policies**
-    - System prompts match τ²-bench exactly
-    - Domain-specific policies loaded from τ²-bench data files
-    - Tool descriptions provided in OpenAI function calling format
+### Next Steps
+1. **Investigate communication requirements**: Deep dive into what specific phrases τ²-bench expects agents to communicate
+2. **Consider prompt engineering**: May need to add guidance for agents to communicate specific information
+3. **Debug remaining state issues**: Ensure perfect alignment between our environment state and τ²-bench's expectations
 
-4.  **Complete State Management**
-    - Agent state, user state, environment database state
-    - Tool execution history with full tracking
-    - Error counting and termination conditions
-
-5.  **Infrastructure Integration**
-    - Follows verifiers `MultiTurnEnv` pattern
-    - All logic encapsulated in `env_response` method
-    - Automatic data setup from τ²-bench repository
-    - Clean dependency management via git reference
-
-### 🔧 Technical Implementation
-
-1.  **Tool Schema Handling**
-    - Tools are JSON-serialized in dataset to avoid HuggingFace schema conflicts
-    - Automatic deserialization in `environment.py`'s `a_generate` method
-    - No special overrides needed in the tau2_bench environment
-
-2.  **Message Format Compatibility**
-    - Handles both dict and object formats for tool calls
-    - Proper conversion to τ²-bench message format (tool_calls=None vs [])
-    - Supports verifiers' message format while maintaining τ²-bench compatibility
-
-3.  **Evaluation Logic**
-    - Binary pass/fail scoring (1.0 or 0.0) matching original
-    - Checks for exact action sequences with tool name, requestor, and arguments
-    - Simplified environment state checking (full hash comparison not implemented)
-
-### 🐛 Recent Fixes
-
-1.  **Tool Response Format**: Fixed mismatch between JSON and τ²-bench's expected format by using `tau2_env.to_json_str()` method
-2.  **Error Message Format**: Tool errors now properly formatted as "Error executing {tool_name}: {error}" to match τ²-bench expectations
-3.  **Evaluation AttributeErrors**: Fixed accessing τ²-bench ToolCall attributes (direct `name`/`arguments` instead of `function.name`/`function.arguments`)
-
-## Known Issues
-
-1.  **Evaluation Scores**: Currently showing 0.0 scores even when tasks appear to complete successfully. This suggests either:
-    - The evaluation criteria are extremely strict (likely)
-    - There's a mismatch in how we track/report tool executions
-    - The expected actions in the dataset don't match what agents naturally do
-
-2.  **Agent Behavior**: Generic LLMs don't always follow τ²-bench's expected patterns:
-    - May not use the exact tool names expected
-    - May not follow the exact sequence of actions
-    - May format tool calls differently than expected
-
-## Project Goals
-
-### Primary Objective
-Create a faithful port of τ²-bench that:
-- Preserves the exact evaluation logic
-- Maintains compatibility with the verifiers framework
-- Enables researchers to test LLM agents on τ²-bench tasks
-
-### Key Requirements
-1.  **Verbatim Logic Translation**: The evaluation must match τ²-bench exactly
-2.  **No Framework Modifications**: Work within verifiers' existing patterns
-3.  **Full Feature Support**: Including dual-control environments
-
-### Success Criteria
-- Agents can complete τ²-bench tasks with appropriate scores
-- The implementation is maintainable and well-documented
-- Researchers can easily run τ²-bench evaluations on their models
-
-## Usage
+## Installation
 
 ```bash
 # Install
