@@ -24,7 +24,7 @@ try:
     from tau2.domains.telecom.environment import get_environment as get_telecom_env
     from tau2.domains.telecom.environment import get_tasks as get_telecom_tasks
     from tau2.data_model.message import (
-        AssistantMessage, UserMessage, ToolMessage, Message as Tau2Message
+        AssistantMessage, UserMessage, ToolMessage, Message as Tau2Message, ToolCall
     )
     from tau2.user.user_simulator import UserSimulator
     from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
@@ -34,9 +34,11 @@ try:
     from tau2.data_model.simulation import SimulationRun, TerminationReason
     from tau2.data_model.tasks import RewardType
     from tau2.environment.environment import Environment as Tau2Environment
-    from tau2.utils.llm_utils import get_llm_completions
     TAU2_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    print(f"DEBUG: Import error: {e}")
+    import traceback
+    traceback.print_exc()
     TAU2_AVAILABLE = False
     STOP = "STOP"
     TRANSFER = "TRANSFER"
@@ -709,7 +711,6 @@ def create_tau2_dataset(tau2_tasks: List[Any], domain: str, tau2_env: Any) -> Da
     dataset_rows = []
     
     # Load the domain policy
-    from tau2.utils.utils import DATA_DIR
     import os
     
     policy_path = os.path.join(DATA_DIR, "tau2", "domains", domain, "policy.md")
@@ -861,7 +862,6 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         # Convert tool calls to tau2 format if present
                         tau2_tool_calls = None
                         if "tool_calls" in msg and msg["tool_calls"]:
-                            from tau2.data_model.message import ToolCall
                             tau2_tool_calls = []
                             for tc in msg["tool_calls"]:
                                 # Handle both dict and object formats
@@ -898,7 +898,6 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         # Handle user tool calls (for telecom domain)
                         tau2_tool_calls = None
                         if "tool_calls" in msg and msg["tool_calls"]:
-                            from tau2.data_model.message import ToolCall
                             tau2_tool_calls = []
                             for tc in msg["tool_calls"]:
                                 # Similar conversion as above
