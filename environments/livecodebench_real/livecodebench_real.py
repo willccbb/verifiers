@@ -6,134 +6,157 @@ with proper Docker-based sandboxing for secure code execution.
 """
 
 import os
-import json
-import tempfile
-import subprocess
-import time
-import resource
-import signal
-import docker
 import re
-from typing import List, Dict, Optional, Tuple, Any
-from contextlib import contextmanager
-from pathlib import Path
+import json
+import time
+import subprocess
+import tempfile
+import resource
+from typing import Dict, List, Any, Optional, Tuple
 
 import verifiers as vf
-from datasets import load_dataset, Dataset
+from datasets import Dataset, load_dataset
+import docker
 
 
-class DockerSandboxExecutor:
-    """Production-grade Docker-based sandbox for secure code execution"""
+class SecureSandboxExecutor:
+    """Secure Docker-based sandbox for code execution"""
     
-    def __init__(
-        self, 
-        image_name: str = "python:3.10-slim",
-        memory_limit: str = "512m",
-        cpu_quota: int = 50000,  # 0.5 CPU
-        timeout: int = 30,
-        max_processes: int = 50
-    ):
-        self.image_name = image_name
-        self.memory_limit = memory_limit
-        self.cpu_quota = cpu_quota
-        self.timeout = timeout
-        self.max_processes = max_processes
-        
-        # Initialize Docker client
+    def __init__(self):
+        """Initialize Docker client"""
         try:
-            self.client = docker.from_env()
+            # Try to connect to Docker
+            self.docker_client = docker.from_env()
             self.docker_available = True
-            self._ensure_image()
-        except Exception as e:
-            print(f"Warning: Docker not available ({e}). Falling back to subprocess sandbox.")
-            self.docker_available = False
-    
-    def _ensure_image(self):
-        """Ensure the Docker image exists"""
-        try:
-            self.client.images.get(self.image_name)
-        except docker.errors.ImageNotFound:
-            print(f"Pulling Docker image {self.image_name}...")
-            self.client.images.pull(self.image_name)
-    
-    def execute_in_docker(self, code: str, test_input: str = "") -> Tuple[str, str, int]:
-        """Execute code in Docker container"""
-        # Create temporary directory for code
-        with tempfile.TemporaryDirectory() as tmpdir:
-            code_path = os.path.join(tmpdir, "solution.py")
-            input_path = os.path.join(tmpdir, "input.txt")
+            print("Docker sandbox initialized successfully")
             
-            # Write code and input
+            # Test if we can actually use Docker
+            try:
+                self.docker_client.ping()
+            except docker.errors.APIError:
+                # Try with sudo
+                print("Regular Docker access failed, trying with sudo...")
+                # For environments where Docker requires sudo, we'll need to handle this differently
+                # In production, the user running the evaluation should be in the docker group
+                raise RuntimeError(
+                    "Docker requires elevated permissions. Please ensure the user is in the docker group:\n"
+                    "  sudo usermod -aG docker $USER\n"
+                    "  Then log out and back in."
+                )
+            
+            # Pull Python image if not available
+            try:
+                self.docker_client.images.get("python:3.11-slim")
+            except docker.errors.ImageNotFound:
+                print("Pulling Python Docker image...")
+                self.docker_client.images.pull("python:3.11-slim")
+                print("Python Docker image ready")
+                
+        except Exception as e:
+            raise RuntimeError(f"Docker is required but not available: {e}\n"
+                             "Please ensure Docker is installed and running:\n"
+                             "  - Install Docker: https://docs.docker.com/get-docker/\n"
+                             "  - Start Docker daemon: sudo systemctl start docker\n"
+                             "  - Add user to docker group: sudo usermod -aG docker $USER")
+    
+    def execute(self, code: str, test_input: str = "", timeout: int = 10) -> Tuple[str, str, int]:
+        """Execute code in Docker sandbox"""
+        
+        # Create a temporary directory for the code
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write code to file
+            code_path = os.path.join(tmpdir, "solution.py")
             with open(code_path, 'w') as f:
                 f.write(code)
+            
+            # Write input to file
+            input_path = os.path.join(tmpdir, "input.txt")
             with open(input_path, 'w') as f:
                 f.write(test_input)
             
-            # Docker run command
-            container = self.client.containers.run(
-                self.image_name,
-                command=f"python /code/solution.py < /code/input.txt",
-                volumes={tmpdir: {'bind': '/code', 'mode': 'ro'}},
-                working_dir="/code",
-                mem_limit=self.memory_limit,
-                cpu_quota=self.cpu_quota,
-                cpu_period=100000,
-                pids_limit=self.max_processes,
-                network_mode="none",
-                remove=True,
-                detach=True,
-                security_opt=["no-new-privileges"],
-                read_only=True,
-                tmpfs={'/tmp': 'size=100M,mode=1777'}
-            )
+            # Create a wrapper script that handles stdin properly
+            wrapper_path = os.path.join(tmpdir, "wrapper.py")
+            wrapper_code = """
+import sys
+import subprocess
+
+# Read all stdin
+stdin_data = sys.stdin.read()
+
+# Run the solution with the input
+result = subprocess.run(
+    [sys.executable, '/code/solution.py'],
+    input=stdin_data,
+    capture_output=True,
+    text=True
+)
+
+# Output results
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
+"""
+            with open(wrapper_path, 'w') as f:
+                f.write(wrapper_code)
             
-            # Wait for completion with timeout
+            # Docker container configuration
+            container_config = {
+                'image': 'python:3.11-slim',
+                'command': ['python', '/code/wrapper.py'],
+                'volumes': {
+                    tmpdir: {'bind': '/code', 'mode': 'ro'}
+                },
+                'working_dir': '/code',
+                'stdin_open': True,
+                'detach': True,
+                'mem_limit': '512m',
+                'memswap_limit': '512m',
+                'cpu_quota': 50000,  # 0.5 CPU
+                'cpu_period': 100000,
+                'pids_limit': 50,
+                'network_disabled': True,
+                'read_only': True,
+                'tmpfs': {'/tmp': 'size=64M,mode=1777'},
+                'security_opt': ['no-new-privileges'],
+                'cap_drop': ['ALL'],
+                'user': 'nobody:nogroup'
+            }
+            
+            stdout, stderr = "", ""
+            exit_code = 0
+            
             try:
-                result = container.wait(timeout=self.timeout)
-                stdout = container.logs(stdout=True, stderr=False).decode()
-                stderr = container.logs(stdout=False, stderr=True).decode()
-                exit_code = result['StatusCode']
-            except Exception:
-                container.kill()
-                stdout = ""
-                stderr = "Execution timed out"
-                exit_code = -1
+                # Run container with input
+                result = self.docker_client.containers.run(
+                    **container_config,
+                    input=test_input.encode('utf-8') if test_input else b'',
+                    remove=True,
+                    timeout=timeout
+                )
+                
+                # Result is bytes, decode it
+                output = result.decode('utf-8', errors='replace')
+                stdout = output
+                stderr = ""
+                exit_code = 0
+                
+            except docker.errors.ContainerError as e:
+                # Container exited with non-zero code
+                stdout = e.output.decode('utf-8', errors='replace') if e.output else ""
+                stderr = str(e)
+                exit_code = e.exit_status
+            except docker.errors.APIError as e:
+                if "timed out" in str(e):
+                    stderr = "Execution timed out"
+                    exit_code = 124
+                else:
+                    stderr = f"Docker API error: {str(e)}"
+                    exit_code = 1
+            except Exception as e:
+                stderr = f"Execution error: {str(e)}"
+                exit_code = 1
             
             return stdout, stderr, exit_code
-    
-    def execute_in_subprocess(self, code: str, test_input: str = "") -> Tuple[str, str, int]:
-        """Fallback execution using subprocess with resource limits"""
-        def set_limits():
-            # Set CPU time limit
-            resource.setrlimit(resource.RLIMIT_CPU, (self.timeout, self.timeout))
-            # Set memory limit (512MB)
-            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
-            # Set process limit
-            resource.setrlimit(resource.RLIMIT_NPROC, (self.max_processes, self.max_processes))
-            # Set file size limit (no file creation)
-            resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-        
-        try:
-            result = subprocess.run(
-                ["python3", "-c", code],
-                input=test_input,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                preexec_fn=set_limits if os.name != 'nt' else None
-            )
-            return result.stdout, result.stderr, result.returncode
-        except subprocess.TimeoutExpired:
-            return "", "Execution timed out", -1
-        except Exception as e:
-            return "", str(e), -1
-    
-    def execute(self, code: str, test_input: str = "") -> Tuple[str, str, int]:
-        """Execute code with appropriate sandbox"""
-        if self.docker_available:
-            return self.execute_in_docker(code, test_input)
-        else:
-            return self.execute_in_subprocess(code, test_input)
 
 
 def load_livecodebench_dataset(
@@ -229,65 +252,49 @@ def load_livecodebench_dataset(
 
 def load_environment(
     version_tag: str = "release_v5",
-    docker_enabled: bool = True,
-    num_examples: int = -1
+    split: str = "test",
+    num_examples: int = -1,
+    **kwargs
 ) -> vf.SingleTurnEnv:
-    """Load LiveCodeBench environment with real dataset"""
+    """Load LiveCodeBench environment for evaluation
     
-    # Load the actual dataset
+    Args:
+        version_tag: LiveCodeBench version to load
+        split: Dataset split (always "test" for LiveCodeBench)
+        num_examples: Number of examples to load (-1 for all)
+        **kwargs: Additional arguments (ignored)
+    """
+    # Load the actual LiveCodeBench dataset
     dataset = load_livecodebench_dataset(
         version_tag=version_tag,
+        split=split,
         num_examples=num_examples
     )
     
     # Initialize sandbox executor
-    sandbox = DockerSandboxExecutor() if docker_enabled else DockerSandboxExecutor()
-    sandbox.docker_available = docker_enabled
+    sandbox = SecureSandboxExecutor()
     
     # Convert dataset to verifiers format
     converted_dataset = []
-    for example in dataset:
-        # LiveCodeBench dataset structure:
-        # - 'question_id': unique identifier
-        # - 'question_title': problem title  
-        # - 'question_content': problem description
-        # - 'test_list': list of test cases
-        # - 'starter_code': optional starter code
-        # - 'difficulty': problem difficulty
+    for idx, example in enumerate(dataset):
+        # Extract problem information
+        problem_id = example.get('question_id', f'problem_{idx}')
+        problem_desc = example.get('question_content', '')
+        starter_code = example.get('starter_code', '')
+        test_cases = example.get('test_list', [])
         
-        # Extract test cases
-        test_cases = []
-        if 'test_list' in example and example['test_list']:
-            for test in example['test_list']:
-                test_cases.append({
-                    'input': test.get('input', ''),
-                    'output': test.get('output', '')
-                })
+        # Format the prompt
+        prompt = f"{problem_desc}\n\n"
+        if starter_code:
+            prompt += f"Starter code:\n```python\n{starter_code}\n```\n\n"
+        prompt += "Write a complete Python solution:"
         
-        # Create the problem prompt
-        prompt_parts = [example['question_title'], "", example['question_content']]
-        
-        # Add starter code if available
-        if example.get('starter_code'):
-            prompt_parts.extend(["", "Starter code:", "```python", example['starter_code'], "```"])
-        
-        # Add example tests
-        if test_cases:
-            prompt_parts.extend(["", "Examples:"])
-            for i, test in enumerate(test_cases[:3]):  # Show first 3 examples
-                prompt_parts.append(f"\nExample {i+1}:")
-                prompt_parts.append(f"Input: {test['input']}")
-                prompt_parts.append(f"Output: {test['output']}")
-        
-        prompt = "\n".join(prompt_parts)
-        
-        # Store all info for the rubric functions
+        # Store test cases and other info
         info = {
-            'question_id': example.get('question_id', ''),
+            'problem_id': problem_id,
             'test_cases': test_cases,
-            'starter_code': example.get('starter_code', ''),
-            'difficulty': example.get('difficulty', 'unknown'),
-            'entry_point': example.get('entry_point', 'solution')
+            'starter_code': starter_code,
+            'difficulty': example.get('difficulty', 'unknown')
         }
         
         converted_dataset.append({
@@ -295,6 +302,7 @@ def load_environment(
             'info': info
         })
     
+    # Create dataset
     dataset = Dataset.from_list(converted_dataset)
     
     # Define answer parser
@@ -340,12 +348,21 @@ def load_environment(
         passed = 0
         total = len(info['test_cases'])
         
-        for test in info['test_cases']:
-            test_input = test['input']
-            expected_output = test['output'].strip()
+        for i, test in enumerate(info['test_cases']):
+            test_input = test.get('input', '')
+            expected_output = test.get('output', '').strip()
             
             # Execute code with test input
             stdout, stderr, exit_code = sandbox.execute(code, test_input)
+            
+            # Debug logging
+            if i == 0:  # Log first test case for debugging
+                print(f"\n=== Test case {i+1} ===")
+                print(f"Input: {test_input[:100]}...")
+                print(f"Expected: {expected_output[:100]}...")
+                print(f"Got stdout: {stdout[:100]}...")
+                print(f"Got stderr: {stderr[:100]}...")
+                print(f"Exit code: {exit_code}")
             
             if exit_code == 0 and stdout.strip() == expected_output:
                 passed += 1
