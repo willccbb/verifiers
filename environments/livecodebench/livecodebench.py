@@ -26,7 +26,6 @@ import docker
 from queue import Queue, Empty
 from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from verifiers.env import SingleTurnEnv
 
 
 class SecureSandboxExecutor:
@@ -260,7 +259,7 @@ def load_environment(
     version_tag: str = "release_v5",
     num_examples: int = -1,  # -1 means use all examples
     pool_size: int = 20,  # Configurable container pool size
-) -> SingleTurnEnv:
+) -> vf.SingleTurnEnv:
     """Load LiveCodeBench environment
     
     Args:
