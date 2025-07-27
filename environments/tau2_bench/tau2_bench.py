@@ -47,10 +47,11 @@ class Tau2BenchEnv(MultiTurnEnv):
                  domain: str,
                  tau2_env,
                  tau2_tasks: List[Any],
-                 user_llm: str = "gpt-4",
+                 user_llm: str = "gpt-4o-mini",
                  max_turns: int = 30,
                  **kwargs):
-        super().__init__(dataset, rubric, **kwargs)
+        # Initialize with message_type="chat" for multi-turn conversations
+        super().__init__(dataset, rubric, message_type="chat", max_turns=max_turns, **kwargs)
         self.domain = domain
         self.tau2_env = tau2_env
         self.tau2_tasks = tau2_tasks
@@ -131,9 +132,9 @@ class Tau2BenchEnv(MultiTurnEnv):
         if "user_state" not in state:
             task_id = state.get("task_id")
             task = self.task_lookup.get(task_id)
-            user_instructions = task.user_instructions.model_dump() if task and hasattr(task, 'user_instructions') and task.user_instructions else {}
+            user_scenario = task.user_scenario.model_dump() if task and hasattr(task, 'user_scenario') and task.user_scenario else {}
             state["user_state"] = {
-                "instructions": user_instructions,
+                "instructions": user_scenario,
                 "context": {},
                 "conversation_stage": "initial"
             }
@@ -471,9 +472,11 @@ def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
     dataset_rows = []
     
     for task in tau2_tasks:
-        # Extract key information
-        user_instructions = task.user_instructions
-        scenario = user_instructions.scenario if hasattr(user_instructions, 'scenario') else ""
+        # Extract key information from task
+        user_scenario = task.user_scenario if hasattr(task, 'user_scenario') else None
+        scenario = ""
+        if user_scenario:
+            scenario = user_scenario.scenario if hasattr(user_scenario, 'scenario') else ""
         
         # Get initial message history if available
         initial_messages = []
@@ -508,7 +511,7 @@ def create_tau2_dataset(tau2_tasks: List[Any], domain: str) -> Dataset:
                 "domain": domain,
                 "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
                 "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
-                "user_instructions": user_instructions.model_dump() if hasattr(user_instructions, 'model_dump') else {}
+                "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {}
             },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
@@ -612,7 +615,7 @@ def load_environment(
     domain: str = "retail",
     num_train_examples: int = -1,
     num_eval_examples: int = 10,
-    user_llm: str = "gpt-4",
+    user_llm: str = "gpt-4o-mini",
     **kwargs
 ) -> vf.Environment:
     """
