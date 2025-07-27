@@ -1,5 +1,4 @@
 import os
-from typing import Optional
 from datasets import load_dataset
 from openai import OpenAI
 import verifiers as vf
@@ -9,7 +8,7 @@ def load_environment(
     judge_model: str = "gpt-4.1-mini",
     judge_base_url: str = "https://api.openai.com/v1",
     judge_api_key_var: str = "OPENAI_API_KEY",
-    max_examples: Optional[int] = None,
+    max_examples: int = -1,
     **kwargs
 ) -> vf.Environment:
     """
@@ -20,13 +19,16 @@ def load_environment(
     2. Provide context-aware explanations for the classification
     
     Uses JudgeRubric to evaluate both accuracy and explanation quality.
+    
+    Args:
+        max_examples: Maximum number of examples to load (-1 for all examples)
     """
     
     # Load the Civil Comments toxicity dataset
     dataset = load_dataset("google/civil_comments", split="train")
     
     # Limit dataset size if requested
-    if max_examples:
+    if max_examples > 0:
         dataset = dataset.select(range(max_examples))
     
     # Transform the dataset to the expected format
