@@ -29,8 +29,11 @@ Environment (orchestration layer)
 The base class for custom interaction protocols:
 
 ```python
+from verifiers.types import Messages, State
+from typing import Tuple
+
 class MyProtocol(vf.MultiTurnEnv):
-    def env_response(self, messages, state):
+    def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
         """Define how environment responds to model"""
         # Custom logic for your protocol
         response = [{"role": "user", "content": "Environment feedback"}]
@@ -38,7 +41,7 @@ class MyProtocol(vf.MultiTurnEnv):
         state["turn"] = state.get("turn", 0) + 1
         return response, state
     
-    def is_completed(self, messages, state):
+    def is_completed(self, messages: Messages, state: State) -> bool:
         """Define when interaction ends"""
         return state.get("task_complete", False)
 ```

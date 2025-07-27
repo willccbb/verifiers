@@ -205,8 +205,11 @@ def load_environment(**kwargs):
 For interactive tasks requiring multiple steps:
 
 ```python
+from verifiers.types import Messages, State
+from typing import Tuple
+
 class MyGameEnv(vf.MultiTurnEnv):
-    def env_response(self, messages, state):
+    def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
         """Define how the environment responds."""
         # Get the last message from the assistant
         last_msg = messages[-1]

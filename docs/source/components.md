@@ -343,12 +343,15 @@ def load_environment(**kwargs):
 Build a Wordle-like game with multi-turn interaction:
 
 ```python
+from verifiers.types import Messages, State
+from typing import Tuple
+
 class WordleEnv(vf.MultiTurnEnv):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.max_guesses = 6
     
-    def env_response(self, messages, state):
+    def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
         if state.get("turn", 0) == 0:
             # First turn: initialize
             state["turn"] = 1
@@ -383,7 +386,7 @@ class WordleEnv(vf.MultiTurnEnv):
             remaining = self.max_guesses - state["turn"] + 1
             return [{"role": "user", "content": f"{feedback}\n{remaining} guesses remaining."}], state
     
-    def is_completed(self, messages, state):
+    def is_completed(self, messages: Messages, state: State) -> bool:
         return state.get("solved", False) or state.get("failed", False)
 ```
 

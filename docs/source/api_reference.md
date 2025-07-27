@@ -61,18 +61,17 @@ The `responses` field contains raw API response objects with:
 ### Message Formats
 
 ```python
-# Import from OpenAI types
-from openai.types.chat.chat_completion_message_param import (
-    ChatCompletionMessageParam as ChatMessage,
-)
+# Import from verifiers.types
+from verifiers.types import ChatMessage, Messages
 
 # Chat format (recommended)
-ChatMessage = TypedDict({
+# ChatMessage is a dict with these fields:
+ChatMessage = {
     "role": str,                    # "system", "user", or "assistant"
     "content": str,                 # Message text
     "tool_calls": List[...],        # Optional tool calls
     "tool_call_id": str,            # Optional tool call ID
-})
+}
 
 Messages = Union[str, List[ChatMessage]]  # Can be string (completion) or chat
 
