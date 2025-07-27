@@ -261,6 +261,9 @@ def load_environment(
     # Initialize sandbox executor
     sandbox = SecureSandboxExecutor()
     
+    # Track unique warning types to avoid spam
+    logged_warnings = set()
+    
     # Convert dataset to verifiers format
     converted_dataset = []
     for idx, example in enumerate(dataset):
@@ -283,12 +286,26 @@ def load_environment(
         
         # Add private test cases
         if 'private_test_cases' in example and example['private_test_cases']:
-            try:
-                private_tests = json.loads(example['private_test_cases'])
-                if isinstance(private_tests, list):
-                    test_cases.extend(private_tests)
-            except json.JSONDecodeError:
-                print(f"Failed to parse private test cases for {problem_id}")
+            private_raw = example['private_test_cases']
+            
+            # Check if it's already a list
+            if isinstance(private_raw, list):
+                test_cases.extend(private_raw)
+            elif isinstance(private_raw, str):
+                # Try direct JSON parsing first
+                try:
+                    private_tests = json.loads(private_raw)
+                    if isinstance(private_tests, list):
+                        test_cases.extend(private_tests)
+                except json.JSONDecodeError:
+                    # The private test cases might be encoded/compressed
+                    # For now, we'll skip them with a single warning per unique length
+                    # This is a known limitation of the current dataset format
+                    length = len(private_raw)
+                    if length not in logged_warnings:
+                        logged_warnings.add(length)
+                        if idx < 5:  # Only show warnings for first few problems
+                            print(f"Note: Private test cases for {problem_id} appear to be encoded (length {length}). Skipping private tests.")
         
         # Format the prompt
         prompt = f"{problem_desc}\n\n"

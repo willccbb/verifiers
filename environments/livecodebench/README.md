@@ -77,7 +77,7 @@ The implementation downloads JSONL files directly from HuggingFace due to the de
 
 ## Known Limitations
 
-1. Some private test cases may fail to parse due to non-standard JSON formatting in the dataset
+1. **Private test cases are encoded**: Many private test cases in the LiveCodeBench dataset are stored as encoded/compressed strings rather than JSON. This is a limitation of the current dataset format. The environment will use public test cases for these problems, which may result in less comprehensive evaluation. You'll see messages like "Note: Private test cases appear to be encoded" for affected problems.
 2. Network DNS resolution issues may temporarily prevent dataset downloading
 3. The environment requires Docker and cannot fall back to subprocess execution
 
