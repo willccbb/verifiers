@@ -23,40 +23,33 @@ from typing import Dict, List, Any, Optional, Tuple
 import verifiers as vf
 from datasets import Dataset, load_dataset
 import docker
+from queue import Queue, Empty
+from threading import Thread, Lock
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class SecureSandboxExecutor:
-    """Secure Docker-based sandbox for code execution"""
+    """Secure Docker-based code execution with container pooling"""
     
     def __init__(self):
-        """Initialize Docker client"""
+        """Initialize Docker-only sandbox with container pool"""
         try:
-            # Try to connect to Docker
             self.docker_client = docker.from_env()
-            self.docker_available = True
-            print("Docker sandbox initialized successfully")
             
-            # Test if we can actually use Docker
-            try:
-                self.docker_client.ping()
-            except docker.errors.APIError:
-                # Try with sudo
-                print("Regular Docker access failed, trying with sudo...")
-                # For environments where Docker requires sudo, we'll need to handle this differently
-                # In production, the user running the evaluation should be in the docker group
-                raise RuntimeError(
-                    "Docker requires elevated permissions. Please ensure the user is in the docker group:\n"
-                    "  sudo usermod -aG docker $USER\n"
-                    "  Then log out and back in."
-                )
+            # Test Docker access
+            self.docker_client.ping()
             
             # Pull Python image if not available
             try:
-                self.docker_client.images.get("python:3.11-slim")
+                self.docker_client.images.get('python:3.11-slim')
             except docker.errors.ImageNotFound:
                 print("Pulling Python Docker image...")
-                self.docker_client.images.pull("python:3.11-slim")
-                print("Python Docker image ready")
+                self.docker_client.images.pull('python:3.11-slim')
+            
+            # Initialize container pool
+            self.container_pool = ContainerPool(self.docker_client, pool_size=20)
+            
+            print("Docker sandbox with container pool initialized successfully")
                 
         except Exception as e:
             raise RuntimeError(f"Docker is required but not available: {e}\n"
@@ -65,195 +58,79 @@ class SecureSandboxExecutor:
                              "  - Start Docker daemon: sudo systemctl start docker\n"
                              "  - Add user to docker group: sudo usermod -aG docker $USER")
     
-    def execute(self, code: str, test_input: str = "", timeout: int = 10) -> Tuple[str, str, int]:
-        """Execute code in Docker sandbox"""
+    def execute_in_container(self, container, code: str, test_input: str = "", timeout: int = 10) -> Tuple[str, str, int]:
+        """Execute code in a pre-allocated container"""
         
-        # Create a temporary directory for the code
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Write code to file with proper permissions
-            code_path = os.path.join(tmpdir, "solution.py")
-            with open(code_path, 'w') as f:
-                f.write(code)
-            os.chmod(code_path, 0o644)
-            
-            # Write input to file with proper permissions
-            input_path = os.path.join(tmpdir, "input.txt")
-            with open(input_path, 'w') as f:
-                f.write(test_input)
-            os.chmod(input_path, 0o644)
-            
-            stdout, stderr = "", ""
-            exit_code = 0
-            
-            try:
-                # Run container
-                # Use a Python wrapper to handle stdin properly
-                wrapper_code = f"""
+        # Create exec command with code and input
+        exec_command = f"""
 import sys
-sys.stdin = open('/code/input.txt', 'r')
-exec(open('/code/solution.py').read())
+from io import StringIO
+
+# Set up stdin
+sys.stdin = StringIO({repr(test_input)})
+
+# Capture stdout
+old_stdout = sys.stdout
+sys.stdout = StringIO()
+
+exit_code = 0
+stderr_output = ""
+
+try:
+    exec({repr(code)})
+    stdout_output = sys.stdout.getvalue()
+except Exception as e:
+    import traceback
+    stderr_output = traceback.format_exc()
+    stdout_output = sys.stdout.getvalue()
+    exit_code = 1
+finally:
+    sys.stdout = old_stdout
+
+# Output results in a parseable format
+print("===STDOUT_START===")
+print(stdout_output)
+print("===STDOUT_END===")
+print("===STDERR_START===") 
+print(stderr_output)
+print("===STDERR_END===")
+print("===EXIT_CODE===")
+print(exit_code)
 """
-                wrapper_path = os.path.join(tmpdir, "wrapper.py")
-                with open(wrapper_path, 'w') as f:
-                    f.write(wrapper_code)
-                os.chmod(wrapper_path, 0o644)
-                
-                container = self.docker_client.containers.run(
-                    image='python:3.11-slim',
-                    command=['python', '/code/wrapper.py'],
-                    volumes={
-                        tmpdir: {'bind': '/code', 'mode': 'rw'}  # Changed to rw
-                    },
-                    working_dir='/code',
-                    detach=True,
-                    mem_limit='512m',
-                    memswap_limit='512m', 
-                    cpu_quota=50000,  # 0.5 CPU
-                    cpu_period=100000,
-                    pids_limit=50,
-                    network_disabled=True,
-                    tmpfs={'/tmp': 'size=64M,mode=1777'},
-                    security_opt=['no-new-privileges'],
-                    cap_drop=['ALL'],
-                    user='1000:1000'  # Use a non-root user
-                )
-                
-                # Wait for completion with timeout
-                try:
-                    result = container.wait(timeout=timeout)
-                    exit_code = result.get('StatusCode', 0)
-                    
-                    # Get logs
-                    logs = container.logs(stdout=True, stderr=True)
-                    stdout = logs.decode('utf-8', errors='replace')
-                    
-                except docker.errors.APIError as e:
-                    stderr = "Execution timed out"
-                    exit_code = 124
-                finally:
-                    # Clean up
-                    try:
-                        container.remove(force=True)
-                    except:
-                        pass
-                
-            except docker.errors.ContainerError as e:
-                # Container exited with non-zero code
-                stdout = e.output.decode('utf-8', errors='replace') if e.output else ""
-                stderr = str(e)
-                exit_code = e.exit_status
-            except docker.errors.ImageNotFound:
-                stderr = "Docker image not found"
-                exit_code = 1
-            except Exception as e:
-                stderr = f"Docker execution error: {str(e)}"
-                exit_code = 1
+        
+        try:
+            # Execute in container
+            exec_result = container.exec_run(
+                cmd=['python', '-c', exec_command],
+                stdout=True,
+                stderr=True,
+                stdin=False,
+                tty=False,
+                privileged=False,
+                user='1000:1000',
+                detach=False,
+                stream=False,
+                socket=False
+            )
+            
+            output = exec_result.output.decode('utf-8')
+            
+            # Parse output
+            stdout = ""
+            stderr = ""
+            exit_code = 1
+            
+            if "===STDOUT_START===" in output:
+                stdout = output.split("===STDOUT_START===")[1].split("===STDOUT_END===")[0].strip()
+            if "===STDERR_START===" in output:
+                stderr = output.split("===STDERR_START===")[1].split("===STDERR_END===")[0].strip()
+            if "===EXIT_CODE===" in output:
+                exit_code = int(output.split("===EXIT_CODE===")[1].strip())
             
             return stdout, stderr, exit_code
-    
-    def batch_execute(self, code: str, test_cases: List[Dict[str, str]], timeout: int = 30) -> List[Tuple[str, str, int]]:
-        """Execute code against multiple test cases in a single container for efficiency"""
-        
-        # Create a temporary directory for the code
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Write the solution code
-            code_path = os.path.join(tmpdir, "solution.py")
-            with open(code_path, 'w') as f:
-                f.write(code)
-            os.chmod(code_path, 0o644)
             
-            # Write all test inputs to separate files
-            for i, test in enumerate(test_cases):
-                input_path = os.path.join(tmpdir, f"input_{i}.txt")
-                with open(input_path, 'w') as f:
-                    f.write(test.get('input', ''))
-                os.chmod(input_path, 0o644)
-            
-            # Create a runner script that executes all test cases
-            runner_code = f"""
-import sys
-import json
-import traceback
-
-results = []
-
-# Load and execute solution code once
-solution_code = open('/code/solution.py').read()
-
-for i in range({len(test_cases)}):
-    # Redirect stdin for this test case
-    sys.stdin = open(f'/code/input_{{i}}.txt', 'r')
-    
-    # Capture stdout
-    from io import StringIO
-    old_stdout = sys.stdout
-    sys.stdout = StringIO()
-    
-    exit_code = 0
-    stderr = ""
-    
-    try:
-        # Execute the solution code in a fresh namespace
-        namespace = {{'__name__': '__main__'}}
-        exec(solution_code, namespace)
-        stdout = sys.stdout.getvalue()
-    except Exception as e:
-        stderr = traceback.format_exc()
-        stdout = sys.stdout.getvalue()
-        exit_code = 1
-    finally:
-        sys.stdout = old_stdout
-    
-    results.append({{'stdout': stdout, 'stderr': stderr, 'exit_code': exit_code}})
-
-# Output results as JSON
-print(json.dumps(results))
-"""
-            runner_path = os.path.join(tmpdir, "runner.py")
-            with open(runner_path, 'w') as f:
-                f.write(runner_code)
-            os.chmod(runner_path, 0o644)
-            
-            try:
-                # Run container with all test cases
-                container = self.docker_client.containers.run(
-                    image='python:3.11-slim',
-                    command=['python', '/code/runner.py'],
-                    volumes={
-                        tmpdir: {'bind': '/code', 'mode': 'rw'}
-                    },
-                    working_dir='/code',
-                    detach=True,
-                    mem_limit='512m',
-                    memswap_limit='512m', 
-                    cpu_quota=50000,  # 0.5 CPU
-                    cpu_period=100000,
-                    pids_limit=50,
-                    network_disabled=True,
-                    tmpfs={'/tmp': 'size=64M,mode=1777'},
-                    security_opt=['no-new-privileges'],
-                    cap_drop=['ALL'],
-                    user='1000:1000'
-                )
-                
-                # Wait for completion
-                result = container.wait(timeout=timeout)
-                logs = container.logs(stdout=True, stderr=True).decode('utf-8')
-                container.remove()
-                
-                # Parse results
-                try:
-                    import json
-                    results_data = json.loads(logs.strip())
-                    return [(r['stdout'], r['stderr'], r['exit_code']) for r in results_data]
-                except:
-                    # Fallback if JSON parsing fails
-                    return [(logs, "", 1)] * len(test_cases)
-                    
-            except Exception as e:
-                # Return error for all test cases
-                error_msg = str(e)
-                return [("", error_msg, 1)] * len(test_cases)
+        except Exception as e:
+            return "", str(e), 1
 
 
 def load_livecodebench_dataset(
@@ -515,16 +392,44 @@ def load_environment(
         if info.get('starter_code'):
             code = info['starter_code'] + '\n\n' + code
         
-        # Batch execute all test cases in one container
+        # Execute test cases in parallel using pre-allocated containers
         test_cases = info['test_cases']
-        results = sandbox.batch_execute(code, test_cases)
+        
+        def run_test(test):
+            container = sandbox.container_pool.get_container()
+            try:
+                input_data = test.get('input', '')
+                stdout, stderr, exit_code = sandbox.execute_in_container(container, code, input_data)
+                return {
+                    'stdout': stdout,
+                    'stderr': stderr,
+                    'exit_code': exit_code,
+                    'expected': test.get('output', '').strip()
+                }
+            finally:
+                sandbox.container_pool.return_container(container)
+        
+        # Run tests in parallel with thread pool
+        results = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all test cases
+            futures = [executor.submit(run_test, test) for test in test_cases]
+            
+            # Collect results as they complete
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    results.append({
+                        'stdout': '',
+                        'stderr': str(e),
+                        'exit_code': 1,
+                        'expected': ''
+                    })
         
         # Check results
-        passed = 0
-        for i, (test, (stdout, stderr, exit_code)) in enumerate(zip(test_cases, results)):
-            expected_output = test.get('output', '').strip()
-            if exit_code == 0 and stdout.strip() == expected_output:
-                passed += 1
+        passed = sum(1 for r in results if r['exit_code'] == 0 and r['stdout'].strip() == r['expected'])
         
         return passed / len(test_cases) if test_cases else 0.0
     
@@ -540,9 +445,12 @@ def load_environment(
             code = info['starter_code'] + '\n\n' + code
         
         # Try to execute with a simple test
-        _, stderr, exit_code = sandbox.execute(code, "")
-        
-        return 1.0 if exit_code == 0 else 0.0
+        container = sandbox.container_pool.get_container()
+        try:
+            _, stderr, exit_code = sandbox.execute_in_container(container, code, "")
+            return 1.0 if exit_code == 0 else 0.0
+        finally:
+            sandbox.container_pool.return_container(container)
     
     # Create rubric
     rubric = vf.Rubric(
@@ -559,3 +467,114 @@ def load_environment(
     )
     
     return env
+
+
+class ContainerPool:
+    """Pool of pre-allocated Docker containers for fast execution"""
+    
+    def __init__(self, docker_client, pool_size: int = 20, image: str = 'python:3.11-slim'):
+        self.docker_client = docker_client
+        self.image = image
+        self.pool_size = pool_size
+        self.available = Queue()
+        self.all_containers = []
+        self._shutdown = False
+        self._lock = Lock()
+        
+        # Start background thread to maintain pool
+        self._maintainer = Thread(target=self._maintain_pool, daemon=True)
+        self._maintainer.start()
+        
+        # Pre-allocate initial containers
+        print(f"Pre-allocating {pool_size} containers...")
+        for _ in range(pool_size):
+            self._create_container()
+    
+    def _create_container(self):
+        """Create a new container and add it to the pool"""
+        try:
+            # Create container in paused state
+            container = self.docker_client.containers.create(
+                image=self.image,
+                command=['python', '-c', 'import time; time.sleep(3600)'],  # Keep alive for 1 hour
+                detach=True,
+                mem_limit='512m',
+                memswap_limit='512m',
+                cpu_quota=50000,  # 0.5 CPU
+                cpu_period=100000,
+                pids_limit=50,
+                network_disabled=True,
+                tmpfs={'/tmp': 'size=64M,mode=1777'},
+                security_opt=['no-new-privileges'],
+                cap_drop=['ALL'],
+                user='1000:1000',
+                stdin_open=True,
+                tty=False
+            )
+            container.start()
+            
+            with self._lock:
+                self.all_containers.append(container)
+            
+            self.available.put(container)
+            
+        except Exception as e:
+            print(f"Failed to create container: {e}")
+    
+    def _maintain_pool(self):
+        """Background thread to maintain pool size"""
+        while not self._shutdown:
+            try:
+                # Check pool size every second
+                time.sleep(1)
+                
+                # Count healthy containers
+                current_size = self.available.qsize()
+                
+                # Replenish if needed
+                if current_size < self.pool_size // 2:  # Refill when below 50%
+                    for _ in range(self.pool_size - current_size):
+                        self._create_container()
+                        
+            except Exception as e:
+                print(f"Pool maintenance error: {e}")
+    
+    def get_container(self, timeout: int = 5):
+        """Get a container from the pool"""
+        try:
+            return self.available.get(timeout=timeout)
+        except Empty:
+            # If pool is empty, create one on demand
+            print("Container pool empty, creating on demand...")
+            self._create_container()
+            return self.available.get(timeout=timeout)
+    
+    def return_container(self, container):
+        """Return a container to the pool or destroy if unhealthy"""
+        try:
+            # Check if container is still healthy
+            container.reload()
+            if container.status == 'running':
+                # Reset container state (optional - could implement cleanup here)
+                self.available.put(container)
+            else:
+                # Remove unhealthy container
+                container.remove(force=True)
+        except:
+            # Container is dead, just try to remove it
+            try:
+                container.remove(force=True)
+            except:
+                pass
+    
+    def shutdown(self):
+        """Clean up all containers"""
+        self._shutdown = True
+        
+        # Remove all containers
+        with self._lock:
+            for container in self.all_containers:
+                try:
+                    container.remove(force=True)
+                except:
+                    pass
