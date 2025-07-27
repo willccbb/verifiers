@@ -110,31 +110,15 @@ class Tau2BenchEnv(MultiTurnEnv):
         self.task_lookup = {task.id: task for task in tau2_tasks}
         
     def get_dataset_row(self, idx):
-        """Override to deserialize info JSON."""
+        """Override to reconstruct oai_tools from JSON."""
         row = super().get_dataset_row(idx)
-        # Deserialize info if it's a string
-        if isinstance(row.get("info"), str):
-            row["info"] = json.loads(row["info"])
+        # Reconstruct oai_tools if stored as JSON
+        if "info" in row and "_oai_tools_json" in row["info"]:
+            row["info"]["oai_tools"] = json.loads(row["info"]["_oai_tools_json"])
+            # Remove the temporary field
+            row["info"].pop("_oai_tools_json", None)
         return row
-        
-    async def a_generate(self, prompt_dataset, client, model, gen_sampling_args=None, eval_dataset=None, max_concurrent=5, **kwargs):
-        """Override to handle JSON deserialization of info."""
-        # Convert dataset to dict format
-        inputs = prompt_dataset.to_dict() if hasattr(prompt_dataset, 'to_dict') else prompt_dataset
-        
-        # If inputs has info column with JSON strings, deserialize them
-        if "info" in inputs:
-            deserialized_infos = []
-            for info in inputs["info"]:
-                if isinstance(info, str):
-                    deserialized_infos.append(json.loads(info))
-                else:
-                    deserialized_infos.append(info)
-            inputs = dict(inputs)  # Make a copy
-            inputs["info"] = deserialized_infos
-        
-        return await super().a_generate(inputs, client, model, gen_sampling_args, eval_dataset, max_concurrent, **kwargs)
-        
+
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation is completed."""
         # Check max turns
@@ -729,21 +713,18 @@ Try to be helpful and always follow the policy. Always make sure you generate va
         initial_messages = [{"role": "system", "content": system_prompt}] + initial_messages
         
         # Create dataset row
-        # Store info as JSON string to preserve tool schemas
-        info_dict = {
-            "task_id": task_id,
-            "domain": domain,
-            "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
-            "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
-            "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
-            "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
-            "oai_tools": oai_tools  # Pass tools directly as JSON schema
-        }
-        
         row = {
             "prompt": initial_messages,
             "question": scenario if scenario else "Help the customer with their request.",
-            "info": json.dumps(info_dict),  # Store as JSON string to avoid HF Dataset corruption
+            "info": {
+                "task_id": task_id,
+                "domain": domain,
+                "expected_state": task.expected_state.model_dump() if hasattr(task, 'expected_state') and task.expected_state else {},
+                "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
+                "user_scenario": user_scenario.model_dump() if user_scenario and hasattr(user_scenario, 'model_dump') else {},
+                "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
+                "oai_tools": oai_tools  # Pass tools directly as JSON schema
+            },
             "answer": "Successfully helped the customer",  # Placeholder
             "task": f"tau2_{domain}",
             # Store task_id in state for easy lookup
@@ -908,6 +889,23 @@ def load_environment(
         
     # Convert tasks to dataset
     full_dataset = create_tau2_dataset(tau2_tasks, domain, tau2_env)
+    
+    # Fix oai_tools after dataset creation to handle HF Dataset schema inference issues
+    # HuggingFace Dataset merges schemas across all tools, adding None fields
+    # We need to store the tools separately and reconstruct them
+    if hasattr(tau2_env, 'get_tools'):
+        tools = tau2_env.get_tools()
+        clean_oai_tools = [tool.openai_schema for tool in tools] if tools else []
+        
+        # Store tools as a JSON string to prevent HF Dataset from corrupting them
+        def fix_oai_tools(example):
+            # Store as JSON string in a special field
+            example["info"]["_oai_tools_json"] = json.dumps(clean_oai_tools)
+            # Remove the corrupted oai_tools
+            example["info"].pop("oai_tools", None)
+            return example
+            
+        full_dataset = full_dataset.map(fix_oai_tools)
     
     # Split into train/eval
     total_tasks = len(full_dataset)
