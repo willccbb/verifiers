@@ -293,22 +293,35 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_func = getattr(self.tau2_env.tools, tool_name)
                     result = tool_func(**tool_args)
                     
-                    exec_record["result"] = result
-                    exec_record["success"] = True
-                    
-                    # Sync environment state after tool execution
-                    if hasattr(self.tau2_env.tools, 'db'):
-                        state["env_db"]["agent_db"] = self.tau2_env.tools.db.model_dump()
-                    if hasattr(self.tau2_env, 'sync_tools'):
-                        self.tau2_env.sync_tools()
-                    
-                    # Create tool message
-                    content = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-                    tool_messages.append({
-                        "role": "tool",
-                        "content": content,
-                        "tool_call_id": tool_id
-                    })
+                    # Check if the result is an error string from tau2
+                    if isinstance(result, str) and result.startswith("Error:"):
+                        # This is an error from tau2, format it properly
+                        exec_record["error"] = result
+                        exec_record["success"] = False
+                        state["error_count"] = state.get("error_count", 0) + 1
+                        
+                        tool_messages.append({
+                            "role": "tool",
+                            "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
+                            "tool_call_id": tool_id
+                        })
+                    else:
+                        exec_record["result"] = result
+                        exec_record["success"] = True
+                        
+                        # Sync agent's environment state  
+                        if hasattr(self.tau2_env.tools, 'db'):
+                            state["env_db"]["agent_db"] = self.tau2_env.tools.db.model_dump()
+                        if hasattr(self.tau2_env, 'sync_tools'):
+                            self.tau2_env.sync_tools()
+                        
+                        # Create tool message - use tau2's to_json_str method for consistency
+                        content = self.tau2_env.to_json_str(result)
+                        tool_messages.append({
+                            "role": "tool",
+                            "content": content,
+                            "tool_call_id": tool_id
+                        })
                 else:
                     exec_record["error"] = f"Tool {tool_name} not found"
                     exec_record["success"] = False
@@ -368,23 +381,37 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_func = getattr(self.tau2_env.user_tools, tool_name)
                     result = tool_func(**tool_args)
                     
-                    exec_record["result"] = result
-                    exec_record["success"] = True
-                    
-                    # Sync user's environment state
-                    if hasattr(self.tau2_env.user_tools, 'db'):
-                        state["env_db"]["user_db"] = self.tau2_env.user_tools.db.model_dump()
-                    if hasattr(self.tau2_env, 'sync_tools'):
-                        self.tau2_env.sync_tools()
-                    
-                    # Create tool message
-                    content = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
-                    tool_messages.append({
-                        "role": "tool",
-                        "content": content,
-                        "tool_call_id": tool_call["id"],
-                        "name": f"user_{tool_name}"  # Prefix to distinguish user tools
-                    })
+                    # Check if the result is an error string from tau2
+                    if isinstance(result, str) and result.startswith("Error:"):
+                        # This is an error from tau2, format it properly
+                        exec_record["error"] = result
+                        exec_record["success"] = False
+                        state["error_count"] = state.get("error_count", 0) + 1
+                        
+                        tool_messages.append({
+                            "role": "tool",
+                            "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
+                            "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                            "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                        })
+                    else:
+                        exec_record["result"] = result
+                        exec_record["success"] = True
+                        
+                        # Sync user's environment state
+                        if hasattr(self.tau2_env.user_tools, 'db'):
+                            state["env_db"]["user_db"] = self.tau2_env.user_tools.db.model_dump()
+                        if hasattr(self.tau2_env, 'sync_tools'):
+                            self.tau2_env.sync_tools()
+                        
+                        # Create tool message - use tau2's to_json_str method for consistency
+                        content = self.tau2_env.to_json_str(result)
+                        tool_messages.append({
+                            "role": "tool", 
+                            "content": content,
+                            "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
+                            "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                        })
                 else:
                     exec_record["error"] = f"User tool {tool_name} not found"
                     exec_record["success"] = False
@@ -392,7 +419,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     tool_messages.append({
                         "role": "tool",
                         "content": f"Error: User tool {tool_name} not found",
-                        "tool_call_id": tool_call["id"]
+                        "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else "")
                     })
                     
             except Exception as e:
@@ -403,7 +430,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                 tool_messages.append({
                     "role": "tool",
                     "content": f"Error executing user tool {tool_name}: {str(e)}",
-                    "tool_call_id": tool_call["id"]
+                    "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else "")
                 })
                 
             # Track execution
@@ -952,14 +979,14 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         for msg in tau2_messages:
                             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    if tc.function.name == check.action.name:
+                                    if tc.name == check.action.name:
                                         found_with_name = True
-                                        print(f"       Found call with args: {tc.function.arguments}")
+                                        print(f"       Found call with args: {tc.arguments}")
                                         # Show which args differ
                                         if check.action.compare_args:
                                             for arg in check.action.compare_args:
                                                 expected = check.action.arguments.get(arg)
-                                                actual = tc.function.arguments.get(arg)
+                                                actual = tc.arguments.get(arg)
                                                 if expected != actual:
                                                     print(f"         - {arg}: expected '{expected}', got '{actual}'")
                         if not found_with_name:
@@ -976,9 +1003,11 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             
             # Log termination reason
             print(f"\n  Termination: {term_reason.value}")
-            print(f"  Task completed: {simulation.task_completed}")
-            print(f"  Errors: {simulation.errors}")
-            print(f"  Steps: {simulation.num_steps}")
+            # Additional info if available
+            if hasattr(simulation, 'errors'):
+                print(f"  Errors: {simulation.errors}")
+            if hasattr(simulation, 'num_steps'):
+                print(f"  Steps: {simulation.num_steps}")
             
             # Log info if present
             if hasattr(reward_info, 'info') and reward_info.info:
