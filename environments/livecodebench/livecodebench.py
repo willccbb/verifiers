@@ -150,6 +150,110 @@ exec(open('/code/solution.py').read())
                 exit_code = 1
             
             return stdout, stderr, exit_code
+    
+    def batch_execute(self, code: str, test_cases: List[Dict[str, str]], timeout: int = 30) -> List[Tuple[str, str, int]]:
+        """Execute code against multiple test cases in a single container for efficiency"""
+        
+        # Create a temporary directory for the code
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Write the solution code
+            code_path = os.path.join(tmpdir, "solution.py")
+            with open(code_path, 'w') as f:
+                f.write(code)
+            os.chmod(code_path, 0o644)
+            
+            # Write all test inputs to separate files
+            for i, test in enumerate(test_cases):
+                input_path = os.path.join(tmpdir, f"input_{i}.txt")
+                with open(input_path, 'w') as f:
+                    f.write(test.get('input', ''))
+                os.chmod(input_path, 0o644)
+            
+            # Create a runner script that executes all test cases
+            runner_code = f"""
+import sys
+import json
+import traceback
+
+results = []
+
+# Load and execute solution code once
+solution_code = open('/code/solution.py').read()
+
+for i in range({len(test_cases)}):
+    # Redirect stdin for this test case
+    sys.stdin = open(f'/code/input_{{i}}.txt', 'r')
+    
+    # Capture stdout
+    from io import StringIO
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    
+    exit_code = 0
+    stderr = ""
+    
+    try:
+        # Execute the solution code in a fresh namespace
+        namespace = {{'__name__': '__main__'}}
+        exec(solution_code, namespace)
+        stdout = sys.stdout.getvalue()
+    except Exception as e:
+        stderr = traceback.format_exc()
+        stdout = sys.stdout.getvalue()
+        exit_code = 1
+    finally:
+        sys.stdout = old_stdout
+    
+    results.append({{'stdout': stdout, 'stderr': stderr, 'exit_code': exit_code}})
+
+# Output results as JSON
+print(json.dumps(results))
+"""
+            runner_path = os.path.join(tmpdir, "runner.py")
+            with open(runner_path, 'w') as f:
+                f.write(runner_code)
+            os.chmod(runner_path, 0o644)
+            
+            try:
+                # Run container with all test cases
+                container = self.docker_client.containers.run(
+                    image='python:3.11-slim',
+                    command=['python', '/code/runner.py'],
+                    volumes={
+                        tmpdir: {'bind': '/code', 'mode': 'rw'}
+                    },
+                    working_dir='/code',
+                    detach=True,
+                    mem_limit='512m',
+                    memswap_limit='512m', 
+                    cpu_quota=50000,  # 0.5 CPU
+                    cpu_period=100000,
+                    pids_limit=50,
+                    network_disabled=True,
+                    tmpfs={'/tmp': 'size=64M,mode=1777'},
+                    security_opt=['no-new-privileges'],
+                    cap_drop=['ALL'],
+                    user='1000:1000'
+                )
+                
+                # Wait for completion
+                result = container.wait(timeout=timeout)
+                logs = container.logs(stdout=True, stderr=True).decode('utf-8')
+                container.remove()
+                
+                # Parse results
+                try:
+                    import json
+                    results_data = json.loads(logs.strip())
+                    return [(r['stdout'], r['stderr'], r['exit_code']) for r in results_data]
+                except:
+                    # Fallback if JSON parsing fails
+                    return [(logs, "", 1)] * len(test_cases)
+                    
+            except Exception as e:
+                # Return error for all test cases
+                error_msg = str(e)
+                return [("", error_msg, 1)] * len(test_cases)
 
 
 def load_livecodebench_dataset(
@@ -411,21 +515,18 @@ def load_environment(
         if info.get('starter_code'):
             code = info['starter_code'] + '\n\n' + code
         
-        # Run all test cases
-        passed = 0
-        total = len(info['test_cases'])
+        # Batch execute all test cases in one container
+        test_cases = info['test_cases']
+        results = sandbox.batch_execute(code, test_cases)
         
-        for i, test in enumerate(info['test_cases']):
-            test_input = test.get('input', '')
+        # Check results
+        passed = 0
+        for i, (test, (stdout, stderr, exit_code)) in enumerate(zip(test_cases, results)):
             expected_output = test.get('output', '').strip()
-            
-            # Execute code with test input
-            stdout, stderr, exit_code = sandbox.execute(code, test_input)
-            
             if exit_code == 0 and stdout.strip() == expected_output:
                 passed += 1
         
-        return passed / total if total > 0 else 0.0
+        return passed / len(test_cases) if test_cases else 0.0
     
     def execution_success(completion, info, parser) -> float:
         """Check if code executes without errors"""
