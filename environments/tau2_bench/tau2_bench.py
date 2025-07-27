@@ -133,15 +133,26 @@ class Tau2BenchEnv(MultiTurnEnv):
         
     def _init_state(self, state: vf.State):
         """Initialize state components if not already present."""
+        # Ensure task_id is in state
+        if "task_id" not in state and "info" in state:
+            state["task_id"] = state["info"].get("task_id")
+            
         if "agent_state" not in state:
             state["agent_state"] = {}
             
         if "user_state" not in state:
             task_id = state.get("task_id")
-            task = self.task_lookup.get(task_id)
+            
+            if not task_id:
+                print(f"WARNING: No task_id found in state: {list(state.keys())}")
+                
+            task = self.task_lookup.get(task_id) if task_id else None
             user_scenario = task.user_scenario.model_dump() if task and hasattr(task, 'user_scenario') and task.user_scenario else {}
+            # Extract instructions from user_scenario
+            instructions = user_scenario.get("instructions", {}) if user_scenario else {}
             state["user_state"] = {
-                "instructions": user_scenario,
+                "instructions": instructions,
+                "persona": user_scenario.get("persona"),
                 "context": {},
                 "conversation_stage": "initial"
             }
@@ -174,6 +185,11 @@ class Tau2BenchEnv(MultiTurnEnv):
     def _init_user_simulator(self, state: vf.State):
         """Initialize the user simulator for this task."""
         user_instructions = state["user_state"]["instructions"]
+        
+        # Debug: Check what instructions we're passing
+        if not user_instructions or (isinstance(user_instructions, dict) and not any(user_instructions.values())):
+            print(f"WARNING: Empty user instructions for task {state.get('task_id')}")
+            print(f"User state: {state['user_state']}")
         
         if self.domain == "telecom" and hasattr(self.tau2_env, 'user_tools'):
             # User with tools for telecom
