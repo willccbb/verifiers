@@ -5,6 +5,8 @@ All tool execution and user simulation happens within env_response.
 """
 
 import json
+import os
+import subprocess
 from typing import List, Tuple, Dict, Any, Optional
 from copy import deepcopy
 from datetime import datetime
@@ -26,13 +28,57 @@ try:
     )
     from tau2.user.user_simulator import UserSimulator
     from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
+    from tau2.utils.utils import DATA_DIR
     TAU2_AVAILABLE = True
 except ImportError:
     TAU2_AVAILABLE = False
     STOP = "STOP"
     TRANSFER = "TRANSFER"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    DATA_DIR = None
     print("Warning: tau2-bench not installed. Please install it to use this environment.")
+
+
+def setup_tau2_data():
+    """Setup tau2-bench data by downloading from GitHub if not present."""
+    if not TAU2_AVAILABLE or not DATA_DIR:
+        return
+        
+    # Check if data already exists
+    if os.path.exists(DATA_DIR) and os.path.exists(os.path.join(DATA_DIR, "tau2", "domains")):
+        return
+        
+    print(f"Setting up tau2-bench data in {DATA_DIR}...")
+    
+    # Create data directory
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # Clone tau2-bench temporarily to get data
+    temp_dir = "/tmp/tau2_bench_temp"
+    try:
+        # Clone the repository
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "https://github.com/sierra-research/tau2-bench.git", temp_dir],
+            check=True,
+            capture_output=True
+        )
+        
+        # Copy data directory
+        import shutil
+        src_data = os.path.join(temp_dir, "data")
+        if os.path.exists(src_data):
+            shutil.copytree(src_data, DATA_DIR, dirs_exist_ok=True)
+            print(f"✅ tau2-bench data successfully set up in {DATA_DIR}")
+        else:
+            print(f"⚠️  Warning: Could not find data directory in tau2-bench repository")
+            
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️  Warning: Failed to download tau2-bench data: {e}")
+    finally:
+        # Clean up temp directory
+        if os.path.exists(temp_dir):
+            import shutil
+            shutil.rmtree(temp_dir)
 
 
 class Tau2BenchEnv(MultiTurnEnv):
@@ -760,6 +806,9 @@ def load_environment(
     if not TAU2_AVAILABLE:
         raise ImportError("tau2-bench is not installed. Please install it first.")
         
+    # Setup tau2 data if not already present
+    setup_tau2_data()
+
     # Load tau2 environment and tasks based on domain
     if domain == "retail":
         tau2_env = get_retail_env()
