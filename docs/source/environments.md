@@ -205,19 +205,32 @@ def load_environment(**kwargs):
 For interactive tasks requiring multiple steps:
 
 ```python
+from verifiers.types import Messages, State
+from typing import Tuple
+
 class MyGameEnv(vf.MultiTurnEnv):
-    def env_response(self, messages, state):
+    def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
         """Define how the environment responds."""
-        last_msg = messages[-1]["content"]
+        # Get the last message from the assistant
+        last_msg = messages[-1]
+        if last_msg["role"] == "assistant":
+            player_action = last_msg["content"]
+        else:
+            return [], state  # No response if not assistant message
         
+        # Check game state
         if self.is_game_over(state):
-            return "Game over!", {"done": True}
+            response = [{"role": "user", "content": "Game over!"}]
+            state["done"] = True
+            return response, state
         
         # Update game state
-        new_state = self.update_state(state, last_msg)
-        response = self.get_game_feedback(new_state)
+        state = self.update_state(state, player_action)
+        feedback = self.get_game_feedback(state)
         
-        return response, new_state
+        # Return list of ChatMessage dicts
+        response = [{"role": "user", "content": feedback}]
+        return response, state
 
 def load_environment(**kwargs):
     return MyGameEnv(dataset=dataset, **kwargs)
