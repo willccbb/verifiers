@@ -338,24 +338,25 @@ class Tau2BenchEnv(MultiTurnEnv):
                             "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
                             "tool_call_id": tool_id
                         })
-                    else:
-                        # Successful execution
-                        exec_record["result"] = result
-                        exec_record["success"] = True
+                        continue  # Skip the success handling
                         
-                        # Sync agent's environment state
-                        if hasattr(tau2_env.tools, 'db'):
-                            state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
-                        if hasattr(tau2_env, 'sync_tools'):
-                            tau2_env.sync_tools()
-                        
-                        # Create tool message - use tau2's to_json_str method for consistency
-                        content = tau2_env.to_json_str(result)
-                        tool_messages.append({
-                            "role": "tool",
-                            "content": content,
-                            "tool_call_id": tool_id
-                        })
+                    # Successful execution
+                    exec_record["result"] = result
+                    exec_record["success"] = True
+                    
+                    # Sync agent's environment state
+                    if hasattr(tau2_env.tools, 'db'):
+                        state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
+                    if hasattr(tau2_env, 'sync_tools'):
+                        tau2_env.sync_tools()
+                    
+                    # Create tool message - use tau2's to_json_str method for consistency
+                    content = tau2_env.to_json_str(result)
+                    tool_messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": tool_id
+                    })
                 else:
                     exec_record["error"] = f"Tool {tool_name} not found"
                     exec_record["success"] = False
@@ -432,7 +433,9 @@ class Tau2BenchEnv(MultiTurnEnv):
                             "tool_call_id": tool_call.get("id", "") if isinstance(tool_call, dict) else (tool_call.id if hasattr(tool_call, 'id') else ""),
                             "name": f"user_{tool_name}"  # Prefix to distinguish user tools
                         })
-                    else:
+                        continue  # Skip the success handling
+                        
+                    # Handle successful execution
                         # Successful execution
                         exec_record["result"] = result
                         exec_record["success"] = True
