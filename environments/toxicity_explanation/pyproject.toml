@@ -2,8 +2,8 @@
 name = "toxicity-explanation"
 version = "0.1.0"
 dependencies = [
-    "datasets>=4.0.0",
-    "openai>=1.97.1",
+    "datasets",
+    "openai",
     "verifiers",
 ]
 
