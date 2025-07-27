@@ -184,7 +184,7 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
                 print(out)
     if args.save_dataset:
         dataset = vf_env.make_dataset(results)
-        dataset.save_to_disk(args.save_path)
+        dataset.to_json(args.save_path)
         print(f"Saved dataset to {args.save_path}")
     if args.save_to_hf_hub:
         if args.hf_hub_dataset_name == "":
