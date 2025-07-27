@@ -235,129 +235,64 @@ def load_livecodebench_dataset(
     split: str = "test",
     num_examples: int = -1
 ) -> Dataset:
-    """Load LiveCodeBench dataset or create example problems for testing"""
+    """Load the actual LiveCodeBench dataset from HuggingFace"""
     
-    # For now, create a proper example dataset that mirrors LiveCodeBench structure
-    # This allows testing while the actual dataset format is being updated
-    print("Creating LiveCodeBench-compatible example dataset...")
+    # LiveCodeBench uses code_generation_lite as the default dataset
+    dataset_name = "livecodebench/code_generation_lite"
     
-    examples = [
-        {
-            'question_id': 'lcb_example_001',
-            'question_title': 'Two Sum',
-            'question_content': '''Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
+    print(f"Loading LiveCodeBench dataset: {dataset_name}")
+    print(f"Note: This dataset requires trust_remote_code=True to load properly")
+    
+    try:
+        # Load with trust_remote_code=True as required by LiveCodeBench
+        dataset = load_dataset(
+            dataset_name,
+            split=split,
+            trust_remote_code=True,  # Required for LiveCodeBench
+            version_tag=version_tag  # Pass version_tag to the dataset script
+        )
+        
+        print(f"Successfully loaded {len(dataset)} problems from LiveCodeBench")
+        
+        # Limit examples if specified
+        if num_examples > 0 and len(dataset) > num_examples:
+            dataset = dataset.select(range(num_examples))
+            print(f"Limited to {num_examples} examples")
+            
+        return dataset
+        
+    except Exception as e:
+        print(f"Error loading LiveCodeBench dataset: {e}")
+        print("Falling back to example dataset for testing...")
+        
+        # Fallback to example dataset if real dataset fails to load
+        examples = [
+            {
+                'question_id': 'lcb_example_001',
+                'question_title': 'Two Sum',
+                'question_content': '''Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
 
 You may assume that each input would have exactly one solution, and you may not use the same element twice.
 
 You can return the answer in any order.''',
-            'public_tests': {
-                'input': ['nums = [2,7,11,15], target = 9', 'nums = [3,2,4], target = 6', 'nums = [3,3], target = 6'],
-                'output': ['[0,1]', '[1,2]', '[0,1]']
-            },
-            'hidden_tests': {
-                'input': ['nums = [1,2,3,4,5], target = 9', 'nums = [-1,-2,-3,-4,-5], target = -8'],
-                'output': ['[3,4]', '[2,4]']
-            },
-            'starter_code': '',
-            'difficulty': 'easy',
-            'contest': 'leetcode',
-            'contest_date': '2023-05-15'
-        },
-        {
-            'question_id': 'lcb_example_002', 
-            'question_title': 'Valid Parentheses',
-            'question_content': '''Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.
-
-An input string is valid if:
-1. Open brackets must be closed by the same type of brackets.
-2. Open brackets must be closed in the correct order.
-3. Every close bracket has a corresponding open bracket of the same type.''',
-            'public_tests': {
-                'input': ['s = "()"', 's = "()[]{}"', 's = "(]"'],
-                'output': ['true', 'true', 'false']
-            },
-            'hidden_tests': {
-                'input': ['s = "([)]"', 's = "{[]}"'],
-                'output': ['false', 'true']
-            },
-            'starter_code': '',
-            'difficulty': 'easy',
-            'contest': 'leetcode',
-            'contest_date': '2023-06-01'
-        },
-        {
-            'question_id': 'lcb_example_003',
-            'question_title': 'Reverse Integer',
-            'question_content': '''Given a signed 32-bit integer x, return x with its digits reversed. If reversing x causes the value to go outside the signed 32-bit integer range [-2^31, 2^31 - 1], then return 0.
-
-Assume the environment does not allow you to store 64-bit integers (signed or unsigned).''',
-            'public_tests': {
-                'input': ['x = 123', 'x = -123', 'x = 120'],
-                'output': ['321', '-321', '21']
-            },
-            'hidden_tests': {
-                'input': ['x = 0', 'x = 1534236469'],
-                'output': ['0', '0']
-            },
-            'starter_code': '',
-            'difficulty': 'medium',
-            'contest': 'leetcode', 
-            'contest_date': '2023-07-10'
-        },
-        {
-            'question_id': 'lcb_example_004',
-            'question_title': 'Palindrome Number',
-            'question_content': '''Given an integer x, return true if x is a palindrome, and false otherwise.
-
-An integer is a palindrome when it reads the same forward and backward.
-
-For example, 121 is a palindrome while 123 is not.''',
-            'public_tests': {
-                'input': ['x = 121', 'x = -121', 'x = 10'],
-                'output': ['true', 'false', 'false']
-            },
-            'hidden_tests': {
-                'input': ['x = 0', 'x = 1221'],
-                'output': ['true', 'true']
-            },
-            'starter_code': '',
-            'difficulty': 'easy',
-            'contest': 'leetcode',
-            'contest_date': '2023-08-20'
-        },
-        {
-            'question_id': 'lcb_example_005',
-            'question_title': 'Fibonacci Number',
-            'question_content': '''The Fibonacci numbers, commonly denoted F(n) form a sequence, called the Fibonacci sequence, such that each number is the sum of the two preceding ones, starting from 0 and 1.
-
-That is:
-F(0) = 0, F(1) = 1
-F(n) = F(n - 1) + F(n - 2), for n > 1.
-
-Given n, calculate F(n).''',
-            'public_tests': {
-                'input': ['n = 2', 'n = 3', 'n = 4'],
-                'output': ['1', '2', '3']
-            },
-            'hidden_tests': {
-                'input': ['n = 10', 'n = 15'],
-                'output': ['55', '610']
-            },
-            'starter_code': '',
-            'difficulty': 'easy',
-            'contest': 'leetcode',
-            'contest_date': '2023-09-05'
-        }
-    ]
-    
-    # Create dataset
-    dataset = Dataset.from_list(examples)
-    
-    # Limit examples if specified
-    if num_examples > 0 and len(dataset) > num_examples:
-        dataset = dataset.select(range(num_examples))
-    
-    return dataset
+                'public_tests': {
+                    'input': ['nums = [2,7,11,15], target = 9', 'nums = [3,2,4], target = 6', 'nums = [3,3], target = 6'],
+                    'output': ['[0,1]', '[1,2]', '[0,1]']
+                },
+                'hidden_tests': {
+                    'input': ['nums = [1,2,3,4,5], target = 9', 'nums = [-1,-2,-3,-4,-5], target = -8'],
+                    'output': ['[3,4]', '[2,4]']
+                },
+                'starter_code': '',
+                'difficulty': 'easy',
+                'contest': 'leetcode',
+                'contest_date': '2023-05-15'
+            }
+        ]
+        
+        # Create minimal dataset for testing
+        dataset = Dataset.from_list(examples)
+        return dataset
 
 
 def parse_livecodebench_problem(example: Dict) -> Dict:
