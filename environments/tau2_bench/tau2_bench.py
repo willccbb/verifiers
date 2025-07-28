@@ -100,7 +100,6 @@ class Tau2BenchEnv(MultiTurnEnv):
                  dataset: Dataset,
                  rubric: vf.Rubric,
                  domain: str,
-                 tau2_env,
                  tau2_tasks: List[Any],
                  user_llm: str = "gpt-4.1-mini",
                  max_turns: int = 30,
@@ -119,12 +118,22 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
         
+        # Get environment configuration from domain
+        if domain == "retail":
+            temp_env = get_retail_env()
+        elif domain == "airline":
+            temp_env = get_airline_env()
+        elif domain == "telecom":
+            temp_env = get_telecom_env(solo_mode=solo_mode)
+        else:
+            raise ValueError(f"Unknown domain: {domain}")
+            
         # Store environment configuration
         self.env_config = {
             "domain": domain,
-            "policy": tau2_env.policy,
-            "tools": tau2_env.tools,
-            "user_tools": getattr(tau2_env, 'user_tools', None),
+            "policy": temp_env.policy,
+            "tools": temp_env.tools,
+            "user_tools": getattr(temp_env, 'user_tools', None),
             "solo_mode": solo_mode
         }
 
@@ -1153,9 +1162,11 @@ def load_environment(
     env = Tau2BenchEnv(
         dataset=full_dataset,
         rubric=rubric,
-        tau2_env=tau2_env,
-        tau2_tasks=tau2_tasks,
         domain=domain,
+        tau2_tasks=tau2_tasks,
+        user_llm=kwargs.get("user_llm", "gpt-4.1-mini"),
+        max_turns=kwargs.get("max_turns", 30),
+        max_errors=kwargs.get("max_errors", 3),
         solo_mode=solo_mode,
         **kwargs
     )
