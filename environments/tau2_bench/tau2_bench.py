@@ -113,35 +113,24 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
         
-        # Get environment configuration from domain
-        if domain == "retail":
-            temp_env = get_retail_env()
-        elif domain == "airline":
-            temp_env = get_airline_env()
-        elif domain == "telecom":
-            temp_env = get_telecom_env(solo_mode=solo_mode)
-        else:
-            raise ValueError(f"Unknown domain: {domain}")
-            
-        # Store environment configuration
+        # Store domain and configuration needed to create fresh environments
         self.env_config = {
             "domain": domain,
-            "policy": temp_env.policy,
-            "tools": temp_env.tools,
-            "user_tools": getattr(temp_env, 'user_tools', None),
             "solo_mode": solo_mode
         }
 
     def _create_fresh_env(self, initial_db_state: dict = None):
-        """Create a fresh tau2 environment instance with optional initial state."""
-        # Create fresh environment
-        env = Tau2Environment(
-            domain_name=self.env_config["domain"],
-            policy=self.env_config["policy"],
-            tools=self.env_config["tools"],
-            user_tools=self.env_config["user_tools"],
-            solo_mode=self.env_config.get("solo_mode", False)
-        )
+        """Create a fresh tau2 environment instance with its own isolated database."""
+        # Create fresh environment with fresh database for each instance
+        if self.domain == "retail":
+            # This creates a fresh RetailDB instance
+            env = get_retail_env()
+        elif self.domain == "airline":
+            env = get_airline_env()
+        elif self.domain == "telecom":
+            env = get_telecom_env(solo_mode=self.solo_mode)
+        else:
+            raise ValueError(f"Unknown domain: {self.domain}")
         
         # Set initial database state if provided
         if initial_db_state:
@@ -387,6 +376,13 @@ class Tau2BenchEnv(MultiTurnEnv):
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
                             print(f"DEBUG: Before {tool_name} - Order {order_id} status: {order.status}")
+                            # For exchange, check if it's the problematic order
+                            if order_id == "#W2378156" and tool_name == "exchange_delivered_order_items":
+                                print(f"DEBUG: Order #W2378156 details before exchange:")
+                                print(f"  - status: {order.status}")
+                                print(f"  - items: {len(order.items)}")
+                                print(f"  - exchange_items: {order.exchange_items}")
+                                print(f"  - return_items: {order.return_items}")
                     except:
                         pass
             
@@ -410,6 +406,17 @@ class Tau2BenchEnv(MultiTurnEnv):
             
             if tool_response.error:
                 print(f"DEBUG: Tool {tool_name} returned error: {tool_response.content}")
+            
+            # Debug: Check order status after execution
+            if tool_name in ["return_delivered_order_items", "exchange_delivered_order_items"] and not tool_response.error:
+                order_id = tool_args.get("order_id")
+                if order_id == "#W2378156":
+                    try:
+                        order = tau2_env.tools.db.orders.get(order_id)
+                        if order:
+                            print(f"DEBUG: After {tool_name} - Order {order_id} status: {order.status}")
+                    except:
+                        pass
             
             # Get database hashes after execution
             db_hash_after = tau2_env.get_db_hash()
