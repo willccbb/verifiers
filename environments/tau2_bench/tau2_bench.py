@@ -829,186 +829,77 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 
             print(f"DEBUG: Termination reason = {term_reason}")
                 
-            # Convert messages to tau2 format
+            # Build list of all messages for simulation
             tau2_messages = []
-            tool_call_count = 0
-            tool_message_count = 0
-            tool_call_ids = []
             tool_message_ids = []
             
-            # First, include all messages from the prompt (initial message history)
-            if isinstance(prompt, list):
-                for msg in prompt:
-                    # Skip system messages as they're not part of tau2's message history
+            # Debug: log what we're building
+            print(f"\n!!! Building simulation messages !!!")
+            print(f"Prompt type: {type(prompt)}, length: {len(prompt) if isinstance(prompt, list) else 'N/A'}")
+            print(f"Completion type: {type(completion)}, length: {len(completion) if isinstance(completion, list) else 'N/A'}")
+            
+            # NOTE: We do NOT include prompt messages in the simulation!
+            # The initial message history is already embedded in the task and will be
+            # replayed by tau2's evaluator when it calls set_state.
+            # We only include the NEW messages from our rollout (completion).
+            
+            # Include all messages from the completion (the rollout)
+            if isinstance(completion, list):
+                print(f"\n!!! Processing {len(completion)} completion messages !!!")
+                for i, msg in enumerate(completion):
+                    # Skip system messages
                     if msg.get("role") == "system":
+                        print(f"  Skipping system message {i}")
                         continue
                         
                     # Convert each message to tau2 format
-                    if msg["role"] == "assistant":
-                        tau2_tool_calls = None
-                        if "tool_calls" in msg and msg["tool_calls"]:
-                            tool_call_count += len(msg["tool_calls"])
-                            tau2_tool_calls = []
-                            for tc in msg["tool_calls"]:
-                                if isinstance(tc, dict):
-                                    tc_id = tc.get("id", "")
-                                    tc_name = tc.get("function", {}).get("name", "")
-                                    args_str = tc.get("function", {}).get("arguments", "{}")
-                                else:
-                                    tc_id = tc.id if hasattr(tc, 'id') else ""
-                                    tc_name = tc.function.name if hasattr(tc, 'function') else ""
-                                    args_str = tc.function.arguments if hasattr(tc, 'function') else "{}"
-                                
-                                tool_call_ids.append(tc_id)
-                                
-                                try:
-                                    args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                                except:
-                                    args_dict = {}
-                                    
-                                tau2_tool_calls.append(
-                                    ToolCall(
-                                        id=tc_id,
-                                        name=tc_name,
-                                        arguments=args_dict
-                                    )
-                                )
-                        
+                    if msg.get("role") == "assistant":
+                        print(f"  Message {i}: assistant, has_tool_calls={bool(msg.get('tool_calls'))}")
                         tau2_msg = AssistantMessage(
                             role="assistant",
-                            content=msg.get("content", ""),
-                            tool_calls=tau2_tool_calls,
-                            cost=0.0
+                            content=msg.get("content", "")
                         )
+                        # Handle tool calls
+                        if msg.get("tool_calls"):
+                            tool_calls = []
+                            for tc in msg["tool_calls"]:
+                                func = tc.get("function", {})
+                                tool_calls.append(ToolCall(
+                                    id=tc.get("id"),
+                                    name=func.get("name"),
+                                    arguments=json.loads(func.get("arguments", "{}")),
+                                    requestor="assistant"
+                                ))
+                            tau2_msg.tool_calls = tool_calls
+                            print(f"    Added {len(tool_calls)} tool calls")
                         tau2_messages.append(tau2_msg)
-                    elif msg["role"] == "user":
+                        
+                    elif msg.get("role") == "user":
+                        print(f"  Message {i}: user")
                         tau2_msg = UserMessage(
                             role="user",
                             content=msg.get("content", "")
                         )
                         tau2_messages.append(tau2_msg)
-                    elif msg["role"] == "tool":
-                        tool_message_count += 1
-                        tm_id = msg.get("tool_call_id", "")
-                        tool_message_ids.append(tm_id)
+                        
+                    elif msg.get("role") == "tool":
+                        print(f"  Message {i}: tool, name={msg.get('name')}")
                         tau2_msg = ToolMessage(
-                            id=tm_id,
                             role="tool",
+                            id=msg.get("tool_call_id"),
                             content=msg.get("content", ""),
-                            name=msg.get("name", "tool")
+                            name=msg.get("name")
                         )
                         tau2_messages.append(tau2_msg)
             
-            # Then, include all messages from the completion (the rollout)
-            if isinstance(completion, list):
-                for i, msg in enumerate(completion):
-                    if msg["role"] == "assistant":
-                        # Convert tool calls to tau2 format if present
-                        tau2_tool_calls = None
-                        if "tool_calls" in msg and msg["tool_calls"]:
-                            tool_call_count += len(msg["tool_calls"])
-                            tau2_tool_calls = []
-                            for tc in msg["tool_calls"]:
-                                # Handle both dict and object formats
-                                if hasattr(tc, 'function'):
-                                    args_str = tc.function.arguments
-                                    tc_id = tc.id if hasattr(tc, 'id') else ""
-                                    tc_name = tc.function.name
-                                else:
-                                    args_str = tc.get("function", {}).get("arguments", "{}")
-                                    tc_id = tc.get("id", "")
-                                    tc_name = tc.get("function", {}).get("name", "")
-                                
-                                tool_call_ids.append(tc_id)
-                                
-                                # Parse arguments
-                                try:
-                                    args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                                except:
-                                    args_dict = {}
-                                    
-                                tau2_tool_calls.append(
-                                    ToolCall(
-                                        id=tc_id,
-                                        name=tc_name,
-                                        arguments=args_dict
-                                    )
-                                )
-                        
-                        tau2_msg = AssistantMessage(
-                            role="assistant",
-                            content=msg.get("content", ""),
-                            tool_calls=tau2_tool_calls,
-                            cost=0.0
-                        )
-                        tau2_messages.append(tau2_msg)
-                    elif msg["role"] == "user":
-                        # Handle user tool calls (for telecom domain)
-                        tau2_tool_calls = None
-                        if "tool_calls" in msg and msg["tool_calls"]:
-                            tau2_tool_calls = []
-                            for tc in msg["tool_calls"]:
-                                # Similar conversion as above
-                                if hasattr(tc, 'function'):
-                                    args_str = tc.function.arguments
-                                    tc_id = tc.id if hasattr(tc, 'id') else ""
-                                    tc_name = tc.function.name
-                                else:
-                                    args_str = tc.get("function", {}).get("arguments", "{}")
-                                    tc_id = tc.get("id", "")
-                                    tc_name = tc.get("function", {}).get("name", "")
-                                
-                                try:
-                                    args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                                except:
-                                    args_dict = {}
-                                    
-                                tau2_tool_calls.append(
-                                    ToolCall(
-                                        id=tc_id,
-                                        name=tc_name,
-                                        arguments=args_dict
-                                    )
-                                )
-                        
-                        tau2_msg = UserMessage(
-                            role="user",
-                            content=msg.get("content", ""),
-                            tool_calls=tau2_tool_calls
-                        )
-                        tau2_messages.append(tau2_msg)
-                    elif msg["role"] == "tool":
-                        tool_message_count += 1
-                        tm_id = msg.get("tool_call_id", "")
-                        tool_message_ids.append(tm_id)
-                        tau2_msg = ToolMessage(
-                            id=tm_id,
-                            role="tool",
-                            content=msg.get("content", ""),
-                            name=msg.get("name", "tool")
-                        )
-                        tau2_messages.append(tau2_msg)
+            print(f"\n!!! Total tau2_messages: {len(tau2_messages)} !!!")
+            for i, msg in enumerate(tau2_messages[:5]):  # First 5 messages
+                print(f"  {i}: {msg.role} - {msg.content[:50] if msg.content else 'No content'}...")
+            if len(tau2_messages) > 5:
+                print(f"  ... and {len(tau2_messages) - 5} more messages")
             
-            print(f"\nDEBUG: Converted {len(tau2_messages)} messages")
-            print(f"DEBUG: Found {tool_call_count} tool calls and {tool_message_count} tool messages")
-            if tool_call_count != tool_message_count:
-                print(f"WARNING: Tool call/message count mismatch!")
-                
-            # Check for ID mismatches
-            missing_responses = []
-            for tc_id in tool_call_ids:
-                if tc_id not in tool_message_ids:
-                    missing_responses.append(tc_id)
-            if missing_responses:
-                print(f"WARNING: Tool calls without responses: {missing_responses}")
-                
-            orphan_responses = []
-            for tm_id in tool_message_ids:
-                if tm_id not in tool_call_ids:
-                    orphan_responses.append(tm_id)
-            if orphan_responses:
-                print(f"WARNING: Tool messages without calls: {orphan_responses}")
-                    
+            # Build simulation run
+            task_id = info.get("task_id", "unknown")
             simulation = SimulationRun(
                 id=f"verifiers_eval_{task_id}_{datetime.now().isoformat()}",
                 agent_id="verifiers_agent",
