@@ -35,7 +35,6 @@ try:
     from tau2.data_model.simulation import SimulationRun, TerminationReason
     from tau2.data_model.tasks import RewardType
     from tau2.environment.environment import Environment as Tau2Environment
-    from tau2.orchestrator.orchestrator import EnvironmentOrchestrator
     TAU2_AVAILABLE = True
 except ImportError as e:
     print(f"DEBUG: Import error: {e}")
