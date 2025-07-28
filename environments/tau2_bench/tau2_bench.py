@@ -356,6 +356,10 @@ class Tau2BenchEnv(MultiTurnEnv):
             # Use tau2's get_response method directly
             tool_response = tau2_env.get_response(tau2_tool_call)
             
+            # Debug: Log the response
+            if tool_name == "modify_pending_order_items":
+                print(f"DEBUG: modify_pending_order_items response: error={tool_response.error}, content={tool_response.content[:200]}...")
+            
             # Get database hash after execution
             db_hash_after = tau2_env.get_db_hash()
             
