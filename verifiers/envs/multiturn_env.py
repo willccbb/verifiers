@@ -25,6 +25,9 @@ class MultiTurnEnv(Environment):
         self.max_turns = max_turns
         self.message_type = message_type
 
+    def setup_state(self, state: State, **kwargs) -> State:
+        return state
+
     @abstractmethod
     def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
         pass
@@ -62,6 +65,7 @@ class MultiTurnEnv(Environment):
             "responses": [],
             "turn": 0,
         }
+        state = self.setup_state(state)
         if self.message_type == "chat":
             assert isinstance(prompt, list)
             completion = []
