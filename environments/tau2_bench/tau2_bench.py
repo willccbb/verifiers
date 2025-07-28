@@ -283,6 +283,23 @@ class Tau2BenchEnv(MultiTurnEnv):
                     message_history=[]  # Empty - don't replay past messages
                 )
                 
+                # Debug: Log what we initialized
+                if task_id == 13:  # The failing task
+                    print(f"\nDEBUG: Task {task_id} initialization:")
+                    print(f"  - initialization_data: {initialization_data is not None}")
+                    print(f"  - initialization_actions: {initialization_actions is not None and len(initialization_actions) if initialization_actions else 0}")
+                    # Try to check order status
+                    if hasattr(state["tau2_env"], 'tools') and hasattr(state["tau2_env"].tools, 'db'):
+                        try:
+                            # Check if order #W2378156 exists
+                            order = state["tau2_env"].tools.db.orders.get("#W2378156")
+                            if order:
+                                print(f"  - Order #W2378156 status after init: {order.status}")
+                            else:
+                                print(f"  - Order #W2378156 not found after init")
+                        except:
+                            pass
+                
                 # Store initial database hashes after initialization
                 state["initial_db_hash"] = state["tau2_env"].get_db_hash()
                 state["initial_user_db_hash"] = state["tau2_env"].get_user_db_hash()
@@ -815,6 +832,13 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
                 print(f"  {j}. {role}: {content[:200]}...")
+                # Also show tool calls if present
+                if "tool_calls" in msg and msg["tool_calls"]:
+                    for tc in msg["tool_calls"]:
+                        if isinstance(tc, dict):
+                            func_name = tc.get("function", {}).get("name", "unknown")
+                            print(f"     -> tool call: {func_name}")
+            print(f"Scenario: {scenario[:200] if scenario else 'None'}...")
             print(f"{'='*80}\n")
         
         dataset_rows.append(row)
