@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install math-python (-p /path/to/environments)
+vf-install vf-math-python (-p /path/to/environments)
 
 # eval
-vf-eval math-python (-m model_name in endpoints.py)
+vf-eval vf-math-python (-m model_name in endpoints.py)
 
 # inference
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model 'willcb/Qwen3-1.7B' \

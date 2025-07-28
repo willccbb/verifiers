@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install gsm8k (-p /path/to/environments)
+vf-install vf-gsm8k (-p /path/to/environments)
 
 # quick eval
-vf-eval gsm8k (-m model_name in endpoints.py)
+vf-eval vf-gsm8k (-m model_name in endpoints.py)
 
 inference:
 CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-0.6B --enforce-eager --disable-log-requests

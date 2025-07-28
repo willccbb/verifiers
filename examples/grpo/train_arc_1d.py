@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install reasoning-gym (-p /path/to/environments)
+vf-install vf-reasoning-gym (-p /path/to/environments)
 
 # quick eval
-vf-eval reasoning-gym (-m model_name in endpoints.py)
+vf-eval vf-reasoning-gym (-m model_name in endpoints.py)
 
 inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3 vf-vllm --model willcb/Qwen3-14B-Arc-1D-SFT \

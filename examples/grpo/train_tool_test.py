@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install tool-test (-p /path/to/environments)
+vf-install vf-tool-test (-p /path/to/environments)
 
 # quick eval
-vf-eval tool-test (-m model_name in endpoints.py)
+vf-eval vf-tool-test (-m model_name in endpoints.py)
 
 inference:
 CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-0.6B \

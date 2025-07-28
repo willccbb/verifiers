@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install self-reward (-p /path/to/environments)
+vf-install vf-self-reward (-p /path/to/environments)
 
 # quick eval
-vf-eval self-reward (-m model_name in endpoints.py)
+vf-eval vf-self-reward (-m model_name in endpoints.py)
 
 inference:
 CUDA_VISIBLE_DEVICES=0 vf-vllm --model Qwen/Qwen2.5-7B-Instruct \

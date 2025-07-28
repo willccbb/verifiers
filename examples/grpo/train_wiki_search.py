@@ -2,10 +2,10 @@ import verifiers as vf
 
 """
 # install
-vf-install wiki-search (-p /path/to/environments)
+vf-install vf-wiki-search (-p /path/to/environments)
 
 # quick eval
-vf-eval wiki-search (-m model_name in endpoints.py)
+vf-eval vf-wiki-search (-m model_name in endpoints.py)
 
 inference:
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-8B-Wiki-Search-SFT \
