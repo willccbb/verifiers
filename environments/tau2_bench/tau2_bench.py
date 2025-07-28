@@ -151,11 +151,11 @@ class Tau2BenchEnv(MultiTurnEnv):
         return env
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
-        """Check if conversation is completed using tau2's termination logic."""
-        # Check max turns
-        turn_count = state.get("turn_count", 0)
-        if turn_count >= self.max_turns:
-            state["termination_reason"] = "max_turns_reached"
+        """Check if conversation should end based on tau2's termination criteria."""
+        # Check max steps
+        step_count = state.get("step_count", 0)
+        if step_count >= self.max_turns:
+            state["termination_reason"] = "max_steps"
             return True
             
         # Check error count
@@ -229,8 +229,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                     )
                     response_messages.extend(user_tool_results)
                     
-        # Update turn count
-        state["turn_count"] += len([m for m in response_messages if m["role"] in ["assistant", "user"]])
+        # Update step count - count EVERY message like tau2 does
+        state["step_count"] = state.get("step_count", 0) + len(response_messages)
         
         return response_messages, state
         
@@ -260,8 +260,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                 "conversation_stage": "initial"
             }
             
-        if "turn_count" not in state:
-            state["turn_count"] = 0
+        if "step_count" not in state:
+            state["step_count"] = 0
             
         if "tau2_env" not in state:
             # Create fresh environment
@@ -823,7 +823,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             termination_reason = state.get("termination_reason", "")
             if termination_reason == "too_many_errors":
                 term_reason = TerminationReason.TOO_MANY_ERRORS
-            elif termination_reason == "max_turns_reached":
+            elif termination_reason == "max_steps":
                 term_reason = TerminationReason.MAX_STEPS
             elif termination_reason == "user_stop":
                 term_reason = TerminationReason.USER_STOP
