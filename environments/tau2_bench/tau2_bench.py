@@ -375,6 +375,17 @@ class Tau2BenchEnv(MultiTurnEnv):
             # Use tau2's get_response method directly
             tool_response = tau2_env.get_response(tau2_tool_call)
             
+            # Debug: Check order status after
+            if tool_name in ["return_delivered_order_items", "exchange_delivered_order_items", "modify_pending_order_items"]:
+                order_id = tool_args.get("order_id") 
+                if order_id and hasattr(tau2_env, 'tools') and hasattr(tau2_env.tools, 'db'):
+                    try:
+                        order = tau2_env.tools.db.orders.get(order_id)
+                        if order:
+                            print(f"DEBUG: After {tool_name} - Order {order_id} status: {order.status}, error: {tool_response.error}")
+                    except:
+                        pass
+            
             # Debug: Log the response
             if tool_name == "modify_pending_order_items":
                 print(f"DEBUG: modify_pending_order_items response: error={tool_response.error}, content={tool_response.content[:200]}...")
@@ -411,7 +422,9 @@ class Tau2BenchEnv(MultiTurnEnv):
             tool_messages.append({
                 "role": "tool",
                 "content": tool_response.content,
-                "tool_call_id": tool_id
+                "tool_call_id": tool_id,
+                "name": tool_name,  # Keep tool name for debugging
+                "error": tool_response.error  # Preserve error flag
             })
             
         return tool_messages
@@ -485,7 +498,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                 "role": "tool",
                 "content": tool_response.content,
                 "tool_call_id": tool_id,
-                "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                "name": f"user_{tool_name}",  # Prefix to distinguish user tools
+                "error": tool_response.error  # Preserve error flag
             })
             
         return tool_messages
@@ -904,19 +918,52 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             role="user",
                             content=msg.get("content", "")
                         )
+                        # Handle tool calls for user messages (telecom domain)
+                        if msg.get("tool_calls"):
+                            tool_calls = []
+                            for tc in msg["tool_calls"]:
+                                tool_calls.append(ToolCall(
+                                    id=tc.id,
+                                    name=tc.function.name,
+                                    arguments=json.loads(tc.function.arguments),
+                                    requestor="user"
+                                ))
+                            tau2_msg.tool_calls = tool_calls
+                            print(f"    Added {len(tool_calls)} user tool calls")
                         tau2_messages.append(tau2_msg)
                         
                     elif msg.get("role") == "tool":
                         print(f"  Message {i}: tool, name={msg.get('name')}")
+                        # Determine requestor based on context - look at previous message
+                        requestor = "assistant"  # default
+                        if i > 0 and tau2_messages and hasattr(tau2_messages[-1], 'role'):
+                            prev_msg_role = tau2_messages[-1].role
+                            if prev_msg_role == "user":
+                                requestor = "user"
+                        
                         tau2_msg = ToolMessage(
                             role="tool",
                             id=msg.get("tool_call_id"),
                             content=msg.get("content", ""),
-                            name=msg.get("name")
+                            requestor=requestor,
+                            error=msg.get("error", False)  # Use actual error flag from execution
                         )
                         tau2_messages.append(tau2_msg)
             
             print(f"\n!!! Total tau2_messages: {len(tau2_messages)} !!!")
+            
+            # Validate tool call/message pairing
+            tool_call_count = 0
+            tool_msg_count = 0
+            for msg in tau2_messages:
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    tool_call_count += len(msg.tool_calls)
+                elif isinstance(msg, ToolMessage):
+                    tool_msg_count += 1
+            
+            if tool_call_count != tool_msg_count:
+                print(f"WARNING: Tool call/message mismatch! {tool_call_count} calls vs {tool_msg_count} messages")
+            
             for i, msg in enumerate(tau2_messages[:5]):  # First 5 messages
                 print(f"  {i}: {msg.role} - {msg.content[:50] if msg.content else 'No content'}...")
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
