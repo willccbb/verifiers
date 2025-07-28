@@ -863,24 +863,13 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         if msg.get("tool_calls"):
                             tool_calls = []
                             for tc in msg["tool_calls"]:
-                                # Handle both dict and object formats
-                                if hasattr(tc, 'function'):
-                                    # Object format (e.g., ChatCompletionMessageToolCall)
-                                    tool_calls.append(ToolCall(
-                                        id=tc.id,
-                                        name=tc.function.name,
-                                        arguments=json.loads(tc.function.arguments),
-                                        requestor="assistant"
-                                    ))
-                                else:
-                                    # Dict format
-                                    func = tc.get("function", {})
-                                    tool_calls.append(ToolCall(
-                                        id=tc.get("id"),
-                                        name=func.get("name"),
-                                        arguments=json.loads(func.get("arguments", "{}")),
-                                        requestor="assistant"
-                                    ))
+                                # tc is a ChatCompletionMessageToolCall object
+                                tool_calls.append(ToolCall(
+                                    id=tc.id,
+                                    name=tc.function.name,
+                                    arguments=json.loads(tc.function.arguments),
+                                    requestor="assistant"
+                                ))
                             tau2_msg.tool_calls = tool_calls
                             print(f"    Added {len(tool_calls)} tool calls")
                         tau2_messages.append(tau2_msg)
