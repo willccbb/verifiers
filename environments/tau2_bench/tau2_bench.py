@@ -846,8 +846,72 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             tool_call_ids = []
             tool_message_ids = []
             
+            # First, include all messages from the prompt (initial message history)
+            if isinstance(info, dict) and "prompt" in info:
+                prompt_messages = info["prompt"]
+                for msg in prompt_messages:
+                    # Skip system messages as they're not part of tau2's message history
+                    if msg.get("role") == "system":
+                        continue
+                        
+                    # Convert each message to tau2 format
+                    if msg["role"] == "assistant":
+                        tau2_tool_calls = None
+                        if "tool_calls" in msg and msg["tool_calls"]:
+                            tool_call_count += len(msg["tool_calls"])
+                            tau2_tool_calls = []
+                            for tc in msg["tool_calls"]:
+                                if isinstance(tc, dict):
+                                    tc_id = tc.get("id", "")
+                                    tc_name = tc.get("function", {}).get("name", "")
+                                    args_str = tc.get("function", {}).get("arguments", "{}")
+                                else:
+                                    tc_id = tc.id if hasattr(tc, 'id') else ""
+                                    tc_name = tc.function.name if hasattr(tc, 'function') else ""
+                                    args_str = tc.function.arguments if hasattr(tc, 'function') else "{}"
+                                
+                                tool_call_ids.append(tc_id)
+                                
+                                try:
+                                    args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                                except:
+                                    args_dict = {}
+                                    
+                                tau2_tool_calls.append(
+                                    ToolCall(
+                                        id=tc_id,
+                                        name=tc_name,
+                                        arguments=args_dict
+                                    )
+                                )
+                        
+                        tau2_msg = AssistantMessage(
+                            role="assistant",
+                            content=msg.get("content", ""),
+                            tool_calls=tau2_tool_calls,
+                            cost=0.0
+                        )
+                        tau2_messages.append(tau2_msg)
+                    elif msg["role"] == "user":
+                        tau2_msg = UserMessage(
+                            role="user",
+                            content=msg.get("content", "")
+                        )
+                        tau2_messages.append(tau2_msg)
+                    elif msg["role"] == "tool":
+                        tool_message_count += 1
+                        tm_id = msg.get("tool_call_id", "")
+                        tool_message_ids.append(tm_id)
+                        tau2_msg = ToolMessage(
+                            id=tm_id,
+                            role="tool",
+                            content=msg.get("content", ""),
+                            name=msg.get("name", "tool")
+                        )
+                        tau2_messages.append(tau2_msg)
+            
+            # Then, include all messages from the completion (the rollout)
             if isinstance(completion, list):
-                # completion is already the full message history
                 for i, msg in enumerate(completion):
                     if msg["role"] == "assistant":
                         # Convert tool calls to tau2 format if present
@@ -888,6 +952,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             tool_calls=tau2_tool_calls,
                             cost=0.0
                         )
+                        tau2_messages.append(tau2_msg)
                     elif msg["role"] == "user":
                         # Handle user tool calls (for telecom domain)
                         tau2_tool_calls = None
@@ -922,6 +987,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             content=msg.get("content", ""),
                             tool_calls=tau2_tool_calls
                         )
+                        tau2_messages.append(tau2_msg)
                     elif msg["role"] == "tool":
                         tool_message_count += 1
                         tm_id = msg.get("tool_call_id", "")
@@ -932,10 +998,8 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             content=msg.get("content", ""),
                             name=msg.get("name", "tool")
                         )
-                    else:
-                        continue
-                    tau2_messages.append(tau2_msg)
-                    
+                        tau2_messages.append(tau2_msg)
+            
             print(f"\nDEBUG: Converted {len(tau2_messages)} messages")
             print(f"DEBUG: Found {tool_call_count} tool calls and {tool_message_count} tool messages")
             if tool_call_count != tool_message_count:
