@@ -8,7 +8,6 @@ import json
 import os
 import subprocess
 from typing import List, Tuple, Dict, Any, Optional
-from copy import deepcopy
 from datetime import datetime
 
 import verifiers as vf
@@ -29,7 +28,6 @@ try:
     )
     from tau2.user.user_simulator import UserSimulator
     from tau2.agent.llm_agent import LLMAgent
-    from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
     from tau2.utils.utils import DATA_DIR
     # Import the evaluators
     from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
@@ -42,9 +40,6 @@ except ImportError as e:
     import traceback
     traceback.print_exc()
     TAU2_AVAILABLE = False
-    STOP = "STOP"
-    TRANSFER = "TRANSFER"
-    OUT_OF_SCOPE = "OUT_OF_SCOPE"
     DATA_DIR = None
     print("Warning: tau2-bench not installed. Please install it to use this environment.")
 
