@@ -28,6 +28,7 @@ args.gradient_accumulation_steps = 8
 args.max_steps = 100
 args.eval_strategy = "steps"
 args.eval_steps = 2
+args.max_tokens = 1024
 
 trainer = vf.GRPOTrainer(
     model=model,
