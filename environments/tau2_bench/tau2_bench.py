@@ -355,9 +355,10 @@ class Tau2BenchEnv(MultiTurnEnv):
                     })
                     continue  # Skip the success handling
                     
-                # Successful execution
+                # Successful execution - check if result indicates success
                 exec_record["result"] = result
-                exec_record["success"] = True
+                # Only mark as success if we got a valid result (not None, not error)
+                exec_record["success"] = result is not None and not (isinstance(result, str) and "error" in result.lower())
                 
                 # Sync tools after successful execution
                 tau2_env.sync_tools()
@@ -454,9 +455,10 @@ class Tau2BenchEnv(MultiTurnEnv):
                     })
                     continue  # Skip the success handling
                     
-                # Successful execution
+                # Successful execution - check if result indicates success
                 exec_record["result"] = result
-                exec_record["success"] = True
+                # Only mark as success if we got a valid result (not None, not error)
+                exec_record["success"] = result is not None and not (isinstance(result, str) and "error" in result.lower())
                 
                 # Sync tools after successful execution
                 tau2_env.sync_tools()
