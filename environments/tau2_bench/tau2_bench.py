@@ -892,7 +892,9 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             else:
                 term_reason = TerminationReason.AGENT_STOP
                 
-                # Build list of all messages for simulation
+            print(f"DEBUG: Termination reason = {term_reason}")
+                
+            # Build list of all messages for simulation
             tau2_messages = []
             tool_message_ids = []
             
