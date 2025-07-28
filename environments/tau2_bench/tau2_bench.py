@@ -28,6 +28,7 @@ try:
         AssistantMessage, UserMessage, ToolMessage, Message as Tau2Message, ToolCall
     )
     from tau2.user.user_simulator import UserSimulator
+    from tau2.agent.llm_agent import LLMAgent
     from tau2.user.base import STOP, TRANSFER, OUT_OF_SCOPE
     from tau2.utils.utils import DATA_DIR
     # Import the evaluators
@@ -155,7 +156,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         return env
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
-        """Check if conversation is completed."""
+        """Check if conversation is completed using tau2's termination logic."""
         # Check max turns
         turn_count = state.get("turn_count", 0)
         if turn_count >= self.max_turns:
@@ -166,21 +167,34 @@ class Tau2BenchEnv(MultiTurnEnv):
         if state.get("error_count", 0) >= self.max_errors:
             state["termination_reason"] = "too_many_errors"
             return True
-            
-        # Check if user said stop/transfer
+        
+        # Check if last message indicates termination
         if messages:
             last_msg = messages[-1]
+            
+            # Check user termination using tau2's logic
             if last_msg["role"] == "user":
-                content = last_msg.get("content", "").lower()
-                if any(word in content for word in ["stop", "transfer", "goodbye", "bye"]):
+                # Convert to tau2 UserMessage to use is_stop
+                tau2_msg = UserMessage(
+                    role="user",
+                    content=last_msg.get("content", "")
+                )
+                if UserSimulator.is_stop(tau2_msg):
                     state["termination_reason"] = "user_stop"
                     return True
-                    
-        # Check if task goal is achieved
-        if self._check_task_completion(state):
-            state["termination_reason"] = "goal_achieved"
-            return True
             
+            # Check agent termination using tau2's logic
+            elif last_msg["role"] == "assistant" and last_msg.get("content"):
+                tau2_msg = AssistantMessage(
+                    role="assistant",
+                    content=last_msg.get("content", "")
+                )
+                from tau2.agent.llm_agent import LLMAgent
+                if LLMAgent.is_stop(tau2_msg):
+                    state["termination_reason"] = "agent_stop"
+                    return True
+                    
+        # Don't check task completion - let the conversation run until other termination conditions
         return False
         
     def env_response(self, messages: vf.Messages, state: vf.State, **kwargs) -> Tuple[vf.Messages, vf.State]:
@@ -517,15 +531,13 @@ class Tau2BenchEnv(MultiTurnEnv):
                 
             # Handle special responses
             if user_msg.content == STOP:
-                state["termination_reason"] = "user_stop"
+                # No need to set termination_reason here - is_completed will handle it
                 return {
                     "role": "user",
                     "content": "I'd like to stop here. Thank you for your help."
                 }
             elif user_msg.content == TRANSFER:
-                state["termination_reason"] = "user_transfer"
-                # Mark as completed to terminate the conversation
-                state["user_said_transfer"] = True
+                # No need to set termination_reason here - is_completed will handle it
                 return {
                     "role": "user",
                     "content": "I'd like to speak to a human agent please."
@@ -834,7 +846,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 term_reason = TerminationReason.MAX_STEPS
             elif termination_reason == "user_stop":
                 term_reason = TerminationReason.USER_STOP
-            elif termination_reason == "goal_achieved":
+            elif termination_reason == "agent_stop":
                 term_reason = TerminationReason.AGENT_STOP
             else:
                 term_reason = TerminationReason.AGENT_STOP
@@ -1028,7 +1040,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 task_id=task_id,
                 messages=tau2_messages,
                 termination_reason=term_reason,
-                task_completed=state.get("termination_reason") == "goal_achieved",
+                task_completed=state.get("termination_reason") == "agent_stop", # Use agent_stop for completion
                 errors=state.get("error_count", 0),
                 num_steps=state.get("turn_count", 0),
                 cost=0.0,  # We don't track cost in verifiers
