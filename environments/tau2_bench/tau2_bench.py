@@ -140,6 +140,17 @@ class Tau2BenchEnv(MultiTurnEnv):
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation should end based on tau2's termination criteria."""
+        # Initialize state if needed (only once)
+        if "tau2_env" not in state:
+            self._init_state(state)
+            
+        # Don't terminate if there are pending tool calls
+        if messages:
+            last_msg = messages[-1]
+            if last_msg.get("role") == "assistant" and last_msg.get("tool_calls"):
+                # Assistant made tool calls - need to execute them first
+                return False
+                
         # Check max steps
         step_count = state.get("step_count", 0)
         if step_count >= self.max_steps:
@@ -184,8 +195,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         
     def env_response(self, messages: vf.Messages, state: vf.State, **kwargs) -> Tuple[vf.Messages, vf.State]:
         """Generate environment response based on tau2 logic."""
-        self._init_state(state)
-        
         response_messages = []
         
         # Get the last message to determine response
