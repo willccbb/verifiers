@@ -140,13 +140,6 @@ class Tau2BenchEnv(MultiTurnEnv):
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation should end based on tau2's termination criteria."""
-        # NEVER terminate if the last message has unanswered tool calls
-        if messages:
-            last_msg = messages[-1]
-            if last_msg.get("role") == "assistant" and last_msg.get("tool_calls"):
-                # Assistant just made tool calls - we need to execute them first
-                return False
-        
         # Check max steps
         step_count = state.get("step_count", 0)
         if step_count >= self.max_steps:
