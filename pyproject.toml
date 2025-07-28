@@ -4,15 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "verifiers"
-authors = [
-    {name = "William Brown", email = "williambrown97@gmail.com"},
-]
-dynamic = ["version"]  # Let hatchling handle version
-description = "Verifiers for reinforcement learning with LLMs"
+version = "0.1.2"
+description = "A library for running evaluations on language models using human-feedback data"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.11,<3.13"
-keywords = ["reinforcement-learning", "llm", "rl", "grpo", "verifiable-environments", "multi-turn"]
+requires-python = ">=3.11,<3.14"
+license = {file = "LICENSE"}
+keywords = ["AI", "verification", "trust", "safety", "evaluation", "language models", "LLM"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -26,8 +23,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai",
     "datasets",
+    "openai",
     "pydantic>=2.11.7",
 ]
 

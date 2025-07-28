@@ -105,6 +105,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                  user_llm: str = "gpt-4.1-mini",
                  max_turns: int = 30,
                  max_errors: int = 3,
+                 solo_mode: bool = False,
                  **kwargs):
         # Initialize parent class
         super().__init__(dataset=dataset, rubric=rubric, **kwargs)
@@ -113,6 +114,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         self.user_llm = user_llm
         self.max_turns = max_turns
         self.max_errors = max_errors
+        self.solo_mode = solo_mode
         
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
@@ -122,7 +124,8 @@ class Tau2BenchEnv(MultiTurnEnv):
             "domain": domain,
             "policy": tau2_env.policy,
             "tools": tau2_env.tools,
-            "user_tools": getattr(tau2_env, 'user_tools', None)
+            "user_tools": getattr(tau2_env, 'user_tools', None),
+            "solo_mode": solo_mode
         }
 
     def _create_fresh_env(self, initial_db_state: dict = None):
@@ -132,7 +135,8 @@ class Tau2BenchEnv(MultiTurnEnv):
             domain_name=self.env_config["domain"],
             policy=self.env_config["policy"],
             tools=self.env_config["tools"],
-            user_tools=self.env_config["user_tools"]
+            user_tools=self.env_config["user_tools"],
+            solo_mode=self.env_config.get("solo_mode", False)
         )
         
         # Set initial database state if provided
@@ -329,52 +333,46 @@ class Tau2BenchEnv(MultiTurnEnv):
             }
             
             try:
-                # Execute tool through tau2 environment
+                # Execute tool through tau2 environment's make_tool_call method
                 tau2_env = state["tau2_env"]
-                if hasattr(tau2_env.tools, tool_name):
-                    tool_func = getattr(tau2_env.tools, tool_name)
-                    result = tool_func(**tool_args)
-                    
-                    # Check if the result is an error string from tau2
-                    if isinstance(result, str) and result.startswith("Error:"):
-                        # This is an error from tau2, format it properly
-                        exec_record["error"] = result
-                        exec_record["success"] = False
-                        state["error_count"] = state.get("error_count", 0) + 1
-                        
-                        tool_messages.append({
-                            "role": "tool",
-                            "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
-                            "tool_call_id": tool_id
-                        })
-                        continue  # Skip the success handling
-                        
-                    # Successful execution
-                    exec_record["result"] = result
-                    exec_record["success"] = True
-                    
-                    # Sync agent's environment state
-                    if hasattr(tau2_env.tools, 'db'):
-                        state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
-                    if hasattr(tau2_env, 'sync_tools'):
-                        tau2_env.sync_tools()
-                    
-                    # Create tool message - use tau2's to_json_str method for consistency
-                    content = tau2_env.to_json_str(result)
-                    tool_messages.append({
-                        "role": "tool",
-                        "content": content,
-                        "tool_call_id": tool_id
-                    })
-                else:
-                    exec_record["error"] = f"Tool {tool_name} not found"
+                result = tau2_env.make_tool_call(
+                    tool_name=tool_name,
+                    requestor="assistant",
+                    **tool_args
+                )
+                
+                # Check if the result is an error string from tau2
+                if isinstance(result, str) and result.startswith("Error:"):
+                    # This is an error from tau2, format it properly
+                    exec_record["error"] = result
                     exec_record["success"] = False
+                    state["error_count"] = state.get("error_count", 0) + 1
                     
                     tool_messages.append({
                         "role": "tool",
-                        "content": f"Error executing {tool_name}: Tool not found",
+                        "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
                         "tool_call_id": tool_id
                     })
+                    continue  # Skip the success handling
+                    
+                # Successful execution
+                exec_record["result"] = result
+                exec_record["success"] = True
+                
+                # Sync tools after successful execution
+                tau2_env.sync_tools()
+                
+                # Update database state after sync
+                if hasattr(tau2_env.tools, 'db'):
+                    state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
+                
+                # Create tool message - use tau2's to_json_str method for consistency
+                content = tau2_env.to_json_str(result)
+                tool_messages.append({
+                    "role": "tool",
+                    "content": content,
+                    "tool_call_id": tool_id
+                })
                     
             except Exception as e:
                 # Format error to match tau2's expected format
@@ -433,56 +431,48 @@ class Tau2BenchEnv(MultiTurnEnv):
             }
             
             try:
-                # Execute tool through tau2 environment
+                # Execute tool through tau2 environment's make_tool_call method
                 tau2_env = state["tau2_env"]
-                if hasattr(tau2_env.user_tools, tool_name):
-                    tool_func = getattr(tau2_env.user_tools, tool_name)
-                    result = tool_func(**tool_args)
-                    
-                    # Check if the result is an error string from tau2
-                    if isinstance(result, str) and result.startswith("Error:"):
-                        # This is an error from tau2, format it properly
-                        exec_record["error"] = result
-                        exec_record["success"] = False
-                        state["error_count"] = state.get("error_count", 0) + 1
-                        
-                        tool_messages.append({
-                            "role": "tool",
-                            "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
-                            "tool_call_id": tool_id,
-                            "name": f"user_{tool_name}"  # Prefix to distinguish user tools
-                        })
-                        continue  # Skip the success handling
-                        
-                    # Handle successful execution
-                        # Successful execution
-                        exec_record["result"] = result
-                        exec_record["success"] = True
-                        
-                        # Sync user's environment state
-                        if hasattr(tau2_env.user_tools, 'db'):
-                            state["env_db"]["user_db"] = tau2_env.user_tools.db.model_dump()
-                        if hasattr(tau2_env, 'sync_tools'):
-                            tau2_env.sync_tools()
-                        
-                        # Create tool message - use tau2's to_json_str method for consistency
-                        content = tau2_env.to_json_str(result)
-                        tool_messages.append({
-                            "role": "tool", 
-                            "content": content,
-                            "tool_call_id": tool_id,
-                            "name": f"user_{tool_name}"  # Prefix to distinguish user tools
-                        })
-                else:
-                    exec_record["error"] = f"User tool {tool_name} not found"
+                result = tau2_env.make_tool_call(
+                    tool_name=tool_name,
+                    requestor="user",
+                    **tool_args
+                )
+                
+                # Check if the result is an error string from tau2
+                if isinstance(result, str) and result.startswith("Error:"):
+                    # This is an error from tau2, format it properly
+                    exec_record["error"] = result
                     exec_record["success"] = False
+                    state["error_count"] = state.get("error_count", 0) + 1
                     
                     tool_messages.append({
                         "role": "tool",
-                        "content": f"Error executing {tool_name}: User tool not found", 
+                        "content": f"Error executing {tool_name}: {result[7:].strip()}",  # Remove "Error: " prefix
                         "tool_call_id": tool_id,
-                        "name": f"user_{tool_name}"
+                        "name": f"user_{tool_name}"  # Prefix to distinguish user tools
                     })
+                    continue  # Skip the success handling
+                    
+                # Successful execution
+                exec_record["result"] = result
+                exec_record["success"] = True
+                
+                # Sync tools after successful execution
+                tau2_env.sync_tools()
+                
+                # Update database state after sync
+                if hasattr(tau2_env.user_tools, 'db'):
+                    state["env_db"]["user_db"] = tau2_env.user_tools.db.model_dump()
+                
+                # Create tool message - use tau2's to_json_str method for consistency
+                content = tau2_env.to_json_str(result)
+                tool_messages.append({
+                    "role": "tool", 
+                    "content": content,
+                    "tool_call_id": tool_id,
+                    "name": f"user_{tool_name}"  # Prefix to distinguish user tools
+                })
                     
             except Exception as e:
                 # Format error to match tau2's expected format
@@ -600,47 +590,16 @@ class Tau2BenchEnv(MultiTurnEnv):
             }
             
     def _check_task_completion(self, state: vf.State) -> bool:
-        """Check if task goals are achieved using environment state comparison."""
+        """Check if task goals are achieved using tau2's environment state comparison."""
         task_id = state.get("task_id")
         task = self.task_lookup.get(task_id)
         
         if not task or not hasattr(task, 'evaluation_criteria') or not task.evaluation_criteria:
             return False
             
-        # First try environment hash comparison (most accurate)
-        tau2_env = state.get("tau2_env")
-        if tau2_env and hasattr(tau2_env, 'get_db_hash'):
-            try:
-                # Get current environment state hash
-                current_hash = tau2_env.get_db_hash()
-                
-                # Compare with expected state
-                # Note: This is simplified - the original creates a golden environment
-                # and compares hashes after applying expected actions
-                if hasattr(task.evaluation_criteria, 'expected_hash'):
-                    return current_hash == task.evaluation_criteria.expected_hash
-            except Exception:
-                pass  # Fall back to other checks
-                
-        # Fall back to checking goals if defined
-        if hasattr(task, 'expected_state') and task.expected_state:
-            expected_state = task.expected_state.model_dump()
-            goals = expected_state.get("goals", [])
-            
-            if goals:
-                achieved = sum(1 for goal in goals if self._check_single_goal(goal, state))
-                return achieved == len(goals)
-                
-        # Check if required actions were performed
-        if hasattr(task.evaluation_criteria, 'actions') and task.evaluation_criteria.actions:
-            required_actions = {(action.name, action.requestor) for action in task.evaluation_criteria.actions}
-            performed_actions = {
-                (exec["tool"], exec.get("role", "agent")) 
-                for exec in state.get("tool_executions", []) 
-                if exec.get("success", False)
-            }
-            return required_actions.issubset(performed_actions)
-            
+        # For now, don't auto-complete based on state checking
+        # Let the evaluation handle the final assessment
+        # This prevents premature termination
         return False
         
     def _check_single_goal(self, goal: Dict, state: vf.State) -> bool:
@@ -1167,6 +1126,7 @@ def load_environment(
     seed: int = 42,
     domain: str = "retail",
     use_cache: bool = True,
+    solo_mode: bool = False,
     **kwargs
 ) -> vf.MultiTurnEnv:
     """Load tau2-bench environment using tau2's native functions."""
@@ -1175,6 +1135,10 @@ def load_environment(
     
     # Ensure data is set up
     setup_tau2_data()
+    
+    # Use domain from dataset_config if not explicitly provided
+    if dataset_config and domain == "retail":
+        domain = dataset_config
     
     # Create dataset using tau2's native functions
     full_dataset = create_tau2_dataset(domain)
@@ -1187,7 +1151,7 @@ def load_environment(
         tau2_env = get_airline_env()
         tau2_tasks = get_airline_tasks()
     elif domain == "telecom":
-        tau2_env = get_telecom_env(solo_mode=False)
+        tau2_env = get_telecom_env(solo_mode=solo_mode)
         tau2_tasks = get_telecom_tasks()
     else:
         raise ValueError(f"Unknown domain: {domain}")
@@ -1210,6 +1174,7 @@ def load_environment(
         tau2_env=tau2_env,
         tau2_tasks=tau2_tasks,
         domain=domain,
+        solo_mode=solo_mode,
         **kwargs
     )
     
