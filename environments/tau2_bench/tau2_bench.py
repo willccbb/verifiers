@@ -27,13 +27,10 @@ try:
         AssistantMessage, UserMessage, ToolMessage, Message as Tau2Message, ToolCall
     )
     from tau2.user.user_simulator import UserSimulator
-    from tau2.agent.llm_agent import LLMAgent
     from tau2.utils.utils import DATA_DIR
     # Import the evaluators
     from tau2.evaluator.evaluator import evaluate_simulation, EvaluationType
     from tau2.data_model.simulation import SimulationRun, TerminationReason
-    from tau2.data_model.tasks import RewardType
-    from tau2.environment.environment import Environment as Tau2Environment
     TAU2_AVAILABLE = True
 except ImportError as e:
     print(f"DEBUG: Import error: {e}")
@@ -75,7 +72,7 @@ def setup_tau2_data():
             shutil.copytree(src_data, DATA_DIR, dirs_exist_ok=True)
             print(f"✅ tau2-bench data successfully set up in {DATA_DIR}")
         else:
-            print(f"⚠️  Warning: Could not find data directory in tau2-bench repository")
+            print("⚠️  Warning: Could not find data directory in tau2-bench repository")
             
     except subprocess.CalledProcessError as e:
         print(f"⚠️  Warning: Failed to download tau2-bench data: {e}")
@@ -366,7 +363,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
                             pass
-                    except:
+                    except Exception:
                         pass
             
             # Use tau2's get_response method directly
@@ -380,7 +377,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
                             pass
-                    except:
+                    except Exception:
                         pass
             
             # Debug: Log the response
@@ -398,7 +395,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
                             pass
-                    except:
+                    except Exception:
                         pass
             
             # Get database hashes after execution
@@ -521,7 +518,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         # Get last message to respond to
         if not messages:
             return None
-        last_msg = messages[-1]
         
         # Convert to tau2 format
         tau2_messages = self._convert_to_tau2_messages(messages)
@@ -580,7 +576,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                 
             return msg
             
-        except Exception as e:
+        except Exception:
             # Fallback response
             state["user_errors"] = state.get("user_errors", 0) + 1
             return {
@@ -659,7 +655,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                             # Parse arguments if they're a string
                             try:
                                 args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                            except:
+                            except (json.JSONDecodeError, TypeError):
                                 args_dict = {}
                                 
                             tau2_tool_calls.append({
@@ -847,7 +843,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
         Evaluate task using tau2-bench's official evaluation logic.
         Returns 1.0 for pass, 0.0 for fail (no partial credit).
         """
-        print(f"\n!!! EVALUATE_TAU2_TASK CALLED !!!")
+        print("\n!!! EVALUATE_TAU2_TASK CALLED !!!")
         print(f"State keys: {list(state.keys()) if state else 'No state'}")
         print(f"Info keys: {list(info.keys()) if info else 'No info'}")
         
@@ -905,10 +901,9 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 
             # Build list of all messages for simulation
             tau2_messages = []
-            tool_message_ids = []
             
             # Debug: log what we're building
-            print(f"\n!!! Building simulation messages !!!")
+            print("!!! Building simulation messages !!!")
             print(f"Prompt type: {type(prompt)}, length: {len(prompt) if isinstance(prompt, list) else 'N/A'}")
             print(f"Completion type: {type(completion)}, length: {len(completion) if isinstance(completion, list) else 'N/A'}")
             
@@ -1056,12 +1051,12 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                             for tc in msg.tool_calls:
                                 actual_calls.append((tc.requestor, tc.name, tc.arguments))
                     
-                    print(f"\nACTUAL TOOL CALLS:")
+                    print("\nACTUAL TOOL CALLS:")
                     for i, (requestor, name, args) in enumerate(actual_calls):
                         print(f"  {i+1}. {requestor}: {name}({args})")
                     
                     # Detailed comparison
-                    print(f"\nDETAILED ACTION MATCHING:")
+                    print("\nDETAILED ACTION MATCHING:")
                     matched_indices = set()
                     for exp_action in task.expected_state.actions:
                         print(f"\nLooking for: {exp_action.name} by {exp_action.requestor}")
@@ -1079,9 +1074,9 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                                     print(f"  ✗ Args mismatch with {act_name}: expected {exp_action.arguments}, got {act_args}")
                         
                         if not found:
-                            print(f"  ✗ NOT FOUND")
+                            print("  ✗ NOT FOUND")
             
-            print(f"\nRunning tau2 evaluation...")
+            print("\nRunning tau2 evaluation...")
             simulation = SimulationRun(
                 id=f"verifiers_eval_{task_id}_{datetime.now().isoformat()}",
                 agent_id="verifiers_agent",
@@ -1105,9 +1100,9 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 expected_actions = task.evaluation_criteria.actions
                 
             # Print detailed comparison
-            print(f"\n================================================================================")
+            print("\n================================================================================")
             print(f"EVALUATION DEBUG for task {task_id}")
-            print(f"================================================================================")
+            print("================================================================================")
             
             print(f"\nEXPECTED ACTIONS ({len(expected_actions)}):")
             for i, action in enumerate(expected_actions, 1):
@@ -1115,14 +1110,14 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 if action.compare_args:
                     print(f"     Compare only: {action.compare_args}")
                     
-            print(f"\nACTUAL TOOL CALLS:")
+            print("\nACTUAL TOOL CALLS:")
             actual_count = 0
             for exec_record in state.get("tool_executions", []):
                 actual_count += 1
                 print(f"  {actual_count}. {exec_record.get('requestor', 'unknown')}: {exec_record['tool']}({exec_record['arguments']})")
                 
             # Try to match each expected action
-            print(f"\nDETAILED ACTION MATCHING:")
+            print("\nDETAILED ACTION MATCHING:")
             for action in expected_actions:
                 print(f"\nLooking for: {action.name} by {action.requestor}")
                 print(f"  Expected args: {action.arguments}")
@@ -1153,10 +1148,10 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                                 print(f"  ✗ Args mismatch with {exec_record['tool']}: expected {action.arguments}, got {exec_record['arguments']}")
                                 
                 if not found:
-                    print(f"  ✗ NOT FOUND")
+                    print("  ✗ NOT FOUND")
                     
             # Also run the tau2 evaluation
-            print(f"\nRunning tau2 evaluation...")
+            print("\nRunning tau2 evaluation...")
             
             # Use tau2-bench's official evaluation
             reward_info = evaluate_simulation(
@@ -1168,14 +1163,14 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             )
             
             # Log evaluation results
-            print(f"\nEVALUATION RESULTS:")
+            print("\nEVALUATION RESULTS:")
             print(f"  Final reward: {reward_info.reward}")
             if hasattr(reward_info, 'reward_breakdown') and reward_info.reward_breakdown:
                 print(f"  Reward breakdown: {reward_info.reward_breakdown}")
             
             # Log specific check results
             if hasattr(reward_info, 'action_checks') and reward_info.action_checks:
-                print(f"\n  Action checks:")
+                print("\n  Action checks:")
                 for check in reward_info.action_checks:
                     status = "✓" if check.action_match else "✗"
                     print(f"    {status} {check.action.name} - Match: {check.action_match}")
@@ -1264,15 +1259,12 @@ def load_environment(
     # Create dataset using tau2's native functions
     full_dataset = create_tau2_dataset(domain)
     
-    # Get environment and tasks for the domain
+    # Get tasks using tau2's native functions
     if domain == "retail":
-        tau2_env = get_retail_env()
         tau2_tasks = get_retail_tasks()
     elif domain == "airline":
-        tau2_env = get_airline_env()
         tau2_tasks = get_airline_tasks()
     elif domain == "telecom":
-        tau2_env = get_telecom_env(solo_mode=solo_mode)
         tau2_tasks = get_telecom_tasks()
     else:
         raise ValueError(f"Unknown domain: {domain}")
