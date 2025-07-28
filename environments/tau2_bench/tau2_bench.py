@@ -700,13 +700,34 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
         initial_messages = []
         if hasattr(task, 'initial_state') and task.initial_state:
             if hasattr(task.initial_state, 'message_history') and task.initial_state.message_history:
-                # Convert tau2 messages to verifiers format
+                # Convert tau2 messages to verifiers format - preserve full structure
                 for msg in task.initial_state.message_history:
                     if hasattr(msg, 'role') and hasattr(msg, 'content'):
-                        initial_messages.append({
+                        verifiers_msg = {
                             "role": msg.role,
                             "content": msg.content
-                        })
+                        }
+                        
+                        # Preserve tool_calls if present (for assistant messages)
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            verifiers_msg["tool_calls"] = []
+                            for tc in msg.tool_calls:
+                                verifiers_msg["tool_calls"].append({
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": json.dumps(tc.arguments)
+                                    }
+                                })
+                        
+                        # Preserve tool_call_id if present (for tool messages)
+                        if msg.role == "tool" and hasattr(msg, 'id'):
+                            verifiers_msg["tool_call_id"] = msg.id
+                            if hasattr(msg, 'name'):
+                                verifiers_msg["name"] = msg.name
+                            
+                        initial_messages.append(verifiers_msg)
         
         # Always start with the exact system prompt from original
         initial_messages = [{"role": "system", "content": system_prompt}] + initial_messages
