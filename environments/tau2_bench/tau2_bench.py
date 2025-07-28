@@ -98,7 +98,6 @@ class Tau2BenchEnv(MultiTurnEnv):
                  domain: str,
                  tau2_tasks: List[Any],
                  user_llm: str = "gpt-4.1",
-                 max_turns: int = 30,
                  max_steps: int = 200,  # tau2's default
                  max_errors: int = 10,  # tau2's default  
                  solo_mode: bool = False,
@@ -108,7 +107,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         self.domain = domain
         self.tau2_tasks = tau2_tasks
         self.user_llm = user_llm
-        self.max_turns = max_turns
         self.max_steps = max_steps
         self.max_errors = max_errors
         
@@ -1118,7 +1116,6 @@ def load_environment(
         domain=domain,
         tau2_tasks=tau2_tasks,
         user_llm=kwargs.get("user_llm", "gpt-4.1-mini"),
-        max_turns=kwargs.get("max_turns", 30),
         max_steps=kwargs.get("max_steps", 200),
         max_errors=kwargs.get("max_errors", 10),
         solo_mode=solo_mode,
