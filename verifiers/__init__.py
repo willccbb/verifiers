@@ -62,21 +62,6 @@ try:
 except ImportError:
     _HAS_TRL = False
 
-# Conditional import for deployment module (requires yaml)
-try:
-    import yaml  # type: ignore # noqa: F401
-
-    from .deployment import (  # noqa: F401
-        DeploymentConfig,
-        KubernetesDeployment,
-        LocalCluster,
-        RemoteCluster,
-    )
-
-    _HAS_DEPLOYMENT = True
-except ImportError:
-    _HAS_DEPLOYMENT = False
-
 
 # Setup default logging configuration
 def setup_logging(
@@ -150,15 +135,5 @@ if _HAS_RICH:
     __all__.extend(
         [
             "print_prompt_completions_sample",
-        ]
-    )
-
-if _HAS_DEPLOYMENT:
-    __all__.extend(
-        [
-            "KubernetesDeployment",
-            "LocalCluster",
-            "RemoteCluster",
-            "DeploymentConfig",
         ]
     )

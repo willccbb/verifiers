@@ -8,9 +8,14 @@ dependencies = [
     "requests>=2.28.0",
 ]
 
+[project.optional-dependencies]
+kubernetes = [
+    "pyyaml>=6.0.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-include = ["livecodebench.py"]
+include = ["livecodebench.py", "kubernetes_sandbox.py"]

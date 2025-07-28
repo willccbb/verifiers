@@ -2,12 +2,14 @@
 LiveCodeBench Real Dataset Implementation for Verifiers
 
 This implementation uses the ACTUAL LiveCodeBench dataset from HuggingFace
-with proper Docker-based sandboxing for secure code execution.
+with proper sandboxing for secure code execution. Supports both Docker
+and Kubernetes backends.
 """
 
 import atexit
 import base64
 import json
+import os
 import pickle
 import re
 import signal
@@ -17,19 +19,60 @@ import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Empty, Queue
 from threading import Lock, Thread
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import docker  # type: ignore
 from datasets import Dataset, load_dataset
 
 import verifiers as vf
 
+# Conditional imports for Docker/Kubernetes backends
+try:
+    import docker  # type: ignore
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_AVAILABLE = False
+
+try:
+    from .kubernetes_sandbox import KubernetesSandbox, KubernetesConfig
+    KUBERNETES_AVAILABLE = True
+except ImportError:
+    KUBERNETES_AVAILABLE = False
+
 
 class SecureSandboxExecutor:
-    """Secure Docker-based code execution with container pooling"""
+    """Secure code execution with container/pod pooling (Docker or Kubernetes)"""
 
-    def __init__(self, pool_size: int = 20):
-        """Initialize Docker-only sandbox with container pool"""
+    def __init__(self, pool_size: int = 20, backend: str = "docker"):
+        """
+        Initialize sandbox with specified backend
+        
+        Args:
+            pool_size: Number of containers/pods to pre-allocate
+            backend: "docker" or "kubernetes"
+        """
+        self.backend = backend.lower()
+        self.pool_size = pool_size
+        
+        if self.backend == "docker":
+            self._init_docker_backend()
+        elif self.backend == "kubernetes":
+            self._init_kubernetes_backend()
+        else:
+            raise ValueError(f"Unknown backend: {backend}. Use 'docker' or 'kubernetes'")
+        
+        # Register cleanup handlers
+        self._register_cleanup_handlers()
+        
+        print(f"{self.backend.capitalize()} sandbox initialized successfully")
+    
+    def _init_docker_backend(self):
+        """Initialize Docker backend"""
+        if not DOCKER_AVAILABLE:
+            raise RuntimeError(
+                "Docker backend requested but docker package not available.\n"
+                "Install with: pip install docker"
+            )
+            
         try:
             self.docker_client = docker.from_env()
 
@@ -47,12 +90,7 @@ class SecureSandboxExecutor:
                 self.docker_client.images.pull("python:3.11-slim")
 
             # Initialize container pool
-            self.container_pool = ContainerPool(self.docker_client, pool_size=pool_size)
-
-            # Register cleanup handlers
-            self._register_cleanup_handlers()
-
-            print("Docker sandbox with container pool initialized successfully")
+            self.container_pool = ContainerPool(self.docker_client, pool_size=self.pool_size)
 
         except Exception as e:
             raise RuntimeError(
@@ -62,9 +100,36 @@ class SecureSandboxExecutor:
                 "  - Start Docker daemon: sudo systemctl start docker\n"
                 "  - Add user to docker group: sudo usermod -aG docker $USER"
             )
+    
+    def _init_kubernetes_backend(self):
+        """Initialize Kubernetes backend"""
+        if not KUBERNETES_AVAILABLE:
+            raise RuntimeError(
+                "Kubernetes backend requested but kubernetes_sandbox not available.\n"
+                "Install PyYAML with: pip install pyyaml"
+            )
+        
+        # Check if we should use local or remote cluster
+        use_local = os.environ.get("LIVECODEBENCH_K8S_LOCAL", "true").lower() == "true"
+        
+        config = KubernetesConfig(
+            use_local_cluster=use_local,
+            local_provider=os.environ.get("LIVECODEBENCH_K8S_PROVIDER", "kind"),
+            cluster_name="livecodebench",
+            kubeconfig_path=os.environ.get("KUBECONFIG"),
+            context=os.environ.get("LIVECODEBENCH_K8S_CONTEXT"),
+            namespace="livecodebench",
+            pool_size=self.pool_size,
+            reuse_pods=True
+        )
+        
+        self.kubernetes_sandbox = KubernetesSandbox(config)
 
     def _cleanup_orphaned_containers(self):
-        """Clean up any containers from previous runs"""
+        """Clean up any containers from previous runs (Docker only)"""
+        if self.backend != "docker":
+            return
+            
         try:
             # Find all containers with our label
             containers = self.docker_client.containers.list(
@@ -99,24 +164,30 @@ class SecureSandboxExecutor:
 
     def cleanup(self):
         """Explicitly clean up all resources"""
-        print("Cleaning up Docker resources...")
+        print(f"Cleaning up {self.backend} resources...")
 
-        # Shutdown container pool
-        if hasattr(self, "container_pool"):
-            self.container_pool.shutdown()
+        if self.backend == "docker":
+            # Shutdown container pool
+            if hasattr(self, "container_pool"):
+                self.container_pool.shutdown()
 
-        # Run Docker system prune to clean up unused resources
-        try:
-            # Remove unused containers, networks, and build cache
-            self.docker_client.containers.prune(filters={"label": "livecodebench=true"})
+            # Run Docker system prune to clean up unused resources
+            try:
+                # Remove unused containers, networks, and build cache
+                self.docker_client.containers.prune(filters={"label": "livecodebench=true"})
 
-            # Optional: More aggressive cleanup (commented out by default)
-            # self.docker_client.images.prune()
-            # self.docker_client.volumes.prune()
-            # self.docker_client.networks.prune()
+                # Optional: More aggressive cleanup (commented out by default)
+                # self.docker_client.images.prune()
+                # self.docker_client.volumes.prune()
+                # self.docker_client.networks.prune()
 
-        except Exception as e:
-            print(f"Warning: Failed to prune Docker resources: {e}")
+            except Exception as e:
+                print(f"Warning: Failed to prune Docker resources: {e}")
+                
+        elif self.backend == "kubernetes":
+            # Cleanup Kubernetes resources
+            if hasattr(self, "kubernetes_sandbox"):
+                self.kubernetes_sandbox.cleanup()
 
     def __del__(self):
         """Cleanup on object destruction"""
@@ -131,10 +202,22 @@ class SecureSandboxExecutor:
         self.cleanup()
         return False
 
+    def execute(self, code: str, test_input: str = "", timeout: int = 10) -> Tuple[str, str, int]:
+        """Execute code in sandbox (Docker container or Kubernetes pod)"""
+        if self.backend == "kubernetes":
+            return self.kubernetes_sandbox.execute(code, test_input, timeout)
+        else:
+            # For Docker, get a container from pool and execute
+            container = self.container_pool.get_container()
+            try:
+                return self.execute_in_container(container, code, test_input, timeout)
+            finally:
+                self.container_pool.return_container(container)
+    
     def execute_in_container(
         self, container, code: str, test_input: str = "", timeout: int = 10
     ) -> Tuple[str, str, int]:
-        """Execute code in a pre-allocated container"""
+        """Execute code in a pre-allocated Docker container"""
 
         # Create exec command with code and input
         exec_command = f"""
@@ -350,7 +433,8 @@ def load_environment(
     dataset_name: str = "livecodebench/code_generation_lite",
     version_tag: str = "release_v5",
     num_examples: int = -1,  # -1 means use all examples
-    pool_size: int = 20,  # Configurable container pool size
+    pool_size: int = 20,  # Configurable container/pod pool size
+    backend: str = "docker",  # "docker" or "kubernetes"
 ) -> vf.SingleTurnEnv:
     """Load LiveCodeBench environment with automatic cleanup
 
@@ -358,7 +442,8 @@ def load_environment(
         dataset_name: Name of the dataset to load
         version_tag: Version of the dataset to use
         num_examples: Number of examples to load (-1 for all)
-        pool_size: Number of pre-allocated Docker containers
+        pool_size: Number of pre-allocated containers/pods
+        backend: Execution backend - "docker" or "kubernetes"
 
     Returns:
         SingleTurnEnv: Configured environment with automatic cleanup
@@ -367,7 +452,7 @@ def load_environment(
     dataset = load_livecodebench_dataset(dataset_name, version_tag, num_examples)
 
     # Initialize sandbox executor
-    sandbox = SecureSandboxExecutor(pool_size=pool_size)
+    sandbox = SecureSandboxExecutor(pool_size=pool_size, backend=backend)
 
     # Convert dataset to verifiers format
     converted_dataset = []
@@ -489,20 +574,14 @@ def load_environment(
         test_cases = info["test_cases"]
 
         def run_test(test):
-            container = sandbox.container_pool.get_container()
-            try:
-                input_data = test.get("input", "")
-                stdout, stderr, exit_code = sandbox.execute_in_container(
-                    container, code, input_data
-                )
-                return {
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "exit_code": exit_code,
-                    "expected": test.get("output", "").strip(),
-                }
-            finally:
-                sandbox.container_pool.return_container(container)
+            input_data = test.get("input", "")
+            stdout, stderr, exit_code = sandbox.execute(code, input_data)
+            return {
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "expected": test.get("output", "").strip(),
+            }
 
         # Run tests in parallel with thread pool
         results = []
