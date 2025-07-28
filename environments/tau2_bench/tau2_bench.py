@@ -266,13 +266,13 @@ class Tau2BenchEnv(MultiTurnEnv):
                     message_history=message_history
                 )
                 
-                # Store the database state for tracking
-                if initialization_data:
-                    state["env_db"] = initialization_data.model_dump() if hasattr(initialization_data, 'model_dump') else {}
-                else:
-                    state["env_db"] = {}
+                # Store initial database hashes
+                state["initial_db_hash"] = state["tau2_env"].get_db_hash()
+                state["initial_user_db_hash"] = state["tau2_env"].get_user_db_hash()
             else:
-                state["env_db"] = {}
+                # No initial state - store empty hashes
+                state["initial_db_hash"] = state["tau2_env"].get_db_hash()
+                state["initial_user_db_hash"] = state["tau2_env"].get_user_db_hash()
                 
         if "tool_executions" not in state:
             state["tool_executions"] = []
@@ -341,9 +341,15 @@ class Tau2BenchEnv(MultiTurnEnv):
                 requestor="assistant"
             )
             
-            # Use tau2's get_response method directly
+            # Get database hash before execution
             tau2_env = state["tau2_env"]
+            db_hash_before = tau2_env.get_db_hash()
+            
+            # Use tau2's get_response method directly
             tool_response = tau2_env.get_response(tau2_tool_call)
+            
+            # Get database hash after execution
+            db_hash_after = tau2_env.get_db_hash()
             
             # Track execution for evaluation
             exec_record = {
@@ -353,7 +359,10 @@ class Tau2BenchEnv(MultiTurnEnv):
                 "timestamp": datetime.now().isoformat(),
                 "requestor": "assistant",
                 "result": tool_response.content,
-                "error": tool_response.error
+                "error": tool_response.error,
+                "db_hash_before": db_hash_before,
+                "db_hash_after": db_hash_after,
+                "db_changed": db_hash_before != db_hash_after
             }
             state["tool_executions"].append(exec_record)
             
@@ -361,9 +370,8 @@ class Tau2BenchEnv(MultiTurnEnv):
             if tool_response.error:
                 state["error_count"] = state.get("error_count", 0) + 1
             
-            # Update database state
-            if hasattr(tau2_env.tools, 'db'):
-                state["env_db"]["agent_db"] = tau2_env.tools.db.model_dump()
+            # Store current database hash
+            state["current_db_hash"] = db_hash_after
             
             # Convert tau2 response to verifiers format
             tool_messages.append({
@@ -407,9 +415,15 @@ class Tau2BenchEnv(MultiTurnEnv):
                 requestor="user"
             )
             
-            # Use tau2's get_response method directly
+            # Get database hashes before execution
             tau2_env = state["tau2_env"]
+            user_db_hash_before = tau2_env.get_user_db_hash()
+            
+            # Use tau2's get_response method directly
             tool_response = tau2_env.get_response(tau2_tool_call)
+            
+            # Get database hashes after execution
+            user_db_hash_after = tau2_env.get_user_db_hash()
             
             # Track execution for evaluation
             exec_record = {
@@ -419,7 +433,10 @@ class Tau2BenchEnv(MultiTurnEnv):
                 "timestamp": datetime.now().isoformat(),
                 "requestor": "user",
                 "result": tool_response.content,
-                "error": tool_response.error
+                "error": tool_response.error,
+                "user_db_hash_before": user_db_hash_before,
+                "user_db_hash_after": user_db_hash_after,
+                "user_db_changed": user_db_hash_before != user_db_hash_after
             }
             state["tool_executions"].append(exec_record)
             
@@ -427,9 +444,8 @@ class Tau2BenchEnv(MultiTurnEnv):
             if tool_response.error:
                 state["error_count"] = state.get("error_count", 0) + 1
             
-            # Update database state
-            if hasattr(tau2_env.user_tools, 'db'):
-                state["env_db"]["user_db"] = tau2_env.user_tools.db.model_dump()
+            # Store current user database hash
+            state["current_user_db_hash"] = user_db_hash_after
             
             # Convert tau2 response to verifiers format
             tool_messages.append({
@@ -664,9 +680,8 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
     else:
         raise ValueError(f"Unknown domain: {domain}")
     
-    # Get tools and prompts directly from tau2
-    tools_dict = tau2_env.tools.get_tools() if hasattr(tau2_env.tools, 'get_tools') else {}
-    tools = list(tools_dict.values()) if tools_dict else []
+    # Get tools using tau2's environment method
+    tools = tau2_env.get_tools()
     
     # Get policy from environment
     policy = tau2_env.policy
