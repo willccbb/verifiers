@@ -271,18 +271,19 @@ class Tau2BenchEnv(MultiTurnEnv):
             task = self.task_lookup.get(task_id) if task_id else None
             
             if task and hasattr(task, 'initial_state') and task.initial_state:
-                # Use tau2's set_state to initialize the environment
+                # Initialize the environment with data and actions only
+                # Do NOT replay message history - tau2's evaluator will do that
                 initialization_data = task.initial_state.initialization_data if hasattr(task.initial_state, 'initialization_data') else None
                 initialization_actions = task.initial_state.initialization_actions if hasattr(task.initial_state, 'initialization_actions') else None
-                message_history = task.initial_state.message_history if hasattr(task.initial_state, 'message_history') else []
                 
+                # Use set_state but with empty message history
                 state["tau2_env"].set_state(
                     initialization_data=initialization_data,
                     initialization_actions=initialization_actions,
-                    message_history=message_history
+                    message_history=[]  # Empty - don't replay past messages
                 )
                 
-                # Store initial database hashes
+                # Store initial database hashes after initialization
                 state["initial_db_hash"] = state["tau2_env"].get_db_hash()
                 state["initial_user_db_hash"] = state["tau2_env"].get_user_db_hash()
             else:
