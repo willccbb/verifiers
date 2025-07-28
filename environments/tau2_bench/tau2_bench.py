@@ -277,13 +277,33 @@ class Tau2BenchEnv(MultiTurnEnv):
                     print(f"\nDEBUG: Task {task_id} initialization:")
                     print(f"  - initialization_data: {initialization_data is not None}")
                     print(f"  - initialization_actions: {initialization_actions is not None and len(initialization_actions) if initialization_actions else 0}")
+                    
+                    # Log the actions
+                    if initialization_actions:
+                        print(f"  - Initialization actions:")
+                        for action in initialization_actions:
+                            print(f"    -> {action}")
+                    
+                    # Check initial message history
+                    if hasattr(task.initial_state, 'message_history') and task.initial_state.message_history:
+                        print(f"  - Initial message history: {len(task.initial_state.message_history)} messages")
+                        for i, msg in enumerate(task.initial_state.message_history):
+                            print(f"    Message {i}: {msg.role}")
+                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tc in msg.tool_calls:
+                                    print(f"      -> tool call: {tc.name}({tc.arguments.get('order_id', 'N/A') if isinstance(tc.arguments, dict) else 'N/A'})")
+                    
                     # Try to check order status
                     if hasattr(state["tau2_env"], 'tools') and hasattr(state["tau2_env"].tools, 'db'):
                         try:
                             # Check if order #W2378156 exists
                             order = state["tau2_env"].tools.db.orders.get("#W2378156")
                             if order:
-                                print(f"  - Order #W2378156 status after init: {order.status}")
+                                print(f"  - Order #W2378156 initial state:")
+                                print(f"    - status: {order.status}")
+                                print(f"    - has fulfillments: {bool(order.fulfillments)}")
+                                print(f"    - exchange_items: {order.exchange_items}")
+                                print(f"    - return_items: {order.return_items}")
                             else:
                                 print(f"  - Order #W2378156 not found after init")
                         except:
