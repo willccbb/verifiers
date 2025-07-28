@@ -778,6 +778,14 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
             if not isinstance(scenario, str) and scenario is not None:
                 scenario = str(scenario)
         
+        # If no message history but we have a scenario, add it as a user message
+        # This ensures the agent sees the user's request with order IDs etc.
+        if len(initial_messages) == 1 and scenario:  # Only system message
+            initial_messages.append({
+                "role": "user",
+                "content": scenario
+            })
+        
         # Create dataset row
         row = {
             "prompt": initial_messages,
@@ -955,11 +963,18 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             # Validate tool call/message pairing
             tool_call_count = 0
             tool_msg_count = 0
-            for msg in tau2_messages:
+            print("\n!!! Message sequence !!!")
+            for j, msg in enumerate(tau2_messages):
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     tool_call_count += len(msg.tool_calls)
+                    print(f"  {j}: {msg.role} with {len(msg.tool_calls)} tool calls")
+                    for tc in msg.tool_calls:
+                        print(f"      -> {tc.name}(id={tc.id})")
                 elif isinstance(msg, ToolMessage):
                     tool_msg_count += 1
+                    print(f"  {j}: tool response (id={msg.id}, error={msg.error})")
+                else:
+                    print(f"  {j}: {msg.role}")
             
             if tool_call_count != tool_msg_count:
                 print(f"WARNING: Tool call/message mismatch! {tool_call_count} calls vs {tool_msg_count} messages")
