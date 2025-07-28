@@ -529,26 +529,7 @@ class Tau2BenchEnv(MultiTurnEnv):
             # Update user state
             state["tau2_user_state"] = new_user_state
                 
-            # Handle special responses
-            if user_msg.content == STOP:
-                # No need to set termination_reason here - is_completed will handle it
-                return {
-                    "role": "user",
-                    "content": "I'd like to stop here. Thank you for your help."
-                }
-            elif user_msg.content == TRANSFER:
-                # No need to set termination_reason here - is_completed will handle it
-                return {
-                    "role": "user",
-                    "content": "I'd like to speak to a human agent please."
-                }
-            elif user_msg.content == OUT_OF_SCOPE:
-                return {
-                    "role": "user",
-                    "content": "I'm not sure that's related to what I need help with."
-                }
-                
-            # Convert to verifiers format
+            # Convert to verifiers format - no special handling needed
             msg = {
                 "role": "user",
                 "content": user_msg.content if user_msg.content else ""
@@ -799,7 +780,7 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
 def create_tau2_rubric(domain: str) -> vf.Rubric:
     """Create evaluation rubric that uses tau2-bench's official evaluation logic."""
     
-    def evaluate_tau2_task(completion, info, state, **kwargs) -> float:
+    def evaluate_tau2_task(prompt, completion, info, state, **kwargs) -> float:
         """
         Evaluate task using tau2-bench's official evaluation logic.
         Returns 1.0 for pass, 0.0 for fail (no partial credit).
@@ -861,9 +842,8 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             tool_message_ids = []
             
             # First, include all messages from the prompt (initial message history)
-            if isinstance(info, dict) and "prompt" in info:
-                prompt_messages = info["prompt"]
-                for msg in prompt_messages:
+            if isinstance(prompt, list):
+                for msg in prompt:
                     # Skip system messages as they're not part of tau2's message history
                     if msg.get("role") == "system":
                         continue
