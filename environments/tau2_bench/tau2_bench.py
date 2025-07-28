@@ -183,41 +183,38 @@ class Tau2BenchEnv(MultiTurnEnv):
         return False
         
     def env_response(self, messages: vf.Messages, state: vf.State, **kwargs) -> Tuple[vf.Messages, vf.State]:
-        """
-        Handle environment response including tool execution and user simulation.
-        All non-agent logic happens here.
-        """
-        if not messages:
-            return [], state
-            
-        last_msg = messages[-1]
-        response_messages = []
-        
-        # Initialize state components if needed
+        """Generate environment response based on tau2 logic."""
         self._init_state(state)
         
-        # Handle assistant messages (may contain tool calls)
+        response_messages = []
+        
+        # Get the last message to determine response
+        if not messages:
+            return response_messages, state
+            
+        last_msg = messages[-1]
+        
+        # Handle assistant messages
         if last_msg["role"] == "assistant":
             # Process any tool calls from the agent
             if "tool_calls" in last_msg and last_msg["tool_calls"]:
                 tool_results = self._execute_agent_tools(last_msg["tool_calls"], state)
                 response_messages.extend(tool_results)
-                # Return tool results only - let agent respond to them first
-                return response_messages, state
-                
-            # Generate user response only if no tool calls
-            # (or this will be called after agent responds to tool results)
-            user_response = self._generate_user_response(messages, state)
-            if user_response:
-                response_messages.append(user_response)
-                
-                # In telecom, user response might contain tool calls
-                if self.domain == "telecom" and "tool_calls" in user_response:
-                    user_tool_results = self._execute_user_tools(
-                        user_response["tool_calls"], 
-                        state
-                    )
-                    response_messages.extend(user_tool_results)
+                # After tool results, the verifiers framework will call the model again
+                # and then we'll generate user response in the next env_response call
+            else:
+                # No tool calls - generate user response
+                user_response = self._generate_user_response(messages, state)
+                if user_response:
+                    response_messages.append(user_response)
+                    
+                    # In telecom, user response might contain tool calls
+                    if self.domain == "telecom" and "tool_calls" in user_response:
+                        user_tool_results = self._execute_user_tools(
+                            user_response["tool_calls"], 
+                            state
+                        )
+                        response_messages.extend(user_tool_results)
                     
         # Update step count - count EVERY message like tau2 does
         state["step_count"] = state.get("step_count", 0) + len(response_messages)
@@ -274,43 +271,6 @@ class Tau2BenchEnv(MultiTurnEnv):
                     message_history=[]  # Empty - don't replay past messages
                 )
                 
-                # Debug: Log what we initialized
-                if task_id == 13:  # The failing task
-                    print(f"\nDEBUG: Task {task_id} initialization:")
-                    print(f"  - initialization_data: {initialization_data is not None}")
-                    print(f"  - initialization_actions: {initialization_actions is not None and len(initialization_actions) if initialization_actions else 0}")
-                    
-                    # Log the actions
-                    if initialization_actions:
-                        print(f"  - Initialization actions:")
-                        for action in initialization_actions:
-                            print(f"    -> {action}")
-                    
-                    # Check initial message history
-                    if hasattr(task.initial_state, 'message_history') and task.initial_state.message_history:
-                        print(f"  - Initial message history: {len(task.initial_state.message_history)} messages")
-                        for i, msg in enumerate(task.initial_state.message_history):
-                            print(f"    Message {i}: {msg.role}")
-                            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                for tc in msg.tool_calls:
-                                    print(f"      -> tool call: {tc.name}({tc.arguments.get('order_id', 'N/A') if isinstance(tc.arguments, dict) else 'N/A'})")
-                    
-                    # Try to check order status
-                    if hasattr(state["tau2_env"], 'tools') and hasattr(state["tau2_env"].tools, 'db'):
-                        try:
-                            # Check if order #W2378156 exists
-                            order = state["tau2_env"].tools.db.orders.get("#W2378156")
-                            if order:
-                                print(f"  - Order #W2378156 initial state:")
-                                print(f"    - status: {order.status}")
-                                print(f"    - has fulfillments: {bool(order.fulfillments)}")
-                                print(f"    - exchange_items: {order.exchange_items}")
-                                print(f"    - return_items: {order.return_items}")
-                            else:
-                                print(f"  - Order #W2378156 not found after init")
-                        except:
-                            pass
-                
                 # Store initial database hashes after initialization
                 state["initial_db_hash"] = state["tau2_env"].get_db_hash()
                 state["initial_user_db_hash"] = state["tau2_env"].get_user_db_hash()
@@ -357,7 +317,6 @@ class Tau2BenchEnv(MultiTurnEnv):
             
     def _execute_agent_tools(self, tool_calls: List[Any], state: vf.State) -> List[Dict]:
         """Execute agent tool calls and return tool messages."""
-        print(f"\nDEBUG: _execute_agent_tools called with {len(tool_calls)} tool calls")
         tool_messages = []
         
         for tool_call in tool_calls:
@@ -397,14 +356,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     try:
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
-                            print(f"DEBUG: Before {tool_name} - Order {order_id} status: {order.status}")
-                            # For exchange, check if it's the problematic order
-                            if order_id == "#W2378156" and tool_name == "exchange_delivered_order_items":
-                                print(f"DEBUG: Order #W2378156 details before exchange:")
-                                print(f"  - status: {order.status}")
-                                print(f"  - items: {len(order.items)}")
-                                print(f"  - exchange_items: {order.exchange_items}")
-                                print(f"  - return_items: {order.return_items}")
+                            pass
                     except:
                         pass
             
@@ -418,16 +370,16 @@ class Tau2BenchEnv(MultiTurnEnv):
                     try:
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
-                            print(f"DEBUG: After {tool_name} - Order {order_id} status: {order.status}, error: {tool_response.error}")
+                            pass
                     except:
                         pass
             
             # Debug: Log the response
             if tool_name == "modify_pending_order_items":
-                print(f"DEBUG: modify_pending_order_items response: error={tool_response.error}, content={tool_response.content[:200]}...")
+                pass
             
             if tool_response.error:
-                print(f"DEBUG: Tool {tool_name} returned error: {tool_response.content}")
+                pass
             
             # Debug: Check order status after execution
             if tool_name in ["return_delivered_order_items", "exchange_delivered_order_items"] and not tool_response.error:
@@ -436,7 +388,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                     try:
                         order = tau2_env.tools.db.orders.get(order_id)
                         if order:
-                            print(f"DEBUG: After {tool_name} - Order {order_id} status: {order.status}")
+                            pass
                     except:
                         pass
             
@@ -940,9 +892,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             else:
                 term_reason = TerminationReason.AGENT_STOP
                 
-            print(f"DEBUG: Termination reason = {term_reason}")
-                
-            # Build list of all messages for simulation
+                # Build list of all messages for simulation
             tau2_messages = []
             tool_message_ids = []
             
