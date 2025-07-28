@@ -140,44 +140,58 @@ class Tau2BenchEnv(MultiTurnEnv):
 
     def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         """Check if conversation should end based on tau2's termination criteria."""
+        # First check if we have pending tool calls that need responses
+        if messages:
+            last_msg = messages[-1]
+            # If the last message is an assistant message with tool calls, we need to wait for tool responses
+            if last_msg.get("role") == "assistant" and last_msg.get("tool_calls"):
+                # Mark that we have pending tool calls
+                state["has_pending_tool_calls"] = True
+                return False
+            # If we previously had pending tool calls and now have a tool message, clear the flag
+            elif state.get("has_pending_tool_calls") and last_msg.get("role") == "tool":
+                state["has_pending_tool_calls"] = False
+        
         # Check max steps
         step_count = state.get("step_count", 0)
         if step_count >= self.max_steps:
             state["termination_reason"] = "max_steps"
             return True
-            
+        
         # Check error count
-        if state.get("error_count", 0) >= self.max_errors:
-            state["termination_reason"] = "too_many_errors"
+        error_count = state.get("error_count", 0)
+        if error_count >= self.max_errors:
+            state["termination_reason"] = "max_errors"
             return True
         
-        # Check if last message indicates termination
-        if messages:
-            last_msg = messages[-1]
+        # Get tau2 environment and simulators
+        tau2_env = state.get("tau2_env")
+        user_simulator = state.get("user_simulator")
+        if not tau2_env or not user_simulator:
+            return False
             
-            # Check user termination using tau2's logic
-            if last_msg["role"] == "user":
-                # Convert to tau2 UserMessage to use is_stop
-                tau2_msg = UserMessage(
-                    role="user",
-                    content=last_msg.get("content", "")
-                )
-                if UserSimulator.is_stop(tau2_msg):
+        # Check user simulator stop conditions
+        tau2_user_state = state.get("tau2_user_state", {})
+        if tau2_user_state:
+            try:
+                if user_simulator.is_stop(tau2_user_state):
                     state["termination_reason"] = "user_stop"
                     return True
-            
-            # Check agent termination using tau2's logic
-            elif last_msg["role"] == "assistant" and last_msg.get("content"):
-                tau2_msg = AssistantMessage(
-                    role="assistant",
-                    content=last_msg.get("content", "")
-                )
+            except Exception:
+                pass
+                
+        # Check agent stop conditions
+        agent_state = state.get("agent_state")
+        if agent_state:
+            try:
+                # Import LLMAgent for is_stop check
                 from tau2.agent.llm_agent import LLMAgent
-                if LLMAgent.is_stop(tau2_msg):
+                if LLMAgent.is_stop(agent_state):
                     state["termination_reason"] = "agent_stop"
                     return True
-                    
-        # Don't check task completion - let the conversation run until other termination conditions
+            except Exception:
+                pass
+        
         return False
         
     def env_response(self, messages: vf.Messages, state: vf.State, **kwargs) -> Tuple[vf.Messages, vf.State]:
