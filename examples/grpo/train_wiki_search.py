@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wiki_search.py
 """
 
-vf_env = vf.load_environment(env_id="wiki-search")
+vf_env = vf.load_environment(env_id="vf-wiki-search")
 
 model_name = "willcb/Qwen3-8B-Wiki-Search-SFT"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)

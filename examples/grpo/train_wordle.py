@@ -31,7 +31,7 @@ def main(args):
     size = args.size
     model_name = f"willcb/Qwen3-{size}-Wordle"
     model, tokenizer = vf.get_model_and_tokenizer(model_name)
-    vf_env = vf.load_environment(env_id="wordle", use_think=True)
+    vf_env = vf.load_environment(env_id="vf-wordle", use_think=True)
     run_name = f"wordle-grpo-{size}"
     training_args = vf.grpo_defaults(run_name=run_name)
     training_args.per_device_train_batch_size = 8

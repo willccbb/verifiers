@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
     --config-file configs/zero3.yaml examples/grpo/train_math_group.py
 """
 
-vf_env = vf.load_environment(env_id="math_group")
+vf_env = vf.load_environment(env_id="vf-math-group")
 
 model_name = "willcb/Qwen3-0.6B"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)

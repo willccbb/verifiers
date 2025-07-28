@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
 model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 model, tokenizer = vf.get_model_and_tokenizer(model_name)
 
-vf_env = vf.load_environment(env_id="sentence_repeater")
+vf_env = vf.load_environment(env_id="vf-sentence-repeater")
 
 run_name = "sentence-repeater-grpo-qwen1.5b"
 training_args = vf.grpo_defaults(run_name=run_name)

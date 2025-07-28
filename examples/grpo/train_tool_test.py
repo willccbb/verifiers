@@ -17,7 +17,7 @@ CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
     --config-file configs/zero3.yaml examples/grpo/train_tool_test.py
 """
 
-vf_env = vf.load_environment(env_id="tool-test", num_eval_examples=100)
+vf_env = vf.load_environment(env_id="vf-tool-test", num_eval_examples=100)
 
 model_name = "willcb/Qwen3-0.6B"
 run_name = "tool-test_" + model_name.split("/")[-1].lower()
