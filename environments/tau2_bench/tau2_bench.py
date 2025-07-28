@@ -361,6 +361,17 @@ class Tau2BenchEnv(MultiTurnEnv):
             tau2_env = state["tau2_env"]
             db_hash_before = tau2_env.get_db_hash()
             
+            # Debug: Check order status if it's an order-related tool
+            if tool_name in ["return_delivered_order_items", "exchange_delivered_order_items", "modify_pending_order_items"]:
+                order_id = tool_args.get("order_id")
+                if order_id and hasattr(tau2_env, 'tools') and hasattr(tau2_env.tools, 'db'):
+                    try:
+                        order = tau2_env.tools.db.orders.get(order_id)
+                        if order:
+                            print(f"DEBUG: Before {tool_name} - Order {order_id} status: {order.status}")
+                    except:
+                        pass
+            
             # Use tau2's get_response method directly
             tool_response = tau2_env.get_response(tau2_tool_call)
             
@@ -368,7 +379,10 @@ class Tau2BenchEnv(MultiTurnEnv):
             if tool_name == "modify_pending_order_items":
                 print(f"DEBUG: modify_pending_order_items response: error={tool_response.error}, content={tool_response.content[:200]}...")
             
-            # Get database hash after execution
+            if tool_response.error:
+                print(f"DEBUG: Tool {tool_name} returned error: {tool_response.content}")
+            
+            # Get database hashes after execution
             db_hash_after = tau2_env.get_db_hash()
             
             # Track execution for evaluation
@@ -795,22 +809,29 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             return 0.0
             
         print(f"DEBUG: Task ID = {task_id}")
-        print(f"DEBUG: Domain = {domain}")  # domain should be in closure
+        print(f"DEBUG: Domain = {domain}")
+        
+        # Ensure we have the current rollout's messages
+        if isinstance(completion, list):
+            print(f"DEBUG: Completion has {len(completion)} messages")
+            actual_step_count = len(completion)
+            state_step_count = state.get("step_count", 0)
+            print(f"DEBUG: State step_count = {state_step_count}, Actual completion length = {actual_step_count}")
             
         # Get the original task from tau2
         if domain == "retail":
-            all_tasks = get_retail_tasks()
+            tasks = get_retail_tasks()
         elif domain == "airline":
-            all_tasks = get_airline_tasks()
+            tasks = get_airline_tasks()
         elif domain == "telecom":
-            all_tasks = get_telecom_tasks()
+            tasks = get_telecom_tasks()
         else:
             print(f"DEBUG: Unknown domain {domain}, returning 0.0")
             return 0.0
             
-        print(f"DEBUG: Found {len(all_tasks)} tasks for domain {domain}")
+        print(f"DEBUG: Found {len(tasks)} tasks for domain {domain}")
             
-        task = next((t for t in all_tasks if t.id == task_id), None)
+        task = next((t for t in tasks if t.id == task_id), None)
         if not task:
             print(f"DEBUG: Task {task_id} not found in tasks, returning 0.0")
             return 0.0
@@ -898,6 +919,9 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             print(f"\n!!! Total tau2_messages: {len(tau2_messages)} !!!")
             for i, msg in enumerate(tau2_messages[:5]):  # First 5 messages
                 print(f"  {i}: {msg.role} - {msg.content[:50] if msg.content else 'No content'}...")
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        print(f"    Tool call: {tc.name}({tc.arguments})")
             if len(tau2_messages) > 5:
                 print(f"  ... and {len(tau2_messages) - 5} more messages")
             
