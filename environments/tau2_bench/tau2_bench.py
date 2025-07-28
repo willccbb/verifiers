@@ -35,6 +35,7 @@ try:
     from tau2.data_model.simulation import SimulationRun, TerminationReason
     from tau2.data_model.tasks import RewardType
     from tau2.environment.environment import Environment as Tau2Environment
+    from tau2.orchestrator.orchestrator import EnvironmentOrchestrator
     TAU2_AVAILABLE = True
 except ImportError as e:
     print(f"DEBUG: Import error: {e}")
@@ -242,28 +243,37 @@ class Tau2BenchEnv(MultiTurnEnv):
                 "conversation_stage": "initial"
             }
             
-        if "env_db" not in state:
+        if "turn_count" not in state:
+            state["turn_count"] = 0
+            
+        if "tau2_env" not in state:
+            # Create fresh environment
+            state["tau2_env"] = self._create_fresh_env()
+            
+            # Use tau2's set_state method to initialize properly
             task_id = state.get("task_id")
-            task = self.task_lookup.get(task_id)
+            task = self.task_lookup.get(task_id) if task_id else None
+            
             if task and hasattr(task, 'initial_state') and task.initial_state:
-                initial_state_dict = task.initial_state.model_dump()
-                if "initialization_data" in initial_state_dict:
-                    state["env_db"] = deepcopy(initial_state_dict["initialization_data"])
+                # Use tau2's set_state to initialize the environment
+                initialization_data = task.initial_state.initialization_data if hasattr(task.initial_state, 'initialization_data') else None
+                initialization_actions = task.initial_state.initialization_actions if hasattr(task.initial_state, 'initialization_actions') else None
+                message_history = task.initial_state.message_history if hasattr(task.initial_state, 'message_history') else []
+                
+                state["tau2_env"].set_state(
+                    initialization_data=initialization_data,
+                    initialization_actions=initialization_actions,
+                    message_history=message_history
+                )
+                
+                # Store the database state for tracking
+                if initialization_data:
+                    state["env_db"] = initialization_data.model_dump() if hasattr(initialization_data, 'model_dump') else {}
                 else:
                     state["env_db"] = {}
             else:
                 state["env_db"] = {}
                 
-        if "turn_count" not in state:
-            state["turn_count"] = 0
-            
-        if "tau2_env" not in state:
-            # Get initial database state from task
-            initial_db_state = None
-            if "env_db" in state:
-                initial_db_state = state["env_db"]
-            state["tau2_env"] = self._create_fresh_env(initial_db_state)
-            
         if "tool_executions" not in state:
             state["tool_executions"] = []
             
