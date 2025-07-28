@@ -608,29 +608,37 @@ class Tau2BenchEnv(MultiTurnEnv):
                 tau2_tool_calls = []
                 if "tool_calls" in msg and msg["tool_calls"]:
                     for tc in msg["tool_calls"]:
-                        # Handle both dict and object formats
-                        if hasattr(tc, 'function'):
-                            # Object format (from API)
+                        # tc should be a tau2 ToolCall or similar object
+                        # But in dataset creation, these come from tau2 message history
+                        # so they might be in a different format
+                        if hasattr(tc, 'name') and hasattr(tc, 'arguments'):
+                            # Direct tau2 ToolCall format
+                            tau2_tool_calls.append({
+                                "id": getattr(tc, 'id', ""),
+                                "name": tc.name,
+                                "arguments": tc.arguments if isinstance(tc.arguments, dict) else {}
+                            })
+                        elif hasattr(tc, 'function'):
+                            # OpenAI format
                             args_str = tc.function.arguments
-                            tc_id = tc.id if hasattr(tc, 'id') else ""
+                            tc_id = tc.id
                             tc_name = tc.function.name
-                        else:
-                            # Dict format
-                            args_str = tc.get("function", {}).get("arguments", "{}")
-                            tc_id = tc.get("id", "")
-                            tc_name = tc.get("function", {}).get("name", "")
-                        
-                        # Parse arguments if they're a string
-                        try:
-                            args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
-                        except:
-                            args_dict = {}
                             
-                        tau2_tool_calls.append({
-                            "id": tc_id,
-                            "name": tc_name,
-                            "arguments": args_dict
-                        })
+                            # Parse arguments if they're a string
+                            try:
+                                args_dict = json.loads(args_str) if isinstance(args_str, str) else args_str
+                            except:
+                                args_dict = {}
+                                
+                            tau2_tool_calls.append({
+                                "id": tc_id,
+                                "name": tc_name,
+                                "arguments": args_dict
+                            })
+                        else:
+                            # Skip unknown format
+                            print(f"WARNING: Unknown tool call format: {type(tc)}")
+                            continue
                 
                 # Set tool_calls to None if empty (critical for tau2 compatibility)
                 tau2_msg = AssistantMessage(
