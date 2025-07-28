@@ -42,8 +42,8 @@ def main():
     args = parser.parse_args()
 
     if args.from_repo:
-        env_name = args.env.replace("-", "_")
-        env_folder = env_name.replace("_", "-")
+        env_folder = args.env.replace("-", "_")
+        env_name = env_folder.replace("_", "-")
         subprocess.run(
             [
                 "uv",
