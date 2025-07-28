@@ -411,7 +411,6 @@ class Tau2BenchEnv(MultiTurnEnv):
         tool_messages = []
         
         for tool_call in tool_calls:
-            # Handle both dict and object formats
             if isinstance(tool_call, ChatCompletionMessageToolCall):
                 # This is the OpenAI object format
                 tool_name = tool_call.function.name
@@ -562,9 +561,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         if not task or not hasattr(task, 'evaluation_criteria') or not task.evaluation_criteria:
             return False
             
-        # For now, don't auto-complete based on state checking
-        # Let the evaluation handle the final assessment
-        # This prevents premature termination
+        # Let the evaluation handle the final assessment to prevent premature termination
         return False
         
     def _check_single_goal(self, goal: Dict, state: vf.State) -> bool:
@@ -871,7 +868,6 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         if msg.get("tool_calls"):
                             tool_calls = []
                             for tc in msg["tool_calls"]:
-                                # tc is a ChatCompletionMessageToolCall object
                                 tool_calls.append(ToolCall(
                                     id=tc.id,
                                     name=tc.function.name,
