@@ -99,17 +99,18 @@ class Tau2BenchEnv(MultiTurnEnv):
                  tau2_tasks: List[Any],
                  user_llm: str = "gpt-4.1",
                  max_turns: int = 30,
-                 max_errors: int = 3,
+                 max_steps: int = 200,  # tau2's default
+                 max_errors: int = 10,  # tau2's default  
                  solo_mode: bool = False,
                  **kwargs):
-        # Initialize parent class
         super().__init__(dataset=dataset, rubric=rubric, **kwargs)
+        self.solo_mode = solo_mode
         self.domain = domain
         self.tau2_tasks = tau2_tasks
         self.user_llm = user_llm
         self.max_turns = max_turns
+        self.max_steps = max_steps
         self.max_errors = max_errors
-        self.solo_mode = solo_mode
         
         # Create task lookup
         self.task_lookup = {task.id: task for task in tau2_tasks}
@@ -154,7 +155,7 @@ class Tau2BenchEnv(MultiTurnEnv):
         """Check if conversation should end based on tau2's termination criteria."""
         # Check max steps
         step_count = state.get("step_count", 0)
-        if step_count >= self.max_turns:
+        if step_count >= self.max_steps:
             state["termination_reason"] = "max_steps"
             return True
             
@@ -912,7 +913,7 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                 termination_reason=term_reason,
                 task_completed=state.get("termination_reason") == "agent_stop", # Use agent_stop for completion
                 errors=state.get("error_count", 0),
-                num_steps=state.get("turn_count", 0),
+                num_steps=state.get("step_count", 0),
                 cost=0.0,  # We don't track cost in verifiers
                 timestamp=datetime.now().isoformat(),
                 start_time=datetime.now().isoformat(),
@@ -1118,7 +1119,8 @@ def load_environment(
         tau2_tasks=tau2_tasks,
         user_llm=kwargs.get("user_llm", "gpt-4.1-mini"),
         max_turns=kwargs.get("max_turns", 30),
-        max_errors=kwargs.get("max_errors", 3),
+        max_steps=kwargs.get("max_steps", 200),
+        max_errors=kwargs.get("max_errors", 10),
         solo_mode=solo_mode,
         **kwargs
     )
