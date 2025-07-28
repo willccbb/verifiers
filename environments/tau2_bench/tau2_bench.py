@@ -770,21 +770,23 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
         # Get scenario description
         scenario = ""
         if hasattr(task, 'user_scenario') and task.user_scenario:
-            if hasattr(task.user_scenario, 'scenario'):
-                scenario = task.user_scenario.scenario
-            elif hasattr(task.user_scenario, 'instructions'):
-                scenario = task.user_scenario.instructions
-            # Handle StructuredUserInstructions or any object with string representation
-            if not isinstance(scenario, str) and scenario is not None:
-                scenario = str(scenario)
+            # Use the full string representation of user_scenario
+            # This includes both persona and instructions
+            scenario = str(task.user_scenario)
         
-        # If no message history but we have a scenario, add it as a user message
+        # Check if we have a user message in initial_messages
+        has_user_message = any(msg.get("role") == "user" for msg in initial_messages[1:])  # Skip system message
+        
+        # If no user message but we have a scenario, add it
         # This ensures the agent sees the user's request with order IDs etc.
-        if len(initial_messages) == 1 and scenario:  # Only system message
+        if not has_user_message and scenario:
+            print(f"DEBUG: Adding user scenario to prompt for task {task.id}: {scenario[:100]}...")
             initial_messages.append({
                 "role": "user",
                 "content": scenario
             })
+        else:
+            print(f"DEBUG: Task {task.id} - has_user_message: {has_user_message}, has scenario: {bool(scenario)}")
         
         # Create dataset row
         row = {
@@ -797,13 +799,23 @@ def create_tau2_dataset(domain: str = "retail") -> Dataset:
                 "initial_state": task.initial_state.model_dump() if hasattr(task, 'initial_state') and task.initial_state else {},
                 "user_scenario": task.user_scenario.model_dump() if hasattr(task, 'user_scenario') and task.user_scenario else {},
                 "evaluation_criteria": task.evaluation_criteria.model_dump() if hasattr(task, 'evaluation_criteria') and task.evaluation_criteria else {},
-                "oai_tools": json.dumps(oai_tools)  # Store as JSON string to avoid HF Dataset schema conflicts
+                "oai_tools": json.dumps(oai_tools)  # Store as JSON string
             },
             "answer": "Successfully helped the customer",  # Placeholder
-            "task": f"tau2_{domain}",
             # Store task_id in state for easy lookup  
             "task_id": task.id
         }
+        
+        # Debug: Show what the agent will see
+        if task.id in [5, 13]:  # Debug specific failing tasks
+            print(f"\n{'='*80}")
+            print(f"DEBUG: Task {task.id} initial messages:")
+            for j, msg in enumerate(initial_messages):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                print(f"  {j}. {role}: {content[:200]}...")
+            print(f"{'='*80}\n")
+        
         dataset_rows.append(row)
     
     return Dataset.from_list(dataset_rows)
@@ -899,6 +911,11 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
                         print(f"  Skipping system message {i}")
                         continue
                         
+                    # Ensure message has a role
+                    if not msg.get("role"):
+                        print(f"  WARNING: Message {i} has no role! Skipping: {msg}")
+                        continue
+                        
                     # Convert each message to tau2 format
                     if msg.get("role") == "assistant":
                         print(f"  Message {i}: assistant, has_tool_calls={bool(msg.get('tool_calls'))}")
@@ -978,6 +995,22 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             
             if tool_call_count != tool_msg_count:
                 print(f"WARNING: Tool call/message mismatch! {tool_call_count} calls vs {tool_msg_count} messages")
+                
+                # Find orphaned tool calls
+                tool_call_ids = []
+                tool_msg_ids = []
+                for msg in tau2_messages:
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            tool_call_ids.append(tc.id)
+                    elif isinstance(msg, ToolMessage):
+                        tool_msg_ids.append(msg.id)
+                
+                missing_responses = set(tool_call_ids) - set(tool_msg_ids)
+                if missing_responses:
+                    print(f"ERROR: Tool calls without responses: {missing_responses}")
+                    # This will cause tau2 evaluation to fail
+                    return 0.0
             
             for i, msg in enumerate(tau2_messages[:5]):  # First 5 messages
                 print(f"  {i}: {msg.role} - {msg.content[:50] if msg.content else 'No content'}...")
@@ -989,6 +1022,51 @@ def create_tau2_rubric(domain: str) -> vf.Rubric:
             
             # Build simulation run
             task_id = info.get("task_id", "unknown")
+            
+            # Debug: Print expected vs actual for this task
+            if hasattr(task, 'expected_state') and task.expected_state:
+                if hasattr(task.expected_state, 'actions') and task.expected_state.actions:
+                    print(f"\n{'='*80}")
+                    print(f"EVALUATION DEBUG for task {task_id}")
+                    print(f"{'='*80}")
+                    
+                    print(f"\nEXPECTED ACTIONS ({len(task.expected_state.actions)}):")
+                    for i, action in enumerate(task.expected_state.actions):
+                        print(f"  {i+1}. {action.requestor}: {action.name}({action.arguments})")
+                    
+                    # Extract actual tool calls from tau2_messages
+                    actual_calls = []
+                    for msg in tau2_messages:
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                actual_calls.append((tc.requestor, tc.name, tc.arguments))
+                    
+                    print(f"\nACTUAL TOOL CALLS:")
+                    for i, (requestor, name, args) in enumerate(actual_calls):
+                        print(f"  {i+1}. {requestor}: {name}({args})")
+                    
+                    # Detailed comparison
+                    print(f"\nDETAILED ACTION MATCHING:")
+                    matched_indices = set()
+                    for exp_action in task.expected_state.actions:
+                        print(f"\nLooking for: {exp_action.name} by {exp_action.requestor}")
+                        print(f"  Expected args: {exp_action.arguments}")
+                        
+                        found = False
+                        for j, (act_req, act_name, act_args) in enumerate(actual_calls):
+                            if j not in matched_indices and act_name == exp_action.name and act_req == exp_action.requestor:
+                                if act_args == exp_action.arguments:
+                                    print(f"  ✓ MATCHED with {act_name} call")
+                                    matched_indices.add(j)
+                                    found = True
+                                    break
+                                else:
+                                    print(f"  ✗ Args mismatch with {act_name}: expected {exp_action.arguments}, got {act_args}")
+                        
+                        if not found:
+                            print(f"  ✗ NOT FOUND")
+            
+            print(f"\nRunning tau2 evaluation...")
             simulation = SimulationRun(
                 id=f"verifiers_eval_{task_id}_{datetime.now().isoformat()}",
                 agent_id="verifiers_agent",
