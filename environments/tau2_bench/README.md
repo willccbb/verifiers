@@ -4,16 +4,14 @@ Implementation of [Tau-Bench](https://github.com/sierra-research/tau2-bench) for
 
 ## Status
 
-⚠️ **Work in Progress**: This implementation is actively being developed to achieve full parity with the original Tau-Bench logic.
+⚠️ **Work in Progress**: This implementation is actively being developed to achieve full parity with the original Tau2-Bench logic.
 
 **Current Performance (Retail Domain)**:
 - Model: gpt-4.1-mini
 - Pass@1: 42.1%
-- Note: The original benchmark reports >60% for GPT-4 class models
+- User model: gpt-4.1
+- Note: The original benchmark reports >60% for gpt-4.1-mini
 
-**Known Issues**:
-- Some edge cases in tool execution validation differ from the original implementation
-- Database state synchronization in certain multi-step scenarios
 
 ## Overview
 
@@ -72,7 +70,7 @@ The environment uses tau2's native evaluation, which checks:
 
 If you encounter import errors, ensure tau2-bench is properly installed:
 ```bash
-uv pip install tau2-bench
+vf-install tau2-bench
 ```
 
 For evaluation discrepancies, check that:
