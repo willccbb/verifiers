@@ -524,6 +524,8 @@ class Tau2BenchEnv(MultiTurnEnv):
                 }
             elif user_msg.content == TRANSFER:
                 state["termination_reason"] = "user_transfer"
+                # Mark as completed to terminate the conversation
+                state["user_said_transfer"] = True
                 return {
                     "role": "user",
                     "content": "I'd like to speak to a human agent please."
