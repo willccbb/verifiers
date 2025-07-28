@@ -97,7 +97,7 @@ class Tau2BenchEnv(MultiTurnEnv):
                  rubric: vf.Rubric,
                  domain: str,
                  tau2_tasks: List[Any],
-                 user_llm: str = "gpt-4.1-mini",
+                 user_llm: str = "gpt-4.1",
                  max_turns: int = 30,
                  max_errors: int = 3,
                  solo_mode: bool = False,
