@@ -1,0 +1,19 @@
+[project]
+name = "tau2-bench"
+version = "0.1.0"
+dependencies = [
+    "pydantic>=2.0.0",
+    "datasets>=2.0.0",
+    "verifiers>=0.1.2",
+    "tau2 @ git+https://github.com/sierra-research/tau2-bench.git",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["tau2_bench.py"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
