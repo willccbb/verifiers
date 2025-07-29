@@ -10,6 +10,7 @@ Verifiers uses Pydantic models for structured data:
 
 ```python
 from pydantic import BaseModel
+from verifiers.types import GenerateInputs, ProcessedOutputs
 
 class GenerateInputs(BaseModel):
     """Pydantic model for generation inputs."""
@@ -27,6 +28,50 @@ class ProcessedOutputs(BaseModel):
     completion_mask: List[List[int]]
     completion_logprobs: List[List[float]]
     rewards: List[float]
+```
+
+#### Using GenerateInputs
+
+The `generate()` and `a_generate()` methods accept both dict and GenerateInputs:
+
+```python
+# Using dict syntax (still supported)
+inputs = {
+    "prompt": [
+        [{"role": "user", "content": "What is 2+2?"}],
+        [{"role": "user", "content": "What is 3+3?"}],
+    ],
+    "answer": ["4", "6"],
+}
+results = env.generate(inputs, client=client, model=model)
+
+# Using pydantic model (recommended for type safety)
+from verifiers.types import GenerateInputs
+
+inputs = GenerateInputs(
+    prompt=[
+        [{"role": "user", "content": "What is 2+2?"}],
+        [{"role": "user", "content": "What is 3+3?"}],
+    ],
+    answer=["4", "6"],
+)
+results = env.generate(inputs, client=client, model=model)
+```
+
+#### Using ProcessedOutputs
+
+The `process_env_results()` method returns a ProcessedOutputs pydantic model:
+
+```python
+# ProcessedOutputs is a pydantic model with attributes
+results = env.process_env_results(prompts, completions, states, rewards, tokenizer)
+
+# Access fields as attributes
+prompt_ids = results.prompt_ids
+rewards = results.rewards
+
+# Can also convert to dict if needed
+results_dict = results.model_dump()
 ```
 
 ### State Dictionary
@@ -211,6 +256,18 @@ def parse(text: str) -> Any:
 def parse_answer(completion: Messages) -> Optional[str]:
     """Must return string answer or None"""
 ```
+
+## Migration Notes
+
+### Pydantic Type Updates
+
+As of recent updates, `GenerateInputs` and `ProcessedOutputs` are now proper Pydantic models. This change is **backwards compatible**:
+
+- **Dict inputs still work**: `env.generate()` and `env.a_generate()` automatically convert dict inputs to pydantic models internally
+- **ProcessedOutputs**: Now returns a pydantic model with attributes instead of a dict, but can be converted using `.model_dump()`
+- **No code changes required**: Existing code using dict syntax will continue to work
+
+For new code, we recommend using the pydantic models directly for better type safety and IDE support.
 
 ## Common Patterns
 
