@@ -32,10 +32,10 @@ class ProcessedOutputs(BaseModel):
 
 #### Using GenerateInputs
 
-The `generate()` and `a_generate()` methods accept both dict and GenerateInputs:
+The `generate()` and `a_generate()` methods accept dict, GenerateInputs pydantic model, or Dataset:
 
 ```python
-# Using dict syntax (still supported)
+# Using dict syntax
 inputs = {
     "prompt": [
         [{"role": "user", "content": "What is 2+2?"}],
@@ -45,7 +45,7 @@ inputs = {
 }
 results = env.generate(inputs, client=client, model=model)
 
-# Using pydantic model (recommended for type safety)
+# Using pydantic model for type safety
 from verifiers.types import GenerateInputs
 
 inputs = GenerateInputs(
@@ -56,6 +56,14 @@ inputs = GenerateInputs(
     answer=["4", "6"],
 )
 results = env.generate(inputs, client=client, model=model)
+
+# Using a Dataset
+from datasets import Dataset
+dataset = Dataset.from_dict({
+    "prompt": [[{"role": "user", "content": "What is 2+2?"}]],
+    "answer": ["4"],
+})
+results = env.generate(dataset, client=client, model=model)
 ```
 
 #### Using ProcessedOutputs
@@ -256,18 +264,6 @@ def parse(text: str) -> Any:
 def parse_answer(completion: Messages) -> Optional[str]:
     """Must return string answer or None"""
 ```
-
-## Migration Notes
-
-### Pydantic Type Updates
-
-As of recent updates, `GenerateInputs` and `ProcessedOutputs` are now proper Pydantic models. This change is **backwards compatible**:
-
-- **Dict inputs still work**: `env.generate()` and `env.a_generate()` automatically convert dict inputs to pydantic models internally
-- **ProcessedOutputs**: Now returns a pydantic model with attributes instead of a dict, but can be converted using `.model_dump()`
-- **No code changes required**: Existing code using dict syntax will continue to work
-
-For new code, we recommend using the pydantic models directly for better type safety and IDE support.
 
 ## Common Patterns
 
