@@ -7,6 +7,7 @@ from verifiers import EnvGroup
 from verifiers.envs.env_group import EnvGroupRubric
 from verifiers import SingleTurnEnv
 from verifiers import Rubric
+from verifiers.types import RolloutScores
 
 
 class TestEnvGroupRubric:
@@ -320,7 +321,9 @@ class TestEnvGroup:
         env_group = EnvGroup(envs=[env1, env2], env_names=["math", "code"])
 
         # Mock the scoring
-        env_group.rubric.score_rollouts = AsyncMock(return_value={"reward": [0.8, 0.9]})
+        env_group.rubric.score_rollouts = AsyncMock(
+            return_value=RolloutScores(reward=[0.8, 0.9], metrics={})
+        )
 
         inputs = {
             "prompt": [
@@ -335,10 +338,10 @@ class TestEnvGroup:
             inputs, client=mock_openai_client, model="test-model"
         )
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
-        assert len(results["completion"]) == 2
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
+        assert len(results.completion) == 2
 
     def test_env_group_with_mixed_datasets(self, mock_openai_client):
         """Test EnvGroup with environments having different dataset configurations."""

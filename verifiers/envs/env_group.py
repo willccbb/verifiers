@@ -66,16 +66,18 @@ class EnvGroupRubric(Rubric):
         env_results = await env.rubric.score_rollout(
             prompt, completion, answer, state, task, info, **kwargs
         )
-        print(env_results.keys())
-        print(env_results["reward"])
-
-        # Update results with scores
-        for reward_name, score in env_results.items():
+        
+        # Update results with the reward score
+        results["reward"] = env_results.reward
+        
+        # Update results with individual metric scores
+        for reward_name, score in env_results.metrics.items():
             if reward_name in results:
                 results[reward_name] = score
+        
         # dummy scores for all reward functions not in the environment
         for reward_name in self.all_reward_names:
-            if reward_name not in env_results:
+            if reward_name not in env_results.metrics:
                 results[reward_name] = 0.0
         return results
 
