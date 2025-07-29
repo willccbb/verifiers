@@ -280,16 +280,16 @@ class TestSingleTurnEnv:
 
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(
-            return_value={"reward": [1.0]}
+            return_value=RolloutScores(reward=[1.0], metrics={})
         )
 
         results = mock_singleturn_env.generate(
             inputs, client=mock_singleturn_env.client
         )
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
 
     @pytest.mark.asyncio
     async def test_different_message_types_in_same_env(

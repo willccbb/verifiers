@@ -84,11 +84,11 @@ class TestEnvGroupRubric:
             task="math",
         )
 
-        assert "func1" in result
-        assert "func2" in result
-        assert result["func1"] == 0.8  # From env1
-        assert result["func2"] == 0.0  # Not in env1, so 0.0
-        assert result["reward"] == 0.8
+        assert "func1" in result.metrics
+        assert "func2" in result.metrics
+        assert result.metrics["func1"] == 0.8  # From env1
+        assert result.metrics["func2"] == 0.0  # Not in env1, so 0.0
+        assert result.reward == 0.8
 
     @pytest.mark.asyncio
     async def test_env_group_rubric_unknown_task(self, mock_openai_client):
@@ -107,7 +107,7 @@ class TestEnvGroupRubric:
             prompt="Test", completion="Test", task="unknown_task"
         )
 
-        assert result["reward"] == 0.0
+        assert result.reward == 0.0
 
 
 class TestEnvGroup:

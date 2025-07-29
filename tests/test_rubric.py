@@ -346,7 +346,7 @@ class TestRubric:
 
         # When apply_weights=False, only individual scores are returned, no weighted sum
         assert (
-            results_unweighted["reward"][0] == 1.0 * 2.0 + 0.5 * 3.0
+            results_unweighted.reward[0] == 1.0 * 2.0 + 0.5 * 3.0
         )  # Still weighted
 
     @pytest.mark.asyncio
