@@ -32,7 +32,7 @@ def main():
         "--endpoints-path",
         "-e",
         type=str,
-        default="./endpoints.py",
+        default="./configs/endpoints.py",
         help="Path to API endpoints registry",
     )
     parser.add_argument(
