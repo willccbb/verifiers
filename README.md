@@ -16,6 +16,13 @@ Verifiers is a library of modular components for creating RL environments and tr
 
 ## Setup
 
+We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv init # create a fresh project
+source .venv/bin/activate
+```
+
 For local (CPU) development and evaluation with API models, do:
 ```bash
 uv add verifiers # uv add 'verifiers[dev]' for Jupyter + testing support
@@ -39,6 +46,11 @@ git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 uv sync --all-extras && uv pip install flash-attn --no-build-isolation
 uv run pre-commit install
+```
+
+Finally, to use included scripts, do:
+```
+source .venv/bin/activate
 ```
 
 In general, we recommend that you build and train Environments *with* `verifiers`, not *in* `verifiers`. If you find yourself needing to clone and modify the core library in order to implement key functionality for your project, we'd love for you to open an issue so that we can try and streamline the development experience. Our aim is for `verifiers` to be a reliable toolkit to build on top of, and to minimize the "fork proliferation" which often pervades the RL infrastructure ecosystem.
