@@ -1325,21 +1325,20 @@ class GRPOTrainer(Trainer):
         if self.accelerator.is_main_process:
             eval_results = self.async_generator.evaluate(num_samples=-1)
         else:
-            eval_results = {}
+            eval_results = None
 
         # Broadcast the results from rank 0 to all other ranks
         broadcast_list = [eval_results]
         broadcast_object_list(broadcast_list, from_process=0)
         eval_results = broadcast_list[0]
-
+        assert eval_results is not None
         # Process results to compute metrics
         metrics = {}
 
         # Compute reward statistics
-        if "reward" in eval_results:
-            rewards = torch.tensor(eval_results["reward"])
-            metrics["eval_reward"] = rewards.mean().item()
-            metrics["eval_reward_std"] = rewards.std().item()
+        rewards = torch.tensor(eval_results.reward)
+        metrics["eval_reward"] = rewards.mean().item()
+        metrics["eval_reward_std"] = rewards.std().item()
 
         # Log individual reward function scores
         non_reward_metric_keys = [
@@ -1351,9 +1350,9 @@ class GRPOTrainer(Trainer):
             "state",
             "task",
         ]
-        for key in eval_results:
+        for key in eval_results.metrics:
             if key not in non_reward_metric_keys:
-                reward_values = eval_results[key]
+                reward_values = eval_results.metrics[key]
                 if isinstance(reward_values, list):
                     metrics[f"eval_rewards/{key}"] = float(np.mean(reward_values))
                 else:
@@ -1364,55 +1363,49 @@ class GRPOTrainer(Trainer):
 
         # Compute completion length statistics
         assert isinstance(self.processing_class, PreTrainedTokenizerBase)
-        if "completion" in eval_results:
-            completions = eval_results["completion"]
-            if isinstance(completions[0], str):
-                # Completion format - directly tokenize strings
-                completion_lengths = [
-                    len(self.processing_class.encode(c)) for c in completions
-                ]  # type: ignore
-            else:
-                # Chat format - use apply_chat_template
-                completion_lengths = []
-                for comp in completions:
-                    # Apply chat template to get the full text
-                    tokens = self.processing_class.apply_chat_template(
-                        comp, tokenize=True, add_generation_prompt=False
-                    )  # type: ignore
-                    # Tokenize and count
-                    completion_lengths.append(len(tokens))
+        completions = eval_results.completion
+        if isinstance(completions[0], str):
+            # Completion format - directly tokenize strings
+            completion_lengths = [
+                len(self.processing_class.encode(c))  # type: ignore
+                for c in completions
+            ]
+        else:
+            # Chat format - use apply_chat_template
+            completion_lengths = []
+            for comp in completions:
+                # Apply chat template to get the full text
+                tokens = self.processing_class.apply_chat_template(
+                    comp,  # type: ignore
+                    tokenize=True,
+                    add_generation_prompt=False,
+                )
+                # Tokenize and count
+                completion_lengths.append(len(tokens))
 
-            metrics["eval_completions/mean_length"] = float(np.mean(completion_lengths))
-            metrics["eval_completions/min_length"] = int(np.min(completion_lengths))
-            metrics["eval_completions/max_length"] = int(np.max(completion_lengths))
+        metrics["eval_completions/mean_length"] = float(np.mean(completion_lengths))
+        metrics["eval_completions/min_length"] = int(np.min(completion_lengths))
+        metrics["eval_completions/max_length"] = int(np.max(completion_lengths))
 
         # Log sample completions if requested
-        if (
-            self.accelerator.is_main_process
-            and self.log_completions
-            and "prompt" in eval_results
-        ):
+        if self.accelerator.is_main_process and self.log_completions:
             # Prepare textual logs
-            prompts = eval_results["prompt"][: self.num_completions_to_print]
-            completions = eval_results["completion"][: self.num_completions_to_print]
+            prompts = eval_results.prompt[: self.num_completions_to_print]
+            completions = eval_results.completion[: self.num_completions_to_print]
 
             # Extract rewards for logging
             reward_dict = {}
-            if "reward" in eval_results:
-                reward_dict["reward"] = eval_results["reward"][
+            reward_dict["reward"] = eval_results.reward[: self.num_completions_to_print]
+            for key in eval_results.metrics:
+                reward_dict[key] = eval_results.metrics[key][
                     : self.num_completions_to_print
                 ]
-            for key in eval_results:
-                if key.startswith("reward_") and key != "reward":
-                    reward_dict[key] = eval_results[key][
-                        : self.num_completions_to_print
-                    ]
 
             # Print sample
             print_prompt_completions_sample(
                 prompts,
                 completions,
-                reward_dict,
+                reward_dict["reward"],
                 self.state.global_step,
             )
 
@@ -1427,7 +1420,10 @@ class GRPOTrainer(Trainer):
                 table_data = {
                     "step": [str(self.state.global_step)] * len(prompts),
                     "prompt": prompts,
-                    "completion": [self._sanitize_tool_calls(c) for c in completions],
+                    "completion": [
+                        self._sanitize_tool_calls(c)  # type: ignore
+                        for c in completions
+                    ],
                 }
                 for k, v in reward_dict.items():
                     table_data[k] = v
@@ -1464,7 +1460,7 @@ class GRPOTrainer(Trainer):
                 print_prompt_completions_sample(
                     self._textual_logs["prompt"],
                     self._textual_logs["completion"],
-                    self._textual_logs["rewards"],
+                    self._textual_logs["rewards"]["reward"],
                     self.state.global_step,
                 )
 
