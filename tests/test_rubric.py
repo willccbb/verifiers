@@ -228,12 +228,12 @@ class TestRubric:
             info={},
         )
 
-        assert "func1" in result
-        assert "func2" in result
-        assert "reward" in result
-        assert result["func1"] == 1.0  # completion == answer
-        assert result["func2"] == 0.4  # len("test") * 0.1
-        assert result["reward"] == 1.0 * 1.0 + 0.4 * 0.5  # Weighted sum
+        assert "func1" in result.metrics
+        assert "func2" in result.metrics
+        assert hasattr(result, "reward")
+        assert result.metrics["func1"] == 1.0  # completion == answer
+        assert result.metrics["func2"] == 0.4  # len("test") * 0.1
+        assert result.reward == 1.0 * 1.0 + 0.4 * 0.5  # Weighted sum
 
     @pytest.mark.asyncio
     async def test_score_rollout_with_list_completion(self):
@@ -258,8 +258,8 @@ class TestRubric:
             info={},
         )
 
-        assert result["list_func"] == 2.0  # Length of completion list
-        assert result["reward"] == 2.0
+        assert result.metrics["list_func"] == 2.0  # Length of completion list
+        assert result.reward == 2.0
 
     @pytest.mark.asyncio
     async def test_score_rollouts_multiple(self):
@@ -289,16 +289,20 @@ class TestRubric:
             infos=infos,
         )
 
-        assert "accuracy_func" in results
-        assert "length_func" in results
-        assert "reward" in results
-        assert len(results["accuracy_func"]) == 3
-        assert results["accuracy_func"] == [
+        assert "accuracy_func" in results.metrics
+        assert "length_func" in results.metrics
+        assert hasattr(results, "reward")
+        assert len(results.metrics["accuracy_func"]) == 3
+        assert results.metrics["accuracy_func"] == [
             1.0,
             1.0,
             0.0,
         ]  # First two match, third doesn't
-        assert results["length_func"] == [7.0, 7.0, 5.0]  # Lengths of completions
+        assert results.metrics["length_func"] == [
+            7.0,
+            7.0,
+            5.0,
+        ]  # Lengths of completions
 
     @pytest.mark.asyncio
     async def test_score_rollouts_with_apply_weights(self):
@@ -330,7 +334,7 @@ class TestRubric:
             apply_weights=True,
         )
 
-        assert results_weighted["reward"][0] == 1.0 * 2.0 + 0.5 * 3.0  # 2.0 + 1.5 = 3.5
+        assert results_weighted.reward[0] == 1.0 * 2.0 + 0.5 * 3.0  # 2.0 + 1.5 = 3.5
 
         # Test with apply_weights=False (should not be used, but test anyway)
         results_unweighted = await rubric.score_rollouts(
@@ -344,9 +348,7 @@ class TestRubric:
         )
 
         # When apply_weights=False, only individual scores are returned, no weighted sum
-        assert (
-            results_unweighted["reward"][0] == 1.0 * 2.0 + 0.5 * 3.0
-        )  # Still weighted
+        assert results_unweighted.reward[0] == 1.0 * 2.0 + 0.5 * 3.0  # Still weighted
 
     @pytest.mark.asyncio
     async def test_score_rollouts_empty(self):
@@ -363,10 +365,10 @@ class TestRubric:
         )
 
         # Should return empty lists for each function
-        assert "test_func" in results
-        assert "reward" in results
-        assert results["test_func"] == []
-        assert results["reward"] == []
+        assert "test_func" in results.metrics
+        assert hasattr(results, "reward")
+        assert results.metrics["test_func"] == []
+        assert results.reward == []
 
     @pytest.mark.asyncio
     async def test_score_rollouts_with_default_infos(self):
@@ -386,8 +388,8 @@ class TestRubric:
             infos=[{}],  # Explicitly provide infos to match other lists
         )
 
-        assert "simple_func" in results
-        assert results["simple_func"] == [1.0]
+        assert "simple_func" in results.metrics
+        assert results.metrics["simple_func"] == [1.0]
 
     def test_rubric_with_custom_parser(self):
         """Test Rubric with custom parser."""
@@ -418,5 +420,5 @@ class TestRubric:
             infos=[{}],
         )
 
-        assert results["scalar_func"] == [0.5]
-        assert results["reward"] == [0.5]
+        assert results.metrics["scalar_func"] == [0.5]
+        assert results.reward == [0.5]

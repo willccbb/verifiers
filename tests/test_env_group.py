@@ -1,12 +1,13 @@
 """Tests for the EnvGroup class."""
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 from datasets import Dataset
-from verifiers import EnvGroup
+
+from verifiers import EnvGroup, Rubric, SingleTurnEnv
 from verifiers.envs.env_group import EnvGroupRubric
-from verifiers import SingleTurnEnv
-from verifiers import Rubric
+from verifiers.types import RolloutScores
 
 
 class TestEnvGroupRubric:
@@ -83,11 +84,11 @@ class TestEnvGroupRubric:
             task="math",
         )
 
-        assert "func1" in result
-        assert "func2" in result
-        assert result["func1"] == 0.8  # From env1
-        assert result["func2"] == 0.0  # Not in env1, so 0.0
-        assert result["reward"] == 0.8
+        assert "func1" in result.metrics
+        assert "func2" in result.metrics
+        assert result.metrics["func1"] == 0.8  # From env1
+        assert result.metrics["func2"] == 0.0  # Not in env1, so 0.0
+        assert result.reward == 0.8
 
     @pytest.mark.asyncio
     async def test_env_group_rubric_unknown_task(self, mock_openai_client):
@@ -106,7 +107,7 @@ class TestEnvGroupRubric:
             prompt="Test", completion="Test", task="unknown_task"
         )
 
-        assert result["reward"] == 0.0
+        assert result.reward == 0.0
 
 
 class TestEnvGroup:
@@ -320,7 +321,9 @@ class TestEnvGroup:
         env_group = EnvGroup(envs=[env1, env2], env_names=["math", "code"])
 
         # Mock the scoring
-        env_group.rubric.score_rollouts = AsyncMock(return_value={"reward": [0.8, 0.9]})
+        env_group.rubric.score_rollouts = AsyncMock(
+            return_value=RolloutScores(reward=[0.8, 0.9], metrics={})
+        )
 
         inputs = {
             "prompt": [
@@ -335,10 +338,10 @@ class TestEnvGroup:
             inputs, client=mock_openai_client, model="test-model"
         )
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
-        assert len(results["completion"]) == 2
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
+        assert len(results.completion) == 2
 
     def test_env_group_with_mixed_datasets(self, mock_openai_client):
         """Test EnvGroup with environments having different dataset configurations."""

@@ -6,6 +6,7 @@ import pytest
 from datasets import Dataset
 
 from verifiers import Environment, Parser, Rubric
+from verifiers.types import GenerateOutputs, RolloutScores
 
 
 # Create a concrete implementation for testing the abstract base class
@@ -478,16 +479,18 @@ class TestEnvironmentBase:
         )
 
         # Mock the rubric scoring
-        env.rubric.score_rollouts = AsyncMock(return_value={"reward": [1.0]})
+        env.rubric.score_rollouts = AsyncMock(
+            return_value=RolloutScores(reward=[1.0], metrics={})
+        )
 
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
         results = await env.a_generate(inputs, score_rollouts=True)
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
-        assert results["reward"] == [1.0]
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
+        assert results.reward == [1.0]
 
     def test_generate_sync_wrapper(self, mock_openai_client, sample_dataset):
         """Test synchronous generate wrapper."""
@@ -500,15 +503,17 @@ class TestEnvironmentBase:
         )
 
         # Mock the rubric scoring
-        env.rubric.score_rollouts = AsyncMock(return_value={"reward": [1.0]})
+        env.rubric.score_rollouts = AsyncMock(
+            return_value=RolloutScores(reward=[1.0], metrics={})
+        )
 
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
         results = env.generate(inputs, client=env.client)
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
 
     def test_make_dataset(self, mock_openai_client, sample_dataset):
         """Test creating a dataset from evaluation results."""
@@ -520,14 +525,16 @@ class TestEnvironmentBase:
             rubric=Rubric(),
         )
 
-        results = {
-            "prompt": [[{"role": "user", "content": "Hello"}]],
-            "completion": [[{"role": "assistant", "content": "Hi"}]],
-            "answer": ["Hi"],
-            "reward": [1.0],
-            "task": ["default"],
-            "state": [{"custom_field": "value"}],
-        }
+        results = GenerateOutputs(
+            prompt=[[{"role": "user", "content": "Hello"}]],
+            completion=[[{"role": "assistant", "content": "Hi"}]],
+            answer=["Hi"],
+            reward=[1.0],
+            task=["default"],
+            state=[{"custom_field": "value"}],
+            info=[{}],
+            metrics={},
+        )
 
         dataset = env.make_dataset(results, state_columns=["custom_field"])
 

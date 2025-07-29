@@ -19,6 +19,27 @@ class GenerateInputs(BaseModel):
     task: Optional[List[str]] = None
     completion: Optional[List[Messages]] = None
 
+class GenerateOutputs(BaseModel):
+    """Pydantic model for generation outputs."""
+    prompt: List[Messages]
+    completion: List[Messages]
+    answer: List[str]
+    state: List[State]
+    info: List[Info]
+    task: List[str]
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
+
+class RolloutScore(BaseModel):
+    """Pydantic model for individual rollout scores."""
+    reward: float
+    metrics: Dict[str, float] = {}
+
+class RolloutScores(BaseModel):
+    """Pydantic model for multiple rollout scores."""
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
+
 class ProcessedOutputs(BaseModel):
     """Pydantic model for processed outputs."""
     prompt_ids: List[List[int]]
@@ -119,7 +140,7 @@ def env_response(
     """
     Returns:
         - Response messages (List[ChatMessage] or str for completion mode)
-        - Updated state dictionary
+        - Updated state
     """
     # Return a list of ChatMessage dicts (typical case)
     response = [{"role": "user", "content": "Environment feedback"}]
@@ -192,12 +213,12 @@ async def rollout(...) -> Tuple[Messages, State]:
     """Returns (completion, final_state)"""
 
 # Evaluation results
-def evaluate(...) -> Dict[str, Any]:
-    """Returns dict with 'prompts', 'completions', 'rewards', 'states', etc."""
+def evaluate(...) -> GenerateOutputs:
+    """Returns GenerateOutputs with prompts, completions, rewards, states, etc."""
 
 # Generation results  
-def generate(...) -> Dict[str, List[Any]]:
-    """Returns dict with 'results' containing rollout data"""
+def generate(...) -> GenerateOutputs:
+    """Returns GenerateOutputs containing rollout data"""
 ```
 
 ### Parser Types
