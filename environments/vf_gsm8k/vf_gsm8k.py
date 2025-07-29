@@ -23,7 +23,7 @@ def load_environment(num_train_examples=-1, num_eval_examples=-1):
 
     rubric = vf.Rubric(
         funcs=[correct_answer_reward_func, parser.get_format_reward_func()],
-        weights=[1.0, 0.2],
+        weights=[1.0, 0.0],
     )
 
     vf_env = vf.SingleTurnEnv(

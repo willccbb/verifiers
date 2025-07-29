@@ -1,6 +1,7 @@
 """Tests for the RubricGroup class."""
 
 import pytest
+
 from verifiers import Rubric, RubricGroup
 
 
@@ -161,13 +162,13 @@ class TestRubricGroup:
         )
 
         # Should have scores from both rubrics
-        assert "func1" in scores
-        assert "func2" in scores
-        assert "reward" in scores
-        assert len(scores["func1"]) == 1
-        assert len(scores["func2"]) == 1
-        assert scores["func1"][0] == 1.0
-        assert scores["func2"][0] == 0.5
+        assert "func1" in scores.metrics
+        assert "func2" in scores.metrics
+        assert hasattr(scores, "reward")
+        assert len(scores.metrics["func1"]) == 1
+        assert len(scores.metrics["func2"]) == 1
+        assert scores.metrics["func1"][0] == 1.0
+        assert scores.metrics["func2"][0] == 0.5
 
     @pytest.mark.asyncio
     async def test_rubric_group_score_rollouts_duplicate_names(self):
@@ -204,9 +205,11 @@ class TestRubricGroup:
         )
 
         # Should have summed scores for duplicate function names
-        assert "func1" in scores
-        assert len(scores["func1"]) == 1
-        assert scores["func1"][0] == 2.0  # 1.0 + 1.0 (same function called twice)
+        assert "func1" in scores.metrics
+        assert len(scores.metrics["func1"]) == 1
+        assert (
+            scores.metrics["func1"][0] == 2.0
+        )  # 1.0 + 1.0 (same function called twice)
 
     @pytest.mark.asyncio
     async def test_rubric_group_score_rollouts_with_kwargs(self):
@@ -240,10 +243,10 @@ class TestRubricGroup:
         )
 
         # Should pass custom kwargs to reward functions
-        assert "func1" in scores
-        assert len(scores["func1"]) == 1
+        assert "func1" in scores.metrics
+        assert len(scores.metrics["func1"]) == 1
         assert (
-            scores["func1"][0] == 2.0
+            scores.metrics["func1"][0] == 2.0
         )  # 1.0 + 1.0 (both should get custom_param="test")
 
     @pytest.mark.asyncio
@@ -276,10 +279,10 @@ class TestRubricGroup:
         )
 
         # Should work with single rubric
-        assert "func1" in scores
-        assert "reward" in scores
-        assert len(scores["func1"]) == 1
-        assert scores["func1"][0] == 1.0
+        assert "func1" in scores.metrics
+        assert hasattr(scores, "reward")
+        assert len(scores.metrics["func1"]) == 1
+        assert scores.metrics["func1"][0] == 1.0
 
     @pytest.mark.asyncio
     async def test_rubric_group_score_rollouts_empty_data(self):
@@ -311,10 +314,10 @@ class TestRubricGroup:
         )
 
         # Should return empty scores but with correct structure
-        assert "func1" in scores
-        assert "reward" in scores
-        assert len(scores["func1"]) == 0
-        assert len(scores["reward"]) == 0
+        assert "func1" in scores.metrics
+        assert hasattr(scores, "reward")
+        assert len(scores.metrics["func1"]) == 0
+        assert len(scores.reward) == 0
 
     def test_rubric_group_mixed_rubric_types(self):
         """Test RubricGroup with different types of rubrics."""
@@ -366,11 +369,11 @@ class TestRubricGroup:
         )
 
         # Should work with max_concurrent parameter
-        assert "func1" in scores
-        assert "reward" in scores
-        assert len(scores["func1"]) == 2
-        assert scores["func1"][0] == 1.0
-        assert scores["func1"][1] == 1.0
+        assert "func1" in scores.metrics
+        assert hasattr(scores, "reward")
+        assert len(scores.metrics["func1"]) == 2
+        assert scores.metrics["func1"][0] == 1.0
+        assert scores.metrics["func1"][1] == 1.0
 
     def test_rubric_group_inheritance(self):
         """Test that RubricGroup properly inherits from Rubric."""

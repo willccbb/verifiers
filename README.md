@@ -16,6 +16,13 @@ Verifiers is a library of modular components for creating RL environments and tr
 
 ## Setup
 
+We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv init # create a fresh project
+source .venv/bin/activate
+```
+
 For local (CPU) development and evaluation with API models, do:
 ```bash
 uv add verifiers # uv add 'verifiers[dev]' for Jupyter + testing support
