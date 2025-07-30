@@ -174,9 +174,9 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
     )
     n = args.num_examples
     r = args.rollouts_per_example
-    for i in range(len(results.reward)):
+    for i in range(r):
         # rounded to 3 decimal places
-        trials = [round(results.reward[i * r + j], 3) for j in range(n)]
+        trials = [round(results.reward[(i * r) + j], 3) for j in range(n)]
         out = f"r{i + 1}: {trials}"
         print(out)
     for k in results.metrics:
