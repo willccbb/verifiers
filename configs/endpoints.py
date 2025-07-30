@@ -24,7 +24,7 @@ ENDPOINTS = {
         "url": "https://api.deepseek.com/v1",
         "key": "DEEPSEEK_API_KEY",
     },
-    "qwen3-instruct": {
+    "qwen3-a22b-instruct": {
         "model": "Qwen/Qwen3-235B-A22B-Instruct-2507",
         "url": "https://api.deepinfra.com/v1/openai",
         "key": "DEEPINFRA_API_KEY",
@@ -39,8 +39,8 @@ ENDPOINTS = {
         "url": "https://api.deepinfra.com/v1/openai",
         "key": "DEEPINFRA_API_KEY",
     },
-    "a3b": {
-        "model": "Qwen/Qwen3-30B-A3B-FP8",
+    "qwen3-a3b-instruct": {
+        "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
         "url": "http://0.0.0.0:8000/v1",
         "key": "EMPTY",
     },
