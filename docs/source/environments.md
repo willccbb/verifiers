@@ -4,7 +4,7 @@ This guide covers how to create, develop, and use environments in Verifiers.
 
 ## Creating a New Environment
 
-The recommended approach is to create an environment module - a self-contained package that can be installed and reused.
+The recommended approach is to create an environment *module*, i.e. a self-contained package that can be installed and reused.
 
 ### Initialize from Template
 
@@ -82,7 +82,7 @@ dependencies = [
 During development, install your environment locally:
 
 ```bash
-vf-install my-math-env
+vf-install my-math-env # wraps 'uv pip install -e ...'
 ```
 
 This installs the module and its dependencies in your Python environment.
@@ -92,7 +92,7 @@ This installs the module and its dependencies in your Python environment.
 Use the CLI to quickly test:
 
 ```bash
-vf-eval my-math-env -m gpt-4.1-mini -n 5
+vf-eval my-math-env -m gpt-4.1-mini -n 5 # runs a small batch of rollouts; use -h to see options
 ```
 
 Or test programmatically:
@@ -106,7 +106,7 @@ env = vf.load_environment("my-math-env")
 
 # Test with a model
 client = OpenAI()
-results = env.evaluate(client, "gpt-4.1-mini", num_examples=5)
+results = env.evaluate(client, "gpt-4.1-mini", num_examples=5, rollouts_per_example=2)
 print(results)
 ```
 
