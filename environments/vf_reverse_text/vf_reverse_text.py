@@ -3,14 +3,14 @@ from datasets import load_dataset
 import verifiers as vf
 
 
-def load_environment(**kwargs):
+def load_environment(num_train_examples=2000, num_eval_examples=200, **kwargs):
     dataset = load_dataset("agentlans/wikipedia-paragraphs", split="train").map(
         lambda x: {"question": x["text"], "answer": x["text"][::-1]}
     )
-    TRAIN_SIZE = 100
-    EVAL_SIZE = 10
-    train_dataset = dataset.select(range(TRAIN_SIZE))  # type: ignore
-    eval_dataset = dataset.select(range(TRAIN_SIZE, TRAIN_SIZE + EVAL_SIZE))  # type: ignore
+    train_dataset = dataset.select(range(num_train_examples))  # type: ignore
+    eval_dataset = dataset.select(  # type: ignore
+        range(num_train_examples, num_train_examples + num_eval_examples)
+    )
 
     parser = vf.XMLParser(["think", "answer"], answer_field="answer")
     system_prompt = f"""Reverse the given text.
