@@ -35,16 +35,18 @@ def load_environment(**kwargs) -> vf.Environment:
 """
 
 
-def init_environment(env: str, path: str = "./environments", skip_vf_prefix: bool = False) -> Path:
+def init_environment(
+    env: str, path: str = "./environments", skip_vf_prefix: bool = False
+) -> Path:
     """
     Initialize a new verifiers environment.
-    
+
     Args:
-        env: The environment id to init ('vf-' prefix is optional but recommended, 
+        env: The environment id to init ('vf-' prefix is optional but recommended,
              included by default unless skip_vf_prefix is True)
         path: Path to environments directory (default: ./environments)
         skip_vf_prefix: Skip the vf- prefix in the environment id
-        
+
     Returns:
         Path to the created environment directory
     """
@@ -85,7 +87,7 @@ def init_environment(env: str, path: str = "./environments", skip_vf_prefix: boo
         print(
             f"{env_id.replace('-', '_')}.py already exists at {environment_file}, skipping..."
         )
-    
+
     return local_dir
 
 
