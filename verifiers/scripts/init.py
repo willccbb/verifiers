@@ -35,34 +35,28 @@ def load_environment(**kwargs) -> vf.Environment:
 """
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "env",
-        type=str,
-        help="The environment id to init ('vf-' prefix is optional but recommended, included by default unless --skip-vf-prefix is used)",
-    )
-    parser.add_argument(
-        "--path",
-        "-p",
-        type=str,
-        default="./environments",
-        help="Path to environments directory (default: ./environments)",
-    )
-    parser.add_argument(
-        "--skip-vf-prefix",
-        action="store_true",
-        help="Skip the vf- prefix in the environment id",
-    )
-    args = parser.parse_args()
+def init_environment(
+    env: str, path: str = "./environments", skip_vf_prefix: bool = False
+) -> Path:
+    """
+    Initialize a new verifiers environment.
 
-    if args.skip_vf_prefix or args.env.startswith("vf-"):
-        env_id = args.env
+    Args:
+        env: The environment id to init ('vf-' prefix is optional but recommended,
+             included by default unless skip_vf_prefix is True)
+        path: Path to environments directory (default: ./environments)
+        skip_vf_prefix: Skip the vf- prefix in the environment id
+
+    Returns:
+        Path to the created environment directory
+    """
+    if skip_vf_prefix or env.startswith("vf-"):
+        env_id = env
     else:
-        env_id = f"vf-{args.env}"
+        env_id = f"vf-{env}"
 
     # make environment parent directory if it doesn't exist
-    local_dir = Path(args.path) / env_id.replace("-", "_")
+    local_dir = Path(path) / env_id.replace("-", "_")
     local_dir.mkdir(parents=True, exist_ok=True)
 
     # create README.md if it doesn't exist
@@ -93,6 +87,32 @@ def main():
         print(
             f"{env_id.replace('-', '_')}.py already exists at {environment_file}, skipping..."
         )
+
+    return local_dir
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "env",
+        type=str,
+        help="The environment id to init ('vf-' prefix is optional but recommended, included by default unless --skip-vf-prefix is used)",
+    )
+    parser.add_argument(
+        "--path",
+        "-p",
+        type=str,
+        default="./environments",
+        help="Path to environments directory (default: ./environments)",
+    )
+    parser.add_argument(
+        "--skip-vf-prefix",
+        action="store_true",
+        help="Skip the vf- prefix in the environment id",
+    )
+    args = parser.parse_args()
+
+    init_environment(args.env, args.path, args.skip_vf_prefix)
 
 
 if __name__ == "__main__":
