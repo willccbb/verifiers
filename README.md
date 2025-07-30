@@ -248,7 +248,7 @@ If you use this code in your research, please cite:
 ```bibtex
 @misc{brown_verifiers_2025,
   author       = {William Brown},
-  title        = {{verifiers}: RL Environments \& Tooling},
+  title        = {{Verifiers}: Reinforcement Learning with LLMs in Verifiable Environments},
   howpublished = {\url{https://github.com/willccbb/verifiers}},
   note         = {Commit abcdefg • accessed DD Mon YYYY},
   year         = {2025}
