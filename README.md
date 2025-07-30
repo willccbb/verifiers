@@ -16,6 +16,13 @@ Verifiers is a library of modular components for creating RL environments and tr
 
 ## Setup
 
+We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv init # create a fresh project
+source .venv/bin/activate
+```
+
 For local (CPU) development and evaluation with API models, do:
 ```bash
 uv add verifiers # uv add 'verifiers[dev]' for Jupyter + testing support
@@ -49,28 +56,29 @@ Environments in Verifiers are installable Python modules which can specify depen
 
 To initialize a blank Environment module template, do:
 ```bash
-vf-init my-new-environment # -p /path/to/environments (defaults to "./environments")
+vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
 ```
+We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies, and we prepend it by fault if it is not present, though you can pass `--skip-vf-prefix` to override. Names are auto-standardized to use `"-"` in IDs and `"_"` in paths.
 
 To an install an Environment module into your project, do:
 ```bash
-vf-install my-new-environment # -p /path/to/environments (defaults to "./environments") 
+vf-install vf-environment-name # -p /path/to/environments (defaults to "./environments") 
 ```
 
 To install an Environment module from this repo's `environments` folder, do:
 ```bash
-vf-install math-python --from-repo # -b branch_or_commit (defaults to "main")
+vf-install vf-math-python --from-repo # -b branch_or_commit (defaults to "main")
 ```
 
 Once an Environment module is installed, you can create an instance of the Environment using `load_environment`, passing any necessary args:
 ```python
 import verifiers as vf
-vf_env = vf.load_environment("my-new-environment", **env_args)
+vf_env = vf.load_environment("vf-environment-name", **env_args)
 ```
 
 To run a quick evaluation of your Environment with an API-based model, do:
 ```bash
-vf-eval my-new-environment # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
+vf-eval vf-environment-name # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
 The core elements of Environments in are:
@@ -193,7 +201,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-1.7B-Wordle \
     --data-parallel-size 7 --enforce-eager --disable-log-requests
 
 # training
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 1 \
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wordle.py --size 1.7B
 ```
 
@@ -238,10 +246,12 @@ Please note that the core `verifiers/` library is intended to be a relatively li
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{brown2025verifiers,
-  title={Verifiers: Reinforcement Learning with LLMs in Verifiable Environments},
-  author={Brown, William},
-  year={2025}
+@misc{brown_verifiers_2025,
+  author       = {William Brown},
+  title        = {{Verifiers}: Reinforcement Learning with LLMs in Verifiable Environments},
+  howpublished = {\url{https://github.com/willccbb/verifiers}},
+  note         = {Commit abcdefg • accessed DD Mon YYYY},
+  year         = {2025}
 }
 ```
 

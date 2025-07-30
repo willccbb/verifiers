@@ -275,19 +275,18 @@ class AsyncBatchGenerator:
         self.is_generating = False
 
         # Extract all reward-related keys
-        all_reward_dict = {}
-        reward_keys = [
-            k for k in env_results.keys() if k.endswith("_func") or k == "reward"
-        ]
-        for key in reward_keys:
-            all_reward_dict[key] = env_results[key]
+        all_reward_dict = {
+            "reward": env_results.reward,
+        }
+        for k in env_results.metrics:
+            all_reward_dict[k] = env_results.metrics[k]
 
         # Process results
         processed_results = self.env.process_env_results_vllm(
-            env_results["prompt"],
-            env_results["completion"],
-            env_results["state"],
-            env_results["reward"],
+            prompts=env_results.prompt,
+            completions=env_results.completion,
+            states=env_results.state,
+            rewards=env_results.reward,
             processing_class=request.processing_class,
             max_seq_len=request.max_seq_len,
             mask_env_responses=request.mask_env_responses,
@@ -299,8 +298,8 @@ class AsyncBatchGenerator:
             batch_id=request.batch_id,
             processed_results=processed_results,
             all_reward_dict=all_reward_dict,
-            completions=env_results["completion"],
-            prompts=env_results["prompt"],
+            completions=env_results.completion,
+            prompts=env_results.prompt,
         )
 
     async def _evaluate_async(self, num_samples: int = -1) -> GenerateOutputs:

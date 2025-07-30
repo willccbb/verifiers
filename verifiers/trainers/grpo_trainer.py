@@ -1302,4 +1302,4 @@ class GRPOTrainer(Trainer):
         self._metrics[mode]["completions/mean_terminated_length"].append(float(sum(term_lengths)) / len(term_lengths))
         self._metrics[mode]["completions/min_terminated_length"].append(float(min(term_lengths)))
         self._metrics[mode]["completions/max_terminated_length"].append(float(max(term_lengths)))
-    
+ 

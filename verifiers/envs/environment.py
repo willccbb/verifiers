@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -332,57 +333,71 @@ class Environment(ABC):
         gen_sampling_args = deepcopy(self.sampling_args)
         gen_sampling_args.update(sampling_args)
 
-        # run rollouts
+        # preprocess dataset or GenerateInputs to GenerateOutputs
+        results_dict = {}
         if isinstance(inputs, Dataset):
             # get prompt column
-            results = {}
+            results_dict = {}
             for col in inputs.column_names:
                 if col == "info":
                     # handle info column to ensure mutable dicts
-                    results[col] = [dict(item) for item in inputs[col]]
+                    results_dict[col] = [dict(item) for item in inputs[col]]
                 else:
-                    results[col] = deepcopy(inputs[col])
+                    results_dict[col] = deepcopy(inputs[col])
         else:
-            results = {col: deepcopy(inputs[col]) for col in inputs}
-        if "prompt" not in results:
+            results_dict = {col: deepcopy(inputs[col]) for col in inputs}
+        if "prompt" not in results_dict:
             raise ValueError("prompt column not found in inputs")
-        if "answer" not in results and "info" not in results:
+        if "answer" not in results_dict and "info" not in results_dict:
             raise ValueError("answer or info column must be found in inputs")
-        if "answer" not in results:
-            results["answer"] = [""] * len(results["prompt"])
-        if "task" not in results:
-            results["task"] = ["default"] * len(results["prompt"])
-        if "info" not in results:
-            results["info"] = [{}] * len(results["prompt"])
-        if self.oai_tools and "oai_tools" not in results["info"][0]:
-            for i, info in enumerate(results["info"]):
+        if "answer" not in results_dict:
+            results_dict["answer"] = [""] * len(results_dict["prompt"])
+        if "task" not in results_dict:
+            results_dict["task"] = ["default"] * len(results_dict["prompt"])
+        if "info" not in results_dict:
+            results_dict["info"] = [{}] * len(results_dict["prompt"])
+        for i, info in enumerate(results_dict["info"]):
+            if isinstance(info, str):
+                info = json.loads(info)
+            if self.oai_tools and "oai_tools" not in info:
                 info["oai_tools"] = self.oai_tools
 
+        # prepare GenerateOutputs and run rollouts
+        results = GenerateOutputs(
+            prompt=results_dict["prompt"],
+            answer=results_dict["answer"],
+            task=results_dict["task"],
+            info=results_dict["info"],
+            completion=[],
+            state=[],
+            reward=[],
+            metrics={},
+        )
         rollouts = await self.run_rollouts(
-            prompts=results["prompt"],
-            answers=results["answer"],
-            tasks=results["task"],
-            infos=results["info"],
+            prompts=results.prompt,
+            answers=results.answer,
+            tasks=results.task,
+            infos=results.info,
             client=client,
             model=model,
             sampling_args=gen_sampling_args,
             max_concurrent=max_concurrent,
             **kwargs,
         )
-        results["completion"] = [rollout[0] for rollout in rollouts]
-        results["state"] = [rollout[1] for rollout in rollouts]
+        results.completion = [rollout[0] for rollout in rollouts]
+        results.state = [rollout[1] for rollout in rollouts]
         if score_rollouts:
-            results_rewards = await self.rubric.score_rollouts(
-                prompts=results["prompt"],
-                completions=results["completion"],
-                answers=results["answer"],
-                states=results["state"],
-                tasks=results["task"],
-                infos=results["info"],
+            rollout_scores = await self.rubric.score_rollouts(
+                prompts=results.prompt,
+                completions=results.completion,
+                answers=results.answer,
+                states=results.state,
+                tasks=results.task,
+                infos=results.info,
                 apply_weights=True,
             )
-            # add rewards to results
-            results.update(results_rewards)
+            results.reward = rollout_scores.reward
+            results.metrics = rollout_scores.metrics
         return results
 
     def generate(
@@ -861,13 +876,34 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         )
         return results
 
+    def _sanitize_tool_calls(self, completion: Messages) -> Messages:
+        """
+        Sanitize tool calls from a completion.
+        """
+
+        assert isinstance(completion, list)
+        sanitized_completion = []
+        for m in completion:
+            if "tool_calls" in m:
+                new_m = {
+                    "role": m["role"],
+                    "content": m.get("content", ""),
+                    "tool_calls": [
+                        json.dumps(tc.model_dump())  # type: ignore
+                        for tc in m.get("tool_calls", [])
+                    ],
+                }
+                sanitized_completion.append(new_m)
+            else:
+                sanitized_completion.append(m)
+        return sanitized_completion
+
     def make_dataset(
         self,
         results: GenerateOutputs,
         push_to_hub: bool = False,
         hub_name: str | None = None,
         state_columns: List[str] = [],
-        extra_columns: List[str] = [],
         **kwargs,
     ) -> Dataset:
         """
@@ -876,26 +912,31 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         if push_to_hub and hub_name is None:
             raise ValueError("hub_name must be provided if push_to_hub is True")
 
-        cols = ["prompt", "completion", "answer", "reward"]
-        if results["task"][0] is not None:
-            cols.append("task")
-        if "state" in results:
+        cols = ["prompt", "completion", "answer", "info", "task", "reward"]
+
+        results_dict = {
+            "prompt": results.prompt,
+            "completion": [],
+            "answer": results.answer,
+            "info": results.info,
+            "task": results.task,
+            "reward": results.reward,
+        }
+        for i in range(len(results.completion)):
+            results_dict["completion"].append(
+                self._sanitize_tool_calls(results.completion[i])
+            )
+        results_dict.update(results.metrics)
+        if results.state[0] is not None:
             for col in state_columns:
-                if col in results["state"][0]:
-                    results[col] = [state[col] for state in results["state"]]
+                if col in results.state[0]:
+                    results_dict[col] = [state[col] for state in results.state]
                     cols.append(col)
                 else:
                     self.logger.warning(
                         f"Column {col} not found in state, skipping from dataset."
                     )
-        for col in extra_columns:
-            if col in results:
-                cols.append(col)
-            else:
-                self.logger.warning(
-                    f"Column {col} not found in results, skipping from dataset."
-                )
-        dataset = Dataset.from_dict({col: results[col] for col in cols})
+        dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
         if push_to_hub:
             assert hub_name is not None
             dataset.push_to_hub(hub_name)

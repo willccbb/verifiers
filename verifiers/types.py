@@ -52,7 +52,31 @@ class GenerateInputs(BaseModel):
     completion: Optional[List[Messages]] = None
 
 
-GenerateOutputs = Dict[str, Any]
+class GenerateOutputs(BaseModel):
+    """Pydantic model for generation outputs."""
+
+    prompt: List[Messages]
+    completion: List[Messages]
+    answer: List[str]
+    state: List[State]
+    info: List[Info]
+    task: List[str]
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
+
+
+class RolloutScore(BaseModel):
+    """Pydantic model for rollout scores."""
+
+    reward: float
+    metrics: Dict[str, float] = {}
+
+
+class RolloutScores(BaseModel):
+    """Pydantic model for rubric outputs."""
+
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
 
 
 class ProcessedOutputs(BaseModel):

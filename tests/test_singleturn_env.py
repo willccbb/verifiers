@@ -6,6 +6,7 @@ import pytest
 from datasets import Dataset
 
 from verifiers import Parser, Rubric, SingleTurnEnv
+from verifiers.types import RolloutScores
 
 
 class TestSingleTurnEnv:
@@ -228,17 +229,17 @@ class TestSingleTurnEnv:
 
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(
-            return_value={"reward": [1.0, 1.0]}
+            return_value=RolloutScores(reward=[1.0, 1.0], metrics={})
         )
 
         results = await mock_singleturn_env.a_generate(inputs)
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
-        assert len(results["completion"]) == 2
-        assert len(results["state"]) == 2
-        assert results["reward"] == [1.0, 1.0]
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
+        assert len(results.completion) == 2
+        assert len(results.state) == 2
+        assert results.reward == [1.0, 1.0]
 
     @pytest.mark.asyncio
     async def test_a_generate_with_dataset(
@@ -247,15 +248,15 @@ class TestSingleTurnEnv:
         """Test async generation with Dataset input."""
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(
-            return_value={"reward": [1.0, 1.0]}
+            return_value=RolloutScores(reward=[1.0, 1.0], metrics={})
         )
 
         results = await mock_singleturn_env.a_generate(sample_chat_dataset)
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
-        assert len(results["completion"]) == 2
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
+        assert len(results.completion) == 2
 
     @pytest.mark.asyncio
     async def test_a_generate_no_scoring(self, mock_singleturn_env):
@@ -264,9 +265,10 @@ class TestSingleTurnEnv:
 
         results = await mock_singleturn_env.a_generate(inputs, score_rollouts=False)
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" not in results  # Should not score when score_rollouts=False
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")  # reward attribute exists but should be empty
+        assert results.reward == []  # Should be empty when score_rollouts=False
 
     def test_generate_sync_wrapper(self, mock_singleturn_env):
         """Test the synchronous generate wrapper."""
@@ -278,16 +280,16 @@ class TestSingleTurnEnv:
 
         # Mock the rubric.score_rollouts method
         mock_singleturn_env.rubric.score_rollouts = AsyncMock(
-            return_value={"reward": [1.0]}
+            return_value=RolloutScores(reward=[1.0], metrics={})
         )
 
         results = mock_singleturn_env.generate(
             inputs, client=mock_singleturn_env.client
         )
 
-        assert "completion" in results
-        assert "state" in results
-        assert "reward" in results
+        assert hasattr(results, "completion")
+        assert hasattr(results, "state")
+        assert hasattr(results, "reward")
 
     @pytest.mark.asyncio
     async def test_different_message_types_in_same_env(

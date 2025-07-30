@@ -32,7 +32,7 @@ def main():
         "--endpoints-path",
         "-e",
         type=str,
-        default="./endpoints.py",
+        default="./configs/endpoints.py",
         help="Path to API endpoints registry",
     )
     parser.add_argument(
@@ -98,7 +98,7 @@ def main():
         "--save-path",
         "-p",
         type=str,
-        default="results.jsonl",
+        default="results",
         help="Path to save dataset",
     )
     parser.add_argument(
@@ -156,8 +156,6 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
         rollouts_per_example=args.rollouts_per_example,
         max_concurrent_requests=args.max_concurrent_requests,
     )
-    scoring_func_names = vf_env.rubric.get_reward_func_names() + ["reward"]
-    rewards = {k: v for k, v in results.items() if k in scoring_func_names}
     print("--- Evaluation ---")
     print(f"Environment: {args.env}")
     print(f"Model: {args.model}")
@@ -167,21 +165,28 @@ or specify the model name (-m), API host base URL (-b), and API key variable nam
 
     print("--- Example ---")
     vf.print_prompt_completions_sample(
-        results["prompt"], results["completion"], rewards, step=0
+        results.prompt, results.completion, results.reward, step=0
     )
     print("--- All ---")
     print("Rewards:")
-    for k in scoring_func_names:
-        if k in results:
-            v = results[k]
-            print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
-            n = args.num_examples
-            r = args.rollouts_per_example
-            for i in range(r):
-                # rounded to 3 decimal places
-                trials = [round(v[(i * r) + j], 3) for j in range(n)]
-                out = f"r{i + 1}: {trials}"
-                print(out)
+    print(
+        f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
+    )
+    n = args.num_examples
+    r = args.rollouts_per_example
+    for i in range(r):
+        # rounded to 3 decimal places
+        trials = [round(results.reward[(i * r) + j], 3) for j in range(n)]
+        out = f"r{i + 1}: {trials}"
+        print(out)
+    for k in results.metrics:
+        v = results.metrics[k]
+        print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        for i in range(r):
+            # rounded to 3 decimal places
+            trials = [round(v[(i * r) + j], 3) for j in range(n)]
+            out = f"r{i + 1}: {trials}"
+            print(out)
     if args.save_dataset:
         dataset = vf_env.make_dataset(results)
         dataset.save_to_disk(args.save_path)

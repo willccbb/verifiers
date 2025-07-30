@@ -4,6 +4,52 @@ This guide explains the key types and data structures in Verifiers.
 
 ## Core Types
 
+### Pydantic Models
+
+Verifiers uses Pydantic models for structured data:
+
+```python
+from pydantic import BaseModel
+
+class GenerateInputs(BaseModel):
+    """Pydantic model for generation inputs."""
+    prompt: List[Messages]
+    answer: Optional[List[str]] = None
+    info: Optional[List[Dict]] = None
+    task: Optional[List[str]] = None
+    completion: Optional[List[Messages]] = None
+
+class GenerateOutputs(BaseModel):
+    """Pydantic model for generation outputs."""
+    prompt: List[Messages]
+    completion: List[Messages]
+    answer: List[str]
+    state: List[State]
+    info: List[Info]
+    task: List[str]
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
+
+class RolloutScore(BaseModel):
+    """Pydantic model for individual rollout scores."""
+    reward: float
+    metrics: Dict[str, float] = {}
+
+class RolloutScores(BaseModel):
+    """Pydantic model for multiple rollout scores."""
+    reward: List[float]
+    metrics: Dict[str, List[float]] = {}
+
+class ProcessedOutputs(BaseModel):
+    """Pydantic model for processed outputs."""
+    prompt_ids: List[List[int]]
+    prompt_mask: List[List[int]]
+    completion_ids: List[List[int]]
+    completion_mask: List[List[int]]
+    completion_logprobs: List[List[float]]
+    rewards: List[float]
+```
+
 ### State Dictionary
 
 The `State` object tracks rollout information throughout an interaction:
@@ -36,13 +82,17 @@ The `responses` field contains raw API response objects with:
 ### Message Formats
 
 ```python
+# Import from verifiers.types
+from verifiers.types import ChatMessage, Messages
+
 # Chat format (recommended)
-ChatMessage = TypedDict({
+# ChatMessage is a dict with these fields:
+ChatMessage = {
     "role": str,                    # "system", "user", or "assistant"
     "content": str,                 # Message text
     "tool_calls": List[...],        # Optional tool calls
     "tool_call_id": str,            # Optional tool call ID
-})
+}
 
 Messages = Union[str, List[ChatMessage]]  # Can be string (completion) or chat
 
@@ -86,15 +136,20 @@ def env_response(
     messages: List[ChatMessage],
     state: State,
     **kwargs
-) -> Tuple[Union[str, ChatMessage], State]:
+) -> Tuple[Messages, State]:
     """
     Returns:
-        - Response message (string or ChatMessage dict)
-        - Updated state dictionary
+        - Response messages (List[ChatMessage] or str for completion mode)
+        - Updated state
     """
-    response = "Environment feedback"  # or {"role": "user", "content": "..."}
-    new_state = {**state, "turn": state.get("turn", 0) + 1}
-    return response, new_state
+    # Return a list of ChatMessage dicts (typical case)
+    response = [{"role": "user", "content": "Environment feedback"}]
+    
+    # Update state as needed
+    state["turn"] = state.get("turn", 0) + 1
+    state["last_action"] = "provided feedback"
+    
+    return response, state
 ```
 
 ### Sampling Arguments
@@ -158,12 +213,12 @@ async def rollout(...) -> Tuple[Messages, State]:
     """Returns (completion, final_state)"""
 
 # Evaluation results
-def evaluate(...) -> Dict[str, Any]:
-    """Returns dict with 'prompts', 'completions', 'rewards', 'states', etc."""
+def evaluate(...) -> GenerateOutputs:
+    """Returns GenerateOutputs with prompts, completions, rewards, states, etc."""
 
 # Generation results  
-def generate(...) -> Dict[str, List[Any]]:
-    """Returns dict with 'results' containing rollout data"""
+def generate(...) -> GenerateOutputs:
+    """Returns GenerateOutputs containing rollout data"""
 ```
 
 ### Parser Types
