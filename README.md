@@ -246,10 +246,12 @@ Please note that the core `verifiers/` library is intended to be a relatively li
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{brown2025verifiers,
-  title={Verifiers: Reinforcement Learning with LLMs in Verifiable Environments},
-  author={Brown, William},
-  year={2025}
+@misc{brown_verifiers_2025,
+  author       = {William Brown},
+  title        = {{verifiers}: RL Environments \& Tooling},
+  howpublished = {\url{https://github.com/willccbb/verifiers}},
+  note         = {Commit abcdefg • accessed DD Mon YYYY},
+  year         = {2025}
 }
 ```
 

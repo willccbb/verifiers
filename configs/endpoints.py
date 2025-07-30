@@ -40,7 +40,7 @@ ENDPOINTS = {
         "key": "DEEPINFRA_API_KEY",
     },
     "qwen3-a3b-instruct": {
-        "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+        "model": "willcb/Qwen3-30B-A3B-Instruct-2507-FP8",
         "url": "http://0.0.0.0:8000/v1",
         "key": "EMPTY",
     },
