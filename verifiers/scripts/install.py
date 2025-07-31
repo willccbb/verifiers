@@ -15,6 +15,23 @@ Options:
 """
 
 
+def install_environment(env: str, path: str, from_repo: bool, branch: str):
+    env_folder = env.replace("-", "_")
+    env_name = env_folder.replace("_", "-")
+    if from_repo:
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{branch}#subdirectory=environments/{env_folder}",
+            ]
+        )
+    else:
+        env_path = Path(path) / env_folder
+        subprocess.run(["uv", "pip", "install", "-e", env_path])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("env", type=str, help="The environment id to install")
@@ -41,20 +58,12 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.from_repo:
-        env_folder = args.env.replace("-", "_")
-        env_name = env_folder.replace("_", "-")
-        subprocess.run(
-            [
-                "uv",
-                "pip",
-                "install",
-                f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{args.branch}#subdirectory=environments/{env_folder}",
-            ]
-        )
-    else:
-        env_path = Path(args.path) / args.env.replace("-", "_")
-        subprocess.run(["uv", "pip", "install", "-e", env_path])
+    install_environment(
+        env=args.env,
+        path=args.path,
+        from_repo=args.from_repo,
+        branch=args.branch,
+    )
 
 
 if __name__ == "__main__":
