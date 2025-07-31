@@ -14,8 +14,8 @@ def load_environment(
 ):
     judge_prompt = "Q: {question}\nA: {answer}\nGiven: {response}\nRespond with a score between 0.0 and 1.0."
     rubric = vf.JudgeRubric(
-        client=OpenAI(base_url=base_url, api_key=os.getenv(api_key_var, "EMPTY")),
-        model=model_name,
+        judge_client=OpenAI(base_url=base_url, api_key=os.getenv(api_key_var, "EMPTY")),
+        judge_model=model_name,
         judge_prompt=judge_prompt,
     )
     vf_env = vf.SingleTurnEnv(
