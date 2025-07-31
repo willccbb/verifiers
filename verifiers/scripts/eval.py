@@ -45,9 +45,8 @@ def eval_environment(
             raise ImportError(f"endpoints.py not found in {current_dir}")
     except (ImportError, AttributeError):
         print(
-            f"No local endpoint registry found at {current_dir}/endpoints.py. \
-Please run `uv run vf-local` to create a local workspace, \
-or specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
+            f"No local endpoint registry found at {endpoints_path}. \
+Please specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
         )
         ENDPOINTS = {}
 
