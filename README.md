@@ -14,6 +14,8 @@ Environments for LLM Reinforcement Learning
 
 Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
 
+Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
+
 ## Setup
 
 We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
