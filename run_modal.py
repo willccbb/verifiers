@@ -86,7 +86,7 @@ cache_volume = modal.Volume.from_name("verifiers-cache", create_if_missing=True)
 
 @app.function(
     image=image,
-    gpu="A10G",  # Can change to H100, A100, etc.
+    gpu="H100",  # Using H100 for more GPU memory (80GB vs A10G's 23GB)
     timeout=7200,
     volumes={
         "/workspace": storage_volume,
@@ -161,6 +161,10 @@ def run_training_command(cmd: str, env_vars: dict = None):
     
     # Enable flash attention
     env['USE_FLASH_ATTENTION'] = 'true'
+    
+    # Add vLLM debugging
+    env['VLLM_LOGGING_LEVEL'] = 'DEBUG'
+    env['VLLM_WORKER_TIMEOUT'] = '300'
     
     # If no OPENAI_API_KEY is set, use a dummy one for vLLM
     if 'OPENAI_API_KEY' not in env:
