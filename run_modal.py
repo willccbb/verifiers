@@ -86,12 +86,20 @@ cache_volume = modal.Volume.from_name("verifiers-cache", create_if_missing=True)
 
 @app.function(
     image=image,
-    gpu="H100",  # Using H100 for more GPU memory (80GB vs A10G's 23GB)
+    gpu="H100:2",  # Use 2 H100 GPUs for multi-GPU training
     timeout=7200,
     volumes={
         "/workspace": storage_volume,
         "/cache": cache_volume,  # Changed from /root/.cache
     },
+    secrets=[
+        modal.Secret.from_name("my-keys", required=False),  # Create this secret in Modal dashboard
+        modal.Secret.from_local_environ(  # Or pass specific env vars from local environment
+            "WANDB_API_KEY",
+            "OPENAI_API_KEY",
+            "HF_TOKEN",
+        ),
+    ],
 )
 def run_training_command(cmd: str, env_vars: dict = None):
     """Run training command with full environment setup."""
@@ -166,6 +174,15 @@ def run_training_command(cmd: str, env_vars: dict = None):
     env['VLLM_LOGGING_LEVEL'] = 'DEBUG'
     env['VLLM_WORKER_TIMEOUT'] = '300'
     
+    # Set up distributed training environment with proper process isolation
+    env['MASTER_ADDR'] = 'localhost'
+    env['MASTER_PORT'] = '12355'
+    
+    # Prevent NCCL conflicts between vLLM and training processes
+    env['NCCL_P2P_DISABLE'] = '1'
+    env['NCCL_SHM_DISABLE'] = '1'
+    env['NCCL_IB_DISABLE'] = '1'
+    
     # If no OPENAI_API_KEY is set, use a dummy one for vLLM
     if 'OPENAI_API_KEY' not in env:
         env['OPENAI_API_KEY'] = 'dummy-key-for-vllm'
@@ -204,17 +221,68 @@ def run_training_command(cmd: str, env_vars: dict = None):
         if os.path.exists("scripts"):
             env['PATH'] = f"{work_dir}/scripts:{env['PATH']}"
     
-    # Run the command
+    # Handle GRPO training which needs vLLM server + training process
+    if "train_wordle.py" in cmd:
+        print(f"\n=== Starting vLLM Server for GRPO Training ===")
+        # Start vLLM server in background - use GPU 0 only to avoid NCCL conflicts
+        vllm_cmd = "CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-1.7B-Wordle --enforce-eager --disable-log-requests --port 8000"
+        print(f"Starting vLLM server: {vllm_cmd}")
+        
+        # Create separate environment for vLLM to avoid process group conflicts
+        vllm_env = env.copy()
+        vllm_env['MASTER_PORT'] = '12356'  # Different port for vLLM
+        vllm_env['CUDA_VISIBLE_DEVICES'] = '0'  # Explicitly set for vLLM
+        
+        vllm_process = subprocess.Popen(
+            vllm_cmd,
+            shell=True,
+            env=vllm_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # Wait for server to be ready
+        print("Waiting for vLLM server to start...")
+        import time
+        try:
+            import requests
+        except ImportError:
+            print("Installing requests...")
+            subprocess.run(["pip", "install", "requests"], check=True)
+        server_ready = False
+        for i in range(60):  # Wait up to 2 minutes
+            try:
+                response = requests.get("http://localhost:8000/health", timeout=5)
+                if response.status_code == 200:
+                    server_ready = True
+                    print("vLLM server is ready!")
+                    break
+            except:
+                pass
+            time.sleep(2)
+            if i % 10 == 0:
+                print(f"Still waiting for vLLM server... ({i*2}s)")
+        
+        if not server_ready:
+            print("WARNING: vLLM server may not be ready, but proceeding with training...")
+    
+    # Run the main command
     try:
         print(f"\n=== Running Command ===")
         print(f"Command: {cmd}")
         
         # For multi-GPU commands, parse and adjust CUDA_VISIBLE_DEVICES
         if "CUDA_VISIBLE_DEVICES=" in cmd:
-            # Modal handles GPU allocation, so we need to adjust this
-            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=0,1,2,3,4,5", "CUDA_VISIBLE_DEVICES=0")
-            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=6,7", "CUDA_VISIBLE_DEVICES=0")
+            # Modal provides GPUs as 0,1 - reserve GPU 0 for vLLM, use GPU 1 for training
+            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=0,1,2,3,4,5", "CUDA_VISIBLE_DEVICES=1")
+            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=6,7", "CUDA_VISIBLE_DEVICES=1")
             print(f"Adjusted command for Modal: {cmd}")
+            
+            # Also adjust num-processes for single GPU training
+            if "--num-processes 2" in cmd:
+                cmd = cmd.replace("--num-processes 2", "--num-processes 1")
+                print(f"Adjusted to single process training: {cmd}")
         
         result = subprocess.run(
             cmd,
