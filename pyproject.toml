@@ -111,16 +111,16 @@ include = [
     "/tests",
     "/README.md",
     "/LICENSE",
+    "/environments",
 ]
 exclude = [
     "/wandb",
     "/scratch",
     "/configs",
-    "/environments",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["verifiers"]
+packages = ["verifiers", "environments"]
 
 [dependency-groups]
 dev = [

@@ -93,12 +93,11 @@ cache_volume = modal.Volume.from_name("verifiers-cache", create_if_missing=True)
         "/cache": cache_volume,  # Changed from /root/.cache
     },
     secrets=[
-        modal.Secret.from_name("my-keys", required=False),  # Create this secret in Modal dashboard
-        modal.Secret.from_local_environ(  # Or pass specific env vars from local environment
+        modal.Secret.from_local_environ([  # Or pass specific env vars from local environment
             "WANDB_API_KEY",
             "OPENAI_API_KEY",
             "HF_TOKEN",
-        ),
+        ]),
     ],
 )
 def run_training_command(cmd: str, env_vars: dict = None):
@@ -158,7 +157,7 @@ def run_training_command(cmd: str, env_vars: dict = None):
     env['PYTHONPATH'] = f"{work_dir}:{work_dir}/environments"
     env['TRANSFORMERS_CACHE'] = '/cache/huggingface'
     env['HF_HOME'] = '/cache/huggingface'
-    env['UV_CACHE_DIR'] = '/cache/uv'  # Also cache uv downloads
+    env['UV_CACHE_DIR'] = '/workspace/uv_cache'  # Use a writable location
     
     # Add any custom env vars
     if env_vars:
@@ -182,7 +181,99 @@ def run_training_command(cmd: str, env_vars: dict = None):
     env['NCCL_P2P_DISABLE'] = '1'
     env['NCCL_SHM_DISABLE'] = '1'
     env['NCCL_IB_DISABLE'] = '1'
-    
+
+    # Set up and activate virtual environment
+    venv_dir = "/workspace/verifiers_venv"
+    if not os.path.exists(os.path.join(venv_dir, "bin", "activate")):
+        print(f"Creating virtual environment in {venv_dir}...")
+        # Use Python's built-in venv module, which is more reliable
+        subprocess.run(["python3", "-m", "venv", venv_dir], check=True, env=os.environ.copy())
+        
+        # Install the local verifiers package in editable mode into the new venv
+        print("Installing verifiers in venv...")
+        pip_executable = os.path.join(venv_dir, "bin/pip")
+        install_command = [pip_executable, "install", "-e", "."]
+        
+        # We need to make sure the subprocess call for installation happens within the work_dir
+        subprocess.run(install_command, check=True, env=os.environ.copy(), cwd=work_dir)
+
+    # Activate venv for subsequent commands by modifying the environment
+    env['VIRTUAL_ENV'] = venv_dir
+    # Prepend the venv's bin directory to PATH
+    env['PATH'] = f"{venv_dir}/bin:{env.get('PATH', '')}"
+    # Clear PYTHONPATH to avoid conflicts with system packages, letting the venv handle dependencies
+    if 'PYTHONPATH' in env:
+        del env['PYTHONPATH']
+
+    # Overwrite the install script to use pip with a writable cache dir
+    install_script_path = os.path.join(work_dir, "verifiers/scripts/install.py")
+    new_install_script_content = """
+import argparse
+import subprocess
+from pathlib import Path
+import os
+
+def _run_pip_install(args):
+    '''Helper to run pip install with the correct pip and cache dir.'''
+    pip_executable = os.path.join(os.environ["VIRTUAL_ENV"], "bin", "pip")
+    cache_dir = "/workspace/pip_cache" # A known writable location
+    os.makedirs(cache_dir, exist_ok=True)
+    command = [pip_executable, "install", "--cache-dir", cache_dir] + [str(arg) for arg in args]
+    print(f"Running patched install command: {' '.join(command)}")
+    subprocess.run(command, check=True)
+
+def install_environment(env: str, path: str, from_repo: bool, branch: str):
+    env_folder = env.replace("-", "_")
+    env_name = env_folder.replace("_", "-")
+    if from_repo:
+        install_arg = f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{branch}#subdirectory=environments/{env_folder}"
+        _run_pip_install([install_arg])
+    else:
+        env_path = Path(path) / env_folder
+        _run_pip_install(["-e", env_path])
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("env", type=str, help="The environment id to install")
+    parser.add_argument(
+        "-p",
+        "--path",
+        type=str,
+        help="Path to environments directory (default: ./environments)",
+        default="./environments",
+    )
+    parser.add_argument(
+        "-r",
+        "--from-repo",
+        action="store_true",
+        help="Install from the Verifiers repo (default: False)",
+        default=False,
+    )
+    parser.add_argument(
+        "-b",
+        "--branch",
+        type=str,
+        help="Branch to install from if --from-repo is True (default: main)",
+        default="main",
+    )
+    args = parser.parse_args()
+
+    install_environment(
+        env=args.env,
+        path=args.path,
+        from_repo=args.from_repo,
+        branch=args.branch,
+    )
+
+if __name__ == "__main__":
+    main()
+"""
+    if os.path.exists(os.path.dirname(install_script_path)):
+        print("Overwriting install script to use pip...")
+        with open(install_script_path, "w") as f:
+            f.write(new_install_script_content)
+        print("Install script overwritten.")
+
     # If no OPENAI_API_KEY is set, use a dummy one for vLLM
     if 'OPENAI_API_KEY' not in env:
         env['OPENAI_API_KEY'] = 'dummy-key-for-vllm'
@@ -217,15 +308,55 @@ def run_training_command(cmd: str, env_vars: dict = None):
     if cmd.startswith("vf-"):
         # These are verifiers CLI commands
         print(f"\n=== Running Verifiers CLI Command ===")
-        # Ensure verifiers CLI tools are in PATH
-        if os.path.exists("scripts"):
-            env['PATH'] = f"{work_dir}/scripts:{env['PATH']}"
+        
+        # Handle specific vf- commands
+        if cmd.startswith("vf-install"):
+            # Replace vf-install with direct python call to the overwritten install script
+            install_script = os.path.join(work_dir, "verifiers/scripts/install.py")
+            if os.path.exists(install_script):
+                # Extract arguments from the original command
+                parts = cmd.split()[1:]  # Remove 'vf-install'
+                # Convert --from-repo to -r for the script
+                if "--from-repo" in parts:
+                    parts[parts.index("--from-repo")] = "-r"
+                cmd = f"python {install_script} {' '.join(parts)}"
+                print(f"Translated vf-install command: {cmd}")
+            else:
+                print(f"Install script not found at {install_script}")
+        elif cmd.startswith("vf-vllm"):
+            # Replace vf-vllm with direct python call to the vllm_server script
+            vllm_script = os.path.join(work_dir, "verifiers/inference/vllm_server.py")
+            if os.path.exists(vllm_script):
+                parts = cmd.split()[1:]  # Remove 'vf-vllm'
+                cmd = f"python {vllm_script} {' '.join(parts)}"
+                print(f"Translated vf-vllm command: {cmd}")
+            else:
+                print(f"vLLM server script not found at {vllm_script}")
+        elif cmd.startswith("vf-eval"):
+            # Replace vf-eval with direct python call to the eval script
+            eval_script = os.path.join(work_dir, "verifiers/scripts/eval.py")
+            if os.path.exists(eval_script):
+                parts = cmd.split()[1:]  # Remove 'vf-eval'
+                cmd = f"python {eval_script} {' '.join(parts)}"
+                print(f"Translated vf-eval command: {cmd}")
+            else:
+                print(f"Eval script not found at {eval_script}")
+        
+        # Verifiers package is already installed in the venv, so no need to modify PYTHONPATH
+        # This avoids conflicts with Python's built-in modules like 'types'
+        pass
+    
+    # Handle accelerate launch commands - translate to use modal config
+    if "accelerate launch" in cmd and "configs/zero3.yaml" in cmd:
+        cmd = cmd.replace("configs/zero3.yaml", "configs/modal_zero3.yaml")
+        print(f"Translated to use modal config: {cmd}")
     
     # Handle GRPO training which needs vLLM server + training process
     if "train_wordle.py" in cmd:
         print(f"\n=== Starting vLLM Server for GRPO Training ===")
         # Start vLLM server in background - use GPU 0 only to avoid NCCL conflicts
-        vllm_cmd = "CUDA_VISIBLE_DEVICES=0 vf-vllm --model willcb/Qwen3-1.7B-Wordle --enforce-eager --disable-log-requests --port 8000"
+        vllm_script = os.path.join(work_dir, "verifiers/inference/vllm_server.py")
+        vllm_cmd = f"CUDA_VISIBLE_DEVICES=0 python {vllm_script} --model willcb/Qwen3-1.7B-Wordle --enforce-eager --disable-log-requests --port 8000"
         print(f"Starting vLLM server: {vllm_cmd}")
         
         # Create separate environment for vLLM to avoid process group conflicts
