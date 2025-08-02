@@ -186,8 +186,33 @@ If your application requires more fine-grained control than is allowed by `Multi
 
 ## Training
 
+### Modal Cloud Training
 
-### GRPOTrainer
+For easy cloud training with [Modal](https://modal.com), use the included `run_modal.py` wrapper:
+
+```bash
+# RL (GRPO) training - automatically sets up vLLM server
+modal run run_modal.py::train --env wordle --size 0.5B --rl
+
+# SFT training (default) - no vLLM server needed
+modal run run_modal.py::train --env wordle --size 0.5B
+
+# With custom settings
+modal run run_modal.py::train --env gsm8k --size 1.7B --steps 500 --rl
+
+# Multi-GPU training
+modal run run_modal.py::train_2gpu --env math-python --size 1.7B --rl
+modal run run_modal.py::train_4gpu --env math-group --size 4B --rl
+```
+
+The Modal wrapper automatically handles:
+- Repository setup and environment installation
+- vLLM server for RL training (embedded in same container using standard OpenAI API)
+- Model caching and outputs persistence
+- WandB integration
+- GPU configuration (defaults to A10G for RL, T4 for SFT)
+
+### Local GRPOTrainer
 
 The included trainer (`vf.GRPOTrainer`) supports running GRPO-style RL training via Accelerate/DeepSpeed, and uses vLLM for inference. It supports both full-parameter finetuning, and is optimized for efficiently training dense transformer models on 2-16 GPUs.
 

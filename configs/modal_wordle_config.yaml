@@ -1,0 +1,58 @@
+name: "modal-wordle-training"
+mode: "full_pipeline"  # environment_only, trainer_only, or full_pipeline
+
+# Model configuration
+model:
+  name: "Qwen/Qwen2.5-1.5B-Instruct"
+  max_token_length: 2048
+  dtype: "bfloat16"
+
+# Environment configuration
+environment:
+  name: "vf-wordle"
+  type: "wordle"
+  config:
+    num_episodes: 1000
+    batch_size: 32
+    max_turns: 10
+    use_think: true
+    serve_mode: true
+    wandb_project: "verifiers-modal"
+    wandb_group: "wordle-modal-env"
+
+# Trainer configuration  
+trainer:
+  type: "grpo"
+  config:
+    training_steps: 200
+    batch_size: 8
+    gradient_accumulation_steps: 8
+    learning_rate: 3e-6
+    checkpoint_interval: 20
+    max_grad_norm: 0.1
+    beta: 0.0
+    eval_steps: 20
+    wandb_project: "verifiers-modal"
+    wandb_group: "wordle-modal-trainer"
+
+# Server configurations
+api_server:
+  enabled: true
+  endpoint: "http://localhost:8001"
+  
+inference_server:
+  enabled: true
+  endpoint: "http://localhost:8000/v1"
+  api_key: "x"
+  gpu_memory_utilization: 0.9
+
+# WandB configuration
+wandb:
+  project: "verifiers-modal"
+  group: "wordle-training"
+  name: "modal-wordle-grpo"
+
+# Deployment settings
+deployment:
+  max_retries: 3
+  timeout: 300

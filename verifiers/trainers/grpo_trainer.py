@@ -528,15 +528,18 @@ class GRPOTrainer(Trainer):
         }
 
         # vLLM client for weight syncing only; only import if used
-        from verifiers.inference.vllm_client import VLLMClient
+        if not args.disable_weight_sync:
+            from verifiers.inference.vllm_client import VLLMClient
 
-        self.vllm_client = VLLMClient(
-            host=host, port=port, connection_timeout=args.vllm_server_timeout
-        )
-        # Only initialize communicator on the main process
-        # Other processes will only use the client for non-NCCL operations
-        if self.accelerator.is_main_process:
-            self.vllm_client.init_communicator()
+            self.vllm_client = VLLMClient(
+                host=host, port=port, connection_timeout=args.vllm_server_timeout
+            )
+            # Only initialize communicator on the main process
+            # Other processes will only use the client for non-NCCL operations
+            if self.accelerator.is_main_process:
+                self.vllm_client.init_communicator()
+        else:
+            self.vllm_client = None
 
         self._last_loaded_step = (
             0  # Initialize to 0 since vLLM already has initial weights
@@ -745,6 +748,11 @@ class GRPOTrainer(Trainer):
         return torch.cat(all_logps, dim=0)
 
     def _move_model_to_vllm(self):
+        # Skip weight syncing if disabled
+        if self.args.disable_weight_sync or self.vllm_client is None:
+            self.logger.info("Weight syncing is disabled, skipping model transfer to vLLM")
+            return
+            
         # For DeepSpeed ZeRO-3 we need to gather all parameters before operations
         deepspeed_plugin = self.accelerator.state.deepspeed_plugin
         zero_stage_3 = deepspeed_plugin is not None and deepspeed_plugin.zero_stage == 3
@@ -868,7 +876,7 @@ class GRPOTrainer(Trainer):
         device: torch.device,
     ) -> Dict[str, torch.Tensor]:
         ids = [prompt_ids[i] + completion_ids[i] for i in range(len(prompt_ids))]
-        mask = [prompt_mask[i] + completion_mask[i] for i in range(len(prompt_mask))]
+        mask = [prompt_mask[i] + completion_mask[i] for i in range(len(mask))]
         max_len = max(len(ids[i]) for i in range(len(ids)))
         ids = [
             torch.cat(

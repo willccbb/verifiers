@@ -1,654 +1,678 @@
 #!/usr/bin/env python3
 """
-Modal wrapper script for verifiers training with GPU support.
-Usage: 
-  modal run run_modal.py --cmd "python examples/grpo/train_wordle.py"
-  modal run run_modal.py --cmd "vf-install vf-wordle --from-repo"
-  modal run run_modal.py --cmd "vf-eval vf-wordle"
-  modal run run_modal.py --download "path/to/file"
-  modal run run_modal.py --sync-only
+Modal runner for verifiers training.
+
+Usage:
+    # Train Wordle environment
+    modal run run_modal.py::train --env wordle --size 0.5B
+    
+    # Train GSM8K environment  
+    modal run run_modal.py::train --env gsm8k
+    
+    # Train with custom config
+    modal run run_modal.py::train --env math-python --gpus 2 --steps 500
+    
+    # Run evaluation
+    modal run run_modal.py::evaluate --env wordle --model Qwen/Qwen2.5-0.5B-Instruct
 """
 
-import argparse
 import modal
-import sys
 import os
-import tarfile
-import io
+import sys
+import re
 from pathlib import Path
+from dotenv import load_dotenv
 
-app = modal.App("verifiers-training")
+load_dotenv()
 
-# Build image with all necessary dependencies
+app = modal.App("verifiers")
+
+# Training scripts mapping
+TRAINING_SCRIPTS = {
+    "wordle": "examples/grpo/train_wordle.py",
+    "wordle-sft": "examples/sft/train_wordle_sft.py",  # SFT version without vLLM
+    "gsm8k": "examples/grpo/train_gsm8k.py",
+    "math-group": "examples/grpo/train_math_group.py",
+    "math-python": "examples/grpo/train_math_python.py",
+    "reverse-text": "examples/grpo/train_reverse_text.py",
+    "self-reward": "examples/grpo/train_self_reward.py",
+    "sentence-repeater": "examples/grpo/train_sentence_repeater.py",
+    "tool-test": "examples/grpo/train_tool_test.py",
+    "wiki-search": "examples/grpo/train_wiki_search.py",
+    "arc-1d": "examples/grpo/train_arc_1d.py",
+}
+
+# GPU configurations
+GPU_CONFIGS = {
+    1: "T4",
+    2: "A10G:2",
+    4: "A100-40GB:4",
+    8: "H100:8",
+}
+
+# Build optimized image with local code
 image = (
-    # Use NVIDIA CUDA image with development tools
     modal.Image.from_registry("nvidia/cuda:12.1.0-devel-ubuntu22.04", add_python="3.11")
-    .apt_install([
-        "git", "build-essential", "cmake", "wget", "curl", "unzip", 
-        "ninja-build", "libssl-dev", "libffi-dev", "rustc", "cargo"
-    ])
-    # Install uv and make it available globally
-    .run_commands(
-        "curl -LsSf https://astral.sh/uv/install.sh | sh",
-        "mv /root/.local/bin/uv /usr/local/bin/uv",
-        "mv /root/.local/bin/uvx /usr/local/bin/uvx",
-        "chmod +x /usr/local/bin/uv /usr/local/bin/uvx"
-    )
-    # Install PyTorch with CUDA 12.1 support (version >=2.7.0 as required)
-    .pip_install(
-        "torch>=2.7.0",
-        "torchvision",
-        "torchaudio",
-        extra_index_url="https://download.pytorch.org/whl/cu121"
-    )
-    # Install build dependencies for flash-attn compilation
-    .pip_install(["packaging", "wheel", "setuptools", "ninja"])
-    # Install flash-attn with proper compilation settings
-    .run_commands(
-        "MAX_JOBS=4 pip install flash-attn --no-build-isolation"
-    )
-    # Install verifiers package with training dependencies from GitHub
-    .pip_install("verifiers[train] @ git+https://github.com/willccbb/verifiers.git")
-    # Install additional dependencies that may not be covered
+    .apt_install("git")
     .pip_install([
+        # Core dependencies
+        "torch>=2.3.0",
         "transformers>=4.44.0",
-        "accelerate>=1.4.0", 
+        "accelerate>=1.4.0",
         "datasets",
-        "peft",
+        "peft>=0.8.0",
         "wandb",
         "rich",
         "trl>=0.17.0",
+        
+        # Verifiers specific
         "openai",
-        "pydantic>=2.11.7",
-        "requests",
-        "nest-asyncio>=1.6.0",
-        "packaging",
-        "huggingface-hub",
+        "nltk",
+        "textarena",
+        "python-dotenv",
+        "liger-kernel>=0.5.10",
+        "deepspeed",
         "einops",
         "sentencepiece",
         "protobuf",
-        "scipy",
-        "scikit-learn",
-        "vllm>=0.9.2",
-        "ray>=2.9.0",
-        "liger-kernel>=0.5.10",
-        "deepspeed",
-        "math-verify>=0.8.0",
-        "nltk",
-        "textarena",
+        "vllm>=0.6.0",
     ])
+    .add_local_dir(".", remote_path="/app/verifiers")
 )
 
-# Create persistent volumes
-storage_volume = modal.Volume.from_name("verifiers-storage", create_if_missing=True)
+# Persistent volumes
 cache_volume = modal.Volume.from_name("verifiers-cache", create_if_missing=True)
+outputs_volume = modal.Volume.from_name("verifiers-outputs", create_if_missing=True)
 
-
+# Single GPU training function
 @app.function(
     image=image,
-    gpu="H100:2",  # Use 2 H100 GPUs for multi-GPU training
-    timeout=7200,
+    gpu="T4",
+    cpu=8.0,
+    memory=32768,
+    timeout=14400,  # Increase timeout to 4 hours
     volumes={
-        "/workspace": storage_volume,
-        "/cache": cache_volume,  # Changed from /root/.cache
+        "/cache": cache_volume,
+        "/outputs": outputs_volume,
     },
-    secrets=[
-        modal.Secret.from_local_environ([  # Or pass specific env vars from local environment
-            "WANDB_API_KEY",
-            "OPENAI_API_KEY",
-            "HF_TOKEN",
-        ]),
-    ],
+    secrets=[modal.Secret.from_dotenv()],
 )
-def run_training_command(cmd: str, env_vars: dict = None):
-    """Run training command with full environment setup."""
+def train_1gpu(env: str, size: str = "0.5B", steps: int = 200, batch_size: int = None, 
+               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
+    """Single GPU training."""
+    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=1)
+
+# 2 GPU training function
+@app.function(
+    image=image,
+    gpu="A10G:2",
+    cpu=8.0,
+    memory=32768,
+    timeout=14400,  # Increase timeout to 4 hours
+    volumes={
+        "/cache": cache_volume,
+        "/outputs": outputs_volume,
+    },
+    secrets=[modal.Secret.from_dotenv()],
+)
+def train_2gpu(env: str, size: str = "0.5B", steps: int = 200, batch_size: int = None,
+               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
+    """2 GPU training."""
+    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=2)
+
+# 4 GPU training function
+@app.function(
+    image=image,
+    gpu="A100-40GB:4",
+    cpu=8.0,
+    memory=32768,
+    timeout=14400,  # Increase timeout to 4 hours
+    volumes={
+        "/cache": cache_volume,
+        "/outputs": outputs_volume,
+    },
+    secrets=[modal.Secret.from_dotenv()],
+)
+def train_4gpu(env: str, size: str = "1.7B", steps: int = 200, batch_size: int = None,
+               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
+    """4 GPU training."""
+    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=4)
+
+# 8 GPU training function
+@app.function(
+    image=image,
+    gpu="H100:8",
+    cpu=8.0,
+    memory=32768,
+    timeout=14400,  # Increase timeout to 4 hours
+    volumes={
+        "/cache": cache_volume,
+        "/outputs": outputs_volume,
+    },
+    secrets=[modal.Secret.from_dotenv()],
+)
+def train_8gpu(env: str, size: str = "4B", steps: int = 200, batch_size: int = None,
+               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
+    """8 GPU training."""
+    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=8)
+
+def _train(env: str, size: str, steps: int, batch_size: int, learning_rate: float, 
+           wandb_project: str, wandb_run_name: str, gpus: int):
+    """Shared training logic."""
     import subprocess
-    import shutil
+    import torch
     
-    # Set up workspace
-    workspace_dir = "/workspace/verifiers"
-    work_dir = "/app/verifiers"
+    print(f"🚀 Starting Verifiers training")
+    print(f"📚 Environment: {env}")
+    print(f"📏 Model size: {size}")
+    print(f"🖥️ GPUs: {gpus}")
     
-    # Copy from persistent storage if exists
-    if os.path.exists(workspace_dir):
-        print("Loading existing workspace from volume...")
-        os.makedirs(os.path.dirname(work_dir), exist_ok=True)
-        shutil.copytree(workspace_dir, work_dir, dirs_exist_ok=True)
-    else:
-        print("No existing workspace found, creating new one...")
-        os.makedirs(work_dir, exist_ok=True)
+    # Set environment variables
+    os.environ["HF_HOME"] = "/cache"
+    os.environ["TRANSFORMERS_CACHE"] = "/cache"
+    os.environ["WANDB_PROJECT"] = wandb_project or "verifiers"
+    if wandb_run_name:
+        os.environ["WANDB_RUN_NAME"] = wandb_run_name
     
-    # Verify files exist
-    train_file = os.path.join(work_dir, "examples/grpo/train_wordle.py")
-    print(f"Checking for training file: {train_file}")
-    print(f"File exists: {os.path.exists(train_file)}")
+    # Log GPU info
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
     
-    if not os.path.exists(train_file):
-        print("Training file not found! Listing workspace contents:")
-        if os.path.exists(work_dir):
-            for root, dirs, files in os.walk(work_dir):
-                level = root.replace(work_dir, '').count(os.sep)
-                indent = ' ' * 2 * level
-                print(f"{indent}{os.path.basename(root)}/")
-                subindent = ' ' * 2 * (level + 1)
-                for file in files[:5]:  # Show first 5 files per directory
-                    print(f"{subindent}{file}")
-        else:
-            print("Work directory doesn't exist!")
+    # Change to the mounted verifiers repository
+    print("\n📥 Setting up verifiers repository...")
+    os.chdir("/app/verifiers")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Contents: {os.listdir('.')}")
     
-    # Ensure environment directories have __init__.py files
-    environments_dir = os.path.join(work_dir, "environments")
-    if os.path.exists(environments_dir):
-        for env_dir in os.listdir(environments_dir):
-            env_path = os.path.join(environments_dir, env_dir)
-            if os.path.isdir(env_path):
-                init_file = os.path.join(env_path, "__init__.py")
-                if not os.path.exists(init_file):
-                    print(f"Creating __init__.py for {env_dir}")
-                    with open(init_file, 'w') as f:
-                        f.write("# Auto-generated __init__.py for environment\n")
-                        # Import the main module
-                        f.write(f"from .{env_dir} import *\n")
+    # Install verifiers
+    print("📦 Installing verifiers...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
     
-    os.chdir(work_dir)
-    
-    # Set up environment
-    env = os.environ.copy()
-    env['PYTHONPATH'] = f"{work_dir}:{work_dir}/environments"
-    env['TRANSFORMERS_CACHE'] = '/cache/huggingface'
-    env['HF_HOME'] = '/cache/huggingface'
-    env['UV_CACHE_DIR'] = '/workspace/uv_cache'  # Use a writable location
-    
-    # Add any custom env vars
-    if env_vars:
-        env.update(env_vars)
-    
-    # Set CUDA environment variables
-    env['CUDA_VISIBLE_DEVICES'] = '0'  # Modal handles GPU allocation
-    
-    # Enable flash attention
-    env['USE_FLASH_ATTENTION'] = 'true'
-    
-    # Add vLLM debugging
-    env['VLLM_LOGGING_LEVEL'] = 'DEBUG'
-    env['VLLM_WORKER_TIMEOUT'] = '300'
-    
-    # Set up distributed training environment with proper process isolation
-    env['MASTER_ADDR'] = 'localhost'
-    env['MASTER_PORT'] = '12355'
-    
-    # Prevent NCCL conflicts between vLLM and training processes
-    env['NCCL_P2P_DISABLE'] = '1'
-    env['NCCL_SHM_DISABLE'] = '1'
-    env['NCCL_IB_DISABLE'] = '1'
-
-    # Set up and activate virtual environment
-    venv_dir = "/workspace/verifiers_venv"
-    if not os.path.exists(os.path.join(venv_dir, "bin", "activate")):
-        print(f"Creating virtual environment in {venv_dir}...")
-        # Use Python's built-in venv module, which is more reliable
-        subprocess.run(["python3", "-m", "venv", venv_dir], check=True, env=os.environ.copy())
-        
-        # Install the local verifiers package in editable mode into the new venv
-        print("Installing verifiers in venv...")
-        pip_executable = os.path.join(venv_dir, "bin/pip")
-        install_command = [pip_executable, "install", "-e", "."]
-        
-        # We need to make sure the subprocess call for installation happens within the work_dir
-        subprocess.run(install_command, check=True, env=os.environ.copy(), cwd=work_dir)
-
-    # Activate venv for subsequent commands by modifying the environment
-    env['VIRTUAL_ENV'] = venv_dir
-    # Prepend the venv's bin directory to PATH
-    env['PATH'] = f"{venv_dir}/bin:{env.get('PATH', '')}"
-    # Clear PYTHONPATH to avoid conflicts with system packages, letting the venv handle dependencies
-    if 'PYTHONPATH' in env:
-        del env['PYTHONPATH']
-
-    # Overwrite the install script to use pip with a writable cache dir
-    install_script_path = os.path.join(work_dir, "verifiers/scripts/install.py")
-    new_install_script_content = """
-import argparse
-import subprocess
-from pathlib import Path
+    # Create SFT training script if it doesn't exist
+    sft_dir = "examples/sft"
+    os.makedirs(sft_dir, exist_ok=True)
+    sft_script_path = "examples/sft/train_wordle_sft.py"
+    if not os.path.exists(sft_script_path):
+        with open(sft_script_path, 'w') as f:
+            f.write('''import argparse
+import verifiers as vf
+from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
+import torch
 import os
 
-def _run_pip_install(args):
-    '''Helper to run pip install with the correct pip and cache dir.'''
-    pip_executable = os.path.join(os.environ["VIRTUAL_ENV"], "bin", "pip")
-    cache_dir = "/workspace/pip_cache" # A known writable location
-    os.makedirs(cache_dir, exist_ok=True)
-    command = [pip_executable, "install", "--cache-dir", cache_dir] + [str(arg) for arg in args]
-    print(f"Running patched install command: {' '.join(command)}")
-    subprocess.run(command, check=True)
-
-def install_environment(env: str, path: str, from_repo: bool, branch: str):
-    env_folder = env.replace("-", "_")
-    env_name = env_folder.replace("_", "-")
-    if from_repo:
-        install_arg = f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{branch}#subdirectory=environments/{env_folder}"
-        _run_pip_install([install_arg])
+def main(args):
+    size = args.size
+    # Use Qwen models with proper HF authentication
+    if size == "1.7B":
+        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "4B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
     else:
-        env_path = Path(path) / env_folder
-        _run_pip_install(["-e", env_path])
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("env", type=str, help="The environment id to install")
-    parser.add_argument(
-        "-p",
-        "--path",
-        type=str,
-        help="Path to environments directory (default: ./environments)",
-        default="./environments",
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+    
+    print(f"Loading model: {model_name}")
+    model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})
+    
+    # Ensure pad token is set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    # Load wordle environment to get dataset
+    vf_env = vf.load_environment(env_id="vf_wordle")
+    
+    # Get train dataset
+    dataset = vf_env.dataset
+    print(f"Dataset size: {len(dataset)}")
+    
+    # Tokenize dataset
+    def tokenize_function(examples):
+        # Format the prompts
+        texts = []
+        for i in range(len(examples["prompt"])):
+            messages = examples["prompt"][i]
+            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            text += f"Let me think about this Wordle puzzle...\\n\\nAnswer: {examples['answer'][i]}"
+            texts.append(text)
+        
+        # Tokenize
+        model_inputs = tokenizer(
+            texts,
+            max_length=512,
+            truncation=True,
+            padding="max_length",
+            return_tensors=None,
+        )
+        
+        # Set labels (same as input_ids for causal LM)
+        model_inputs["labels"] = model_inputs["input_ids"].copy()
+        
+        return model_inputs
+    
+    # Tokenize the dataset
+    tokenized_dataset = dataset.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=dataset.column_names,
+        desc="Tokenizing dataset",
     )
-    parser.add_argument(
-        "-r",
-        "--from-repo",
-        action="store_true",
-        help="Install from the Verifiers repo (default: False)",
-        default=False,
+    
+    # Data collator
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,  # We're doing causal LM, not masked LM
     )
-    parser.add_argument(
-        "-b",
-        "--branch",
-        type=str,
-        help="Branch to install from if --from-repo is True (default: main)",
-        default="main",
+    
+    # Training arguments
+    run_name = f"wordle-sft-{size}"
+    training_args = TrainingArguments(
+        output_dir=f"./outputs/{run_name}",
+        run_name=run_name,
+        num_train_epochs=1,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=2,
+        learning_rate=5e-5,
+        logging_steps=1,
+        save_steps=50,
+        eval_strategy="no",
+        save_strategy="steps",
+        warmup_steps=10,
+        bf16=torch.cuda.is_bf16_supported(),
+        fp16=not torch.cuda.is_bf16_supported(),
+        report_to="wandb" if os.environ.get("WANDB_API_KEY") else "none",
+        remove_unused_columns=True,
+        max_steps=int(os.environ.get("VERIFIERS_MAX_STEPS", "20")),
+        logging_dir=f"./logs/{run_name}",
     )
-    args = parser.parse_args()
-
-    install_environment(
-        env=args.env,
-        path=args.path,
-        from_repo=args.from_repo,
-        branch=args.branch,
+    
+    # Create standard Trainer (not SFTTrainer to avoid compatibility issues)
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_dataset,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
     )
+    
+    # Train
+    print("Starting training...")
+    trainer.train()
+    
+    # Save model and tokenizer
+    print("Saving model...")
+    trainer.save_model()
+    tokenizer.save_pretrained(training_args.output_dir)
+    print(f"Model saved to {training_args.output_dir}")
+    
+    # Copy outputs to Modal volume if available
+    if os.path.exists("/outputs"):
+        import shutil
+        shutil.copytree(training_args.output_dir, f"/outputs/{run_name}", dirs_exist_ok=True)
+        print(f"Model copied to Modal volume: /outputs/{run_name}")
 
 if __name__ == "__main__":
-    main()
-"""
-    if os.path.exists(os.path.dirname(install_script_path)):
-        print("Overwriting install script to use pip...")
-        with open(install_script_path, "w") as f:
-            f.write(new_install_script_content)
-        print("Install script overwritten.")
-
-    # If no OPENAI_API_KEY is set, use a dummy one for vLLM
-    if 'OPENAI_API_KEY' not in env:
-        env['OPENAI_API_KEY'] = 'dummy-key-for-vllm'
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--size", "-s", type=str, default="0.5B")
+    args = parser.parse_args()
+    main(args)
+''')
     
-    print("=== Environment Check ===")
-    print(f"Working directory: {os.getcwd()}")
-    subprocess.run(["nvidia-smi"], check=False)
-    
-    # Check PyTorch and CUDA
-    try:
-        import torch
-        print(f"PyTorch version: {torch.__version__}")
-        print(f"CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"CUDA devices: {torch.cuda.device_count()}")
-            print(f"Current device: {torch.cuda.current_device()}")
-            print(f"Device name: {torch.cuda.get_device_name(0)}")
-    except Exception as e:
-        print(f"PyTorch check failed: {e}")
-    
-    # Check if verifiers is installed
-    try:
-        import verifiers
-        print(f"Verifiers package found at: {verifiers.__file__}")
-    except ImportError:
-        print("WARNING: verifiers package not found!")
-    
-    print("\nDirectory structure:")
-    subprocess.run(["find", ".", "-maxdepth", "3", "-type", "d", "-name", "__pycache__", "-prune", "-o", "-type", "d", "-print"], check=False)
-    
-    # Handle special commands
-    if cmd.startswith("vf-"):
-        # These are verifiers CLI commands
-        print(f"\n=== Running Verifiers CLI Command ===")
-        
-        # Handle specific vf- commands
-        if cmd.startswith("vf-install"):
-            # Replace vf-install with direct python call to the overwritten install script
-            install_script = os.path.join(work_dir, "verifiers/scripts/install.py")
-            if os.path.exists(install_script):
-                # Extract arguments from the original command
-                parts = cmd.split()[1:]  # Remove 'vf-install'
-                # Convert --from-repo to -r for the script
-                if "--from-repo" in parts:
-                    parts[parts.index("--from-repo")] = "-r"
-                cmd = f"python {install_script} {' '.join(parts)}"
-                print(f"Translated vf-install command: {cmd}")
-            else:
-                print(f"Install script not found at {install_script}")
-        elif cmd.startswith("vf-vllm"):
-            # Replace vf-vllm with direct python call to the vllm_server script
-            vllm_script = os.path.join(work_dir, "verifiers/inference/vllm_server.py")
-            if os.path.exists(vllm_script):
-                parts = cmd.split()[1:]  # Remove 'vf-vllm'
-                cmd = f"python {vllm_script} {' '.join(parts)}"
-                print(f"Translated vf-vllm command: {cmd}")
-            else:
-                print(f"vLLM server script not found at {vllm_script}")
-        elif cmd.startswith("vf-eval"):
-            # Replace vf-eval with direct python call to the eval script
-            eval_script = os.path.join(work_dir, "verifiers/scripts/eval.py")
-            if os.path.exists(eval_script):
-                parts = cmd.split()[1:]  # Remove 'vf-eval'
-                cmd = f"python {eval_script} {' '.join(parts)}"
-                print(f"Translated vf-eval command: {cmd}")
-            else:
-                print(f"Eval script not found at {eval_script}")
-        
-        # Verifiers package is already installed in the venv, so no need to modify PYTHONPATH
-        # This avoids conflicts with Python's built-in modules like 'types'
-        pass
-    
-    # Handle accelerate launch commands - translate to use modal config
-    if "accelerate launch" in cmd and "configs/zero3.yaml" in cmd:
-        cmd = cmd.replace("configs/zero3.yaml", "configs/modal_zero3.yaml")
-        print(f"Translated to use modal config: {cmd}")
-    
-    # Handle GRPO training which needs vLLM server + training process
-    if "train_wordle.py" in cmd:
-        print(f"\n=== Starting vLLM Server for GRPO Training ===")
-        # Start vLLM server in background - use GPU 0 only to avoid NCCL conflicts
-        vllm_script = os.path.join(work_dir, "verifiers/inference/vllm_server.py")
-        vllm_cmd = f"CUDA_VISIBLE_DEVICES=0 python {vllm_script} --model willcb/Qwen3-1.7B-Wordle --enforce-eager --disable-log-requests --port 8000"
-        print(f"Starting vLLM server: {vllm_cmd}")
-        
-        # Create separate environment for vLLM to avoid process group conflicts
-        vllm_env = env.copy()
-        vllm_env['MASTER_PORT'] = '12356'  # Different port for vLLM
-        vllm_env['CUDA_VISIBLE_DEVICES'] = '0'  # Explicitly set for vLLM
-        
-        vllm_process = subprocess.Popen(
-            vllm_cmd,
-            shell=True,
-            env=vllm_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        # Wait for server to be ready
-        print("Waiting for vLLM server to start...")
-        import time
-        try:
-            import requests
-        except ImportError:
-            print("Installing requests...")
-            subprocess.run(["pip", "install", "requests"], check=True)
-        server_ready = False
-        for i in range(60):  # Wait up to 2 minutes
-            try:
-                response = requests.get("http://localhost:8000/health", timeout=5)
-                if response.status_code == 200:
-                    server_ready = True
-                    print("vLLM server is ready!")
-                    break
-            except:
-                pass
-            time.sleep(2)
-            if i % 10 == 0:
-                print(f"Still waiting for vLLM server... ({i*2}s)")
-        
-        if not server_ready:
-            print("WARNING: vLLM server may not be ready, but proceeding with training...")
-    
-    # Run the main command
-    try:
-        print(f"\n=== Running Command ===")
-        print(f"Command: {cmd}")
-        
-        # For multi-GPU commands, parse and adjust CUDA_VISIBLE_DEVICES
-        if "CUDA_VISIBLE_DEVICES=" in cmd:
-            # Modal provides GPUs as 0,1 - reserve GPU 0 for vLLM, use GPU 1 for training
-            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=0,1,2,3,4,5", "CUDA_VISIBLE_DEVICES=1")
-            cmd = cmd.replace("CUDA_VISIBLE_DEVICES=6,7", "CUDA_VISIBLE_DEVICES=1")
-            print(f"Adjusted command for Modal: {cmd}")
+    # Fix training scripts to use correct model names and environment IDs
+    for _, script_path in TRAINING_SCRIPTS.items():
+        if os.path.exists(script_path):
+            with open(script_path, 'r') as f:
+                content = f.read()
             
-            # Also adjust num-processes for single GPU training
-            if "--num-processes 2" in cmd:
-                cmd = cmd.replace("--num-processes 2", "--num-processes 1")
-                print(f"Adjusted to single process training: {cmd}")
-        
-        result = subprocess.run(
-            cmd,
-            shell=True,
-            text=True,
-            env=env,
-            timeout=7200
-        )
-        
-        # Save workspace back to volume
-        print("\n=== Saving Results ===")
-        if os.path.exists(workspace_dir):
-            shutil.rmtree(workspace_dir)
-        shutil.copytree(work_dir, workspace_dir)
-        storage_volume.commit()
-        print("Workspace saved to persistent volume")
-        
-        return result.returncode
-        
-    except subprocess.TimeoutExpired:
-        print("Command timed out after 2 hours")
-        return 1
-    except Exception as e:
-        print(f"Error running command: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-@app.function(
-    image=image,
-    volumes={"/workspace": storage_volume},
-    timeout=300,
-)
-def sync_local_to_modal(files_data: bytes):
-    """Sync local files to Modal storage."""
-    import shutil
-    
-    print("Syncing local files to Modal...")
-    
-    # Extract files to temporary directory
-    temp_dir = "/tmp/local_files"
-    os.makedirs(temp_dir, exist_ok=True)
-    
-    with tarfile.open(fileobj=io.BytesIO(files_data), mode='r:gz') as tar:
-        tar.extractall(temp_dir)
-    
-    # Copy to persistent storage
-    workspace_dir = "/workspace/verifiers"
-    if os.path.exists(workspace_dir):
-        shutil.rmtree(workspace_dir)
-    
-    shutil.copytree(temp_dir, workspace_dir)
-    storage_volume.commit()
-    
-    print(f"Synced files to workspace. Items: {len(os.listdir(workspace_dir))}")
-    
-    # List key directories
-    for item in ['verifiers', 'environments', 'examples', 'configs']:
-        path = os.path.join(workspace_dir, item)
-        if os.path.exists(path):
-            print(f"  ✓ {item}/")
-    
-    return True
-
-
-@app.function(
-    image=image,
-    volumes={"/workspace": storage_volume},
-    timeout=300,
-)
-def download_from_modal(file_path: str) -> bytes:
-    """Download file from Modal storage."""
-    workspace_dir = "/workspace/verifiers"
-    full_path = os.path.join(workspace_dir, file_path)
-    
-    if not os.path.exists(full_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
-    
-    if os.path.isfile(full_path):
-        with open(full_path, 'rb') as f:
-            return f.read()
+            modified = False
+            
+            # Fix environment ID (vf-wordle -> vf_wordle)
+            if 'env_id="vf-' in content:
+                content = re.sub(r'env_id="vf-([^"]+)"', r'env_id="vf_\1"', content)
+                modified = True
+            
+            # Fix old model references
+            if 'willcb/Qwen3' in content or 'model_name = f"willcb/Qwen3-{size}-Wordle"' in content:
+                # Find and replace the model_name assignment
+                content = re.sub(
+                    r'model_name = .*Qwen3.*',
+                    '''# Use Qwen2.5 models based on size
+    if size == "1.7B":
+        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "4B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
     else:
-        # Directory - create tar
-        tar_buffer = io.BytesIO()
-        with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
-            tar.add(full_path, arcname=os.path.basename(full_path))
-        return tar_buffer.getvalue()
-
-
-@app.function(
-    image=image,
-    volumes={"/workspace": storage_volume},
-    timeout=300,
-)
-def list_workspace():
-    """List contents of Modal workspace."""
-    workspace_dir = "/workspace/verifiers"
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"''',
+                    content
+                )
+                modified = True
+            
+            if modified:
+                with open(script_path, 'w') as f:
+                    f.write(content)
     
-    print(f"Contents of {workspace_dir}:")
-    if not os.path.exists(workspace_dir):
-        print("  (empty)")
-        return
+    # Install environment
+    # For SFT versions, use the base environment name
+    base_env = env.replace("-sft", "")
+    env_name = f"vf_{base_env.replace('-', '_')}"
+    env_path = f"environments/{env_name}"
+    if os.path.exists(env_path):
+        print(f"📦 Installing {env_name} environment...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
+    else:
+        print(f"❌ Environment {env_name} not found at {env_path}")
+        print("Available environments:")
+        if os.path.exists("environments"):
+            for env_dir in os.listdir("environments"):
+                if os.path.isdir(f"environments/{env_dir}"):
+                    print(f"  - {env_dir}")
+        else:
+            print("  No environments directory found")
     
-    for root, dirs, files in os.walk(workspace_dir):
-        level = root.replace(workspace_dir, '').count(os.sep)
-        indent = ' ' * 2 * level
-        print(f"{indent}{os.path.basename(root)}/")
-        subindent = ' ' * 2 * (level + 1)
-        for file in files[:10]:  # Limit files shown
-            print(f"{subindent}{file}")
-        if len(files) > 10:
-            print(f"{subindent}... and {len(files) - 10} more files")
+    # Build training command
+    script = TRAINING_SCRIPTS.get(env)
+    if not script:
+        raise ValueError(f"Unknown environment: {env}")
+    
+    # Configure based on GPU count
+    if gpus > 1:
+        # Multi-GPU with accelerate
+        cmd = [
+            "accelerate", "launch",
+            "--num-processes", str(gpus),
+            "--config-file", "configs/zero3.yaml",
+            script
+        ]
+    else:
+        # Single GPU
+        cmd = [sys.executable, script]
+    
+    # Add arguments
+    cmd.extend(["--size", size])
+    
+    # Override training args if provided
+    if steps:
+        os.environ["VERIFIERS_MAX_STEPS"] = str(steps)
+        # Also update the training script to use the max_steps
+        if script and os.path.exists(script):
+            with open(script, 'r') as f:
+                content = f.read()
+            # Replace max_steps value
+            content = re.sub(r'training_args\.max_steps = \d+', f'training_args.max_steps = {steps}', content)
+            with open(script, 'w') as f:
+                f.write(content)
+    if batch_size:
+        os.environ["VERIFIERS_BATCH_SIZE"] = str(batch_size)
+    if learning_rate:
+        os.environ["VERIFIERS_LR"] = str(learning_rate)
+    
+    # Disable flash attention if needed
+    os.environ["TRANSFORMERS_DISABLE_FLASH_ATTN"] = "1"
+    os.environ["ATTN_IMPLEMENTATION"] = "sdpa"
+    os.environ["FLASH_ATTENTION_SKIP_IMPORT"] = "1"
+    
+    # Add attn_implementation to model loading
+    if script and os.path.exists(script):
+        with open(script, 'r') as f:
+            content = f.read()
+        # Add attn_implementation parameter
+        content = content.replace(
+            'model, tokenizer = vf.get_model_and_tokenizer(model_name)',
+            'model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})'
+        )
+        with open(script, 'w') as f:
+            f.write(content)
+    
+    # Run training
+    print(f"\n🏃 Running: {' '.join(cmd)}")
+    print("=" * 60)
+    
+    result = subprocess.run(cmd)
+    
+    print("=" * 60)
+    print(f"✅ Training completed with exit code: {result.returncode}")
+    
+    # Save outputs
+    if os.path.exists("outputs"):
+        print("💾 Saving outputs...")
+        subprocess.run(["cp", "-r", "outputs", "/outputs/"], check=False)
+    
+    return result.returncode == 0
 
-
-def create_file_archive():
-    """Create compressed archive of local files."""
-    print("Creating archive of local files...")
+def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
+    """Training with embedded vLLM server for RL."""
+    import subprocess
+    import time
     
-    tar_buffer = io.BytesIO()
-    file_count = 0
-    total_size = 0
+    print(f"🚀 Starting Verifiers RL training with embedded vLLM")
+    print(f"📚 Environment: {env}")
+    print(f"📏 Model size: {size}")
+    print(f"🖥️ GPUs: {gpus}")
     
-    # Files and directories to exclude
-    exclude_patterns = {
-        '.git', '__pycache__', '.pytest_cache', 'node_modules',
-        '.venv', 'venv', 'wandb', '.modal', '.mypy_cache',
-        '.DS_Store', 'outputs', 'checkpoints'
+    # Set environment variables
+    os.environ["HF_HOME"] = "/cache"
+    os.environ["TRANSFORMERS_CACHE"] = "/cache"
+    os.environ["WANDB_PROJECT"] = "verifiers"
+    os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "dummy-key-for-vllm")
+    
+    # Change to the mounted verifiers repository
+    print("\n📥 Setting up verifiers repository...")
+    os.chdir("/app/verifiers")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Contents: {os.listdir('.')}")
+    
+    # Install verifiers
+    print("📦 Installing verifiers...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+    
+    # Install environment
+    base_env = env.replace("-sft", "")
+    env_name = f"vf_{base_env.replace('-', '_')}"
+    env_path = f"environments/{env_name}"
+    if os.path.exists(env_path):
+        print(f"📦 Installing {env_name} environment...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
+    
+    # Fix training scripts to use correct model names
+    script_path = TRAINING_SCRIPTS.get(env, f"examples/grpo/train_{env}.py")
+    if os.path.exists(script_path):
+        with open(script_path, 'r') as f:
+            content = f.read()
+        
+        modified = False
+        
+        # Fix environment ID (vf-wordle -> vf_wordle)
+        if 'env_id="vf-' in content:
+            content = re.sub(r'env_id="vf-([^"]+)"', r'env_id="vf_\1"', content)
+            modified = True
+        
+        # Fix model loading with attn_implementation
+        if 'model, tokenizer = vf.get_model_and_tokenizer(model_name)' in content and 'model_kwargs=' not in content:
+            content = content.replace(
+                'model, tokenizer = vf.get_model_and_tokenizer(model_name)',
+                'model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})'
+            )
+            modified = True
+        
+        # Replace old model references
+        if 'willcb/Qwen3' in content or 'model_name = f"willcb/Qwen3-{size}-Wordle"' in content:
+            # Find and replace the model_name assignment
+            content = re.sub(
+                r'model_name = .*Qwen3.*',
+                '''# Use Qwen2.5 models based on size
+    if size == "1.7B":
+        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "4B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
+    else:
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"''',
+                content
+            )
+            modified = True
+        
+        if modified:
+            with open(script_path, 'w') as f:
+                f.write(content)
+    
+    # Model name mapping
+    if size == "1.7B":
+        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "4B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
+    else:
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+    
+    # Start standard vLLM OpenAI API server (no weight sync needed)
+    print(f"\n🌐 Starting vLLM server with {model_name}...")
+    vllm_cmd = [
+        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+        "--model", model_name,
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--enforce-eager",
+        "--disable-log-requests",
+        "--trust-remote-code",
+        "--max-model-len", "4096",
+        "--gpu-memory-utilization", "0.3",  # Reduced to leave more memory for training
+        "--block-size", "16",
+    ]
+    
+    # Start vLLM in background
+    vllm_process = subprocess.Popen(vllm_cmd)
+    
+    # Wait for vLLM to start
+    print("⏳ Waiting for vLLM server to start...")
+    time.sleep(30)  # Give vLLM time to load model
+    
+    # Disable flash attention and optimize memory
+    os.environ["TRANSFORMERS_DISABLE_FLASH_ATTN"] = "1"
+    os.environ["ATTN_IMPLEMENTATION"] = "sdpa"
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+    os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+    
+    # Create configuration to use OpenAI client instead of VLLMClient
+    vllm_config = {
+        "use_openai_client": True,
+        "base_url": "http://127.0.0.1:8000/v1",
+        "api_key": "dummy-key"
     }
     
-    # File extensions to exclude
-    exclude_extensions = {'.pyc', '.pyo', '.pyd', '.so', '.dylib', '.pt', '.bin'}
+    # Save config to environment for the training script to use
+    os.environ["VLLM_USE_OPENAI_CLIENT"] = "1"
+    os.environ["VLLM_BASE_URL"] = vllm_config["base_url"]
+    os.environ["VLLM_API_KEY"] = vllm_config["api_key"]
     
-    with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
-        for root, dirs, files in os.walk('.'):
-            # Skip unwanted directories
-            dirs[:] = [d for d in dirs if d not in exclude_patterns and not d.startswith('.')]
-            
-            for file in files:
-                # Skip unwanted files
-                if (file in exclude_patterns or 
-                    file.startswith('.') or 
-                    any(file.endswith(ext) for ext in exclude_extensions)):
-                    continue
-                
-                file_path = os.path.join(root, file)
-                try:
-                    file_size = os.path.getsize(file_path)
-                    # Skip very large files
-                    if file_size > 100 * 1024 * 1024:  # 100MB
-                        print(f"  Skipping large file: {file_path} ({file_size / 1024 / 1024:.1f} MB)")
-                        continue
-                    
-                    arcname = file_path[2:] if file_path.startswith('./') else file_path
-                    tar.add(file_path, arcname=arcname)
-                    file_count += 1
-                    total_size += file_size
-                    
-                    # Show important files being archived
-                    if 'train_wordle.py' in file or file.endswith('.py') and file_count <= 10:
-                        print(f"  Adding: {arcname}")
-                        
-                except Exception as e:
-                    print(f"  Warning: Could not add {file_path}: {e}")
+    print(f"\n🏃 Starting GRPO training...")
+    print("==" * 30)
     
-    data = tar_buffer.getvalue()
-    compressed_size_mb = len(data) / 1024 / 1024
-    total_size_mb = total_size / 1024 / 1024
-    print(f"Archived {file_count} files ({total_size_mb:.1f} MB -> {compressed_size_mb:.1f} MB compressed)")
-    return data
+    try:
+        # Run training script directly
+        script = TRAINING_SCRIPTS.get(env, f"examples/grpo/train_{env}.py")
+        train_cmd = [sys.executable, script, "--size", size]
+        if steps:
+            train_cmd.extend(["--steps", str(steps)])
+        result = subprocess.run(train_cmd)
+        
+        print("==" * 30)
+        print(f"✅ Training completed with exit code: {result.returncode}")
+        
+        # Save outputs
+        if os.path.exists("outputs"):
+            print("💾 Saving outputs...")
+            subprocess.run(["cp", "-r", "outputs", "/outputs/"], check=False)
+        
+        return result.returncode == 0
+        
+    finally:
+        # Kill vLLM server
+        print("🛑 Stopping vLLM server...")
+        vllm_process.terminate()
+        vllm_process.wait()
 
-
-@app.local_entrypoint()
-def main(cmd: str = None, download: str = None, sync_only: bool = False, list: bool = False, env_vars: str = None):
-    """Main entry point."""
+# Simplified entry point - single GPU by default
+@app.function(
+    image=image,
+    gpu="A10G",  # Use A10G for RL training (24GB memory is sufficient)
+    cpu=8.0,
+    memory=32768,
+    timeout=14400,  # 4 hours for longer training runs
+    volumes={
+        "/cache": cache_volume,
+        "/outputs": outputs_volume,
+    },
+    secrets=[modal.Secret.from_dotenv()],
+)
+def train(env: str = "wordle", size: str = "0.5B", steps: int = 200, rl: bool = False):
+    """Default training function - single GPU.
     
-    # Parse environment variables
-    parsed_env_vars = {}
-    if env_vars:
-        for var in env_vars.split(','):
-            if '=' in var:
-                key, value = var.split('=', 1)
-                parsed_env_vars[key] = value
-    
-    # Handle list request
-    if list:
-        list_workspace.remote()
-        return
-    
-    # Handle download request
-    if download:
-        print(f"Downloading: {download}")
-        try:
-            file_data = download_from_modal.remote(download)
-            local_path = Path(download)
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            if download.endswith('.tar.gz'):
-                # Extract if it's a tar file
-                with tarfile.open(fileobj=io.BytesIO(file_data), mode='r:gz') as tar:
-                    tar.extractall('.')
-                print(f"Extracted archive to current directory")
-            else:
-                with open(local_path, 'wb') as f:
-                    f.write(file_data)
-                print(f"Downloaded to: {local_path}")
-        except Exception as e:
-            print(f"Download failed: {e}")
-            sys.exit(1)
-        return
-    
-    # Sync local files to Modal
-    file_data = create_file_archive()
-    sync_local_to_modal.remote(file_data)
-    
-    if sync_only:
-        print("Files synced to Modal.")
-        return
-    
-    # Run command if provided
-    if cmd:
-        print(f"Running command on Modal: {cmd}")
-        exit_code = run_training_command.remote(cmd, parsed_env_vars)
-        sys.exit(exit_code)
+    Args:
+        env: Environment name (e.g., 'wordle', 'gsm8k')
+        size: Model size ('0.5B', '1.7B', '4B')
+        steps: Number of training steps
+        rl: Use RL (GRPO) training. If False, uses SFT training.
+    """
+    if rl:
+        print("🚀 Using RL (GRPO) training with embedded vLLM server")
+        # For RL, use the original environment name
+        return _train_with_vllm(env, size, steps, gpus=1)
     else:
-        print("Files synced. Use --cmd to run a command.")
+        print("📚 Using SFT (Supervised Fine-Tuning)")
+        # For SFT, add -sft suffix if not present
+        if not env.endswith("-sft"):
+            env = f"{env}-sft"
+        return _train(env, size, steps, None, None, None, None, gpus=1)
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Modal wrapper for verifiers")
-    parser.add_argument("--cmd", help="Command to run")
-    parser.add_argument("--download", help="Download file/directory from Modal")
-    parser.add_argument("--sync-only", action="store_true", help="Only sync files")
-    parser.add_argument("--list", action="store_true", help="List workspace contents")
-    parser.add_argument("--env-vars", help="Environment variables (comma-separated KEY=VALUE pairs)")
+@app.function(
+    image=image,
+    gpu="T4",
+    timeout=600,
+    volumes={"/cache": cache_volume},
+    secrets=[modal.Secret.from_dotenv()],
+)
+def evaluate(env: str = "wordle", model: str = None, num_examples: int = 10):
+    """Run verifiers evaluation on Modal."""
+    import subprocess
     
-    args = parser.parse_args()
-    main(cmd=args.cmd, download=args.download, sync_only=args.sync_only, list=args.list, env_vars=args.env_vars)
+    print(f"🧪 Running evaluation")
+    print(f"📚 Environment: {env}")
+    print(f"🤖 Model: {model or 'default'}")
+    
+    # Change to the mounted verifiers repository
+    os.chdir("/app/verifiers")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Contents: {os.listdir('.')}")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
+    
+    # Install environment
+    # For SFT versions, use the base environment name
+    base_env = env.replace("-sft", "")
+    env_name = f"vf_{base_env.replace('-', '_')}"
+    env_path = f"environments/{env_name}"
+    if os.path.exists(env_path):
+        subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
+    
+    # Build eval command
+    cmd = [sys.executable, "-m", "verifiers.scripts.eval", env_name]
+    if model:
+        cmd.extend(["-m", model])
+    cmd.extend(["-n", str(num_examples)])
+    
+    # Run evaluation
+    print(f"\n🏃 Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+    
+    return result.returncode == 0
+
+# Simple local entry point for testing
+@app.local_entrypoint()
+def main():
+    """Local testing."""
+    print("🎯 Modal runner for verifiers")
+    print("\nUsage examples:")
+    print("  modal run run_modal.py::train --env wordle --size 0.5B")
+    print("  modal run run_modal.py::train_2gpu --env gsm8k --size 1.7B")
+    print("  modal run run_modal.py::evaluate --env wordle")
+    
+if __name__ == "__main__":
+    with app.run():
+        main()

@@ -210,6 +210,12 @@ class GRPOConfig(TrainingArguments):
             "after the timeout, a `ConnectionError` is raised."
         },
     )
+    disable_weight_sync: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to disable weight syncing with vLLM server. Set to True when using standard vLLM OpenAI API server."
+        },
+    )
     # Parameters that control the training
     learning_rate: float = field(
         default=1e-6,
