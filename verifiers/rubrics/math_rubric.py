@@ -1,7 +1,7 @@
 from verifiers.parsers.parser import Parser
 from verifiers.parsers.xml_parser import XMLParser
 from verifiers.rubrics.rubric import Rubric
-from verifiers.types import RewardFunc
+from verifiers.types import Messages, RewardFunc
 
 
 class MathRubric(Rubric):
@@ -16,7 +16,9 @@ class MathRubric(Rubric):
         self.add_reward_func(self.correct_answer_reward_func)
         self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
 
-    def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
+    def correct_answer_reward_func(
+        self, completion: Messages, answer: str, **kwargs
+    ) -> float:
         """Reward function that checks if the final answer matches the expected answer."""
         try:
             from verifiers.rubrics.utils.math_utils import (

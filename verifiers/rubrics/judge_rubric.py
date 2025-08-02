@@ -4,6 +4,7 @@ from openai import OpenAI
 
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
+from verifiers.types import Messages, State
 
 DEFAULT_JUDGE_PROMPT = """Given a ground truth answer \
 and a response, determine if the response is correct.
@@ -45,7 +46,14 @@ class JudgeRubric(Rubric):
         self.judge_prompt = judge_prompt
         self.judge_sampling_args = judge_sampling_args or {}
 
-    def judge(self, prompt, completion, answer, state, **kwargs) -> str:
+    def judge(
+        self,
+        prompt: Messages,
+        completion: Messages,
+        answer: str,
+        state: State,
+        **kwargs,
+    ) -> str:
         if "judge_response" in state:
             return state["judge_response"]
         if isinstance(prompt, list):
