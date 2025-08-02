@@ -52,12 +52,12 @@ class JudgeRubric(Rubric):
         else:
             question = prompt
         response = self.parser.parse_answer(completion)
-        prompt = self.judge_prompt.format(
+        judge_prompt = self.judge_prompt.format(
             question=question, answer=answer, response=response
         )
         judge_response = self.judge_client.chat.completions.create(
             model=self.judge_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": judge_prompt}],
             **self.judge_sampling_args,
         )
         judge_response = str(judge_response.choices[0].message.content)
