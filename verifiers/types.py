@@ -20,7 +20,7 @@ from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # typing aliases
 MessageType = Literal["chat", "completion"]
@@ -58,21 +58,21 @@ class GenerateOutputs(BaseModel):
     info: list[Info]
     task: list[str]
     reward: list[float]
-    metrics: dict[str, list[float]] = {}
+    metrics: dict[str, list[float]] = Field(default_factory=dict)
 
 
 class RolloutScore(BaseModel):
     """Pydantic model for rollout scores."""
 
     reward: float
-    metrics: dict[str, float] = {}
+    metrics: dict[str, float] = Field(default_factory=dict)
 
 
 class RolloutScores(BaseModel):
     """Pydantic model for rubric outputs."""
 
     reward: list[float]
-    metrics: dict[str, list[float]] = {}
+    metrics: dict[str, list[float]] = Field(default_factory=dict)
 
 
 class ProcessedOutputs(BaseModel):
