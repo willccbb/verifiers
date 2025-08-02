@@ -276,8 +276,8 @@ class Environment(ABC):
         model: str,
         prompts: list[Messages],
         answers: list[str],
-        tasks: list[str] | None = None,
-        infos: list[Info] | None = None,
+        tasks: list[str],
+        infos: list[Info],
         sampling_args: SamplingArgs | None = None,
         max_concurrent: int = -1,
         **kwargs,
@@ -286,8 +286,6 @@ class Environment(ABC):
         Run rollouts for a given list of prompts and return the completions.
         """
         from tqdm.asyncio import tqdm_asyncio
-
-        tasks, infos = tasks or [], infos or []
 
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
