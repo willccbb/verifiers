@@ -1,6 +1,7 @@
 from typing import Callable
 
 from verifiers.rubrics.rubric import Rubric
+from verifiers.types import Messages
 from verifiers.utils.tool_utils import convert_func_to_oai_tool
 
 
@@ -23,7 +24,7 @@ class ToolRubric(Rubric):
         # Pass them to parent class
         super().__init__(funcs=reward_funcs, weights=reward_weights)
 
-    def total_tool_calls(self, completion, **kwargs) -> float:
+    def total_tool_calls(self, completion: Messages, **kwargs) -> float:
         """Count the total number of tool calls across all assistant messages."""
         total = 0
         for msg in completion:
@@ -36,7 +37,7 @@ class ToolRubric(Rubric):
     def get_tool_call_count_func(self, tool_name: str) -> Callable:
         """Create a reward function that counts calls to a specific tool."""
 
-        def tool_call_count_func(completion, **kwargs) -> float:
+        def tool_call_count_func(completion: Messages, **kwargs) -> float:
             """Count calls to {tool_name} tool."""
             count = 0
 
