@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable
 
 from verifiers.rubrics.rubric import Rubric
 from verifiers.utils.tool_utils import convert_func_to_oai_tool
@@ -7,10 +7,10 @@ from verifiers.utils.tool_utils import convert_func_to_oai_tool
 class ToolRubric(Rubric):
     """Simple rubric that counts tool calls in completion messages."""
 
-    def __init__(self, tools: List[Callable] = []):
-        self.tools = tools
-        self.oai_tools = [convert_func_to_oai_tool(tool) for tool in tools]
-        self.tool_names = [tool.__name__ for tool in tools]
+    def __init__(self, tools: list[Callable] | None = None):
+        self.tools = tools or []
+        self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
+        self.tool_names = [tool.__name__ for tool in self.tools]
 
         # Build initial reward functions and weights
         reward_funcs = [self.total_tool_calls]
