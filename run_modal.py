@@ -31,16 +31,7 @@ app = modal.App("verifiers")
 TRAINING_SCRIPTS = {
     "wordle": "examples/grpo/train_wordle.py",
     "wordle-sft": "examples/sft/train_wordle_sft.py",  # SFT version without vLLM
-    "gsm8k": "examples/grpo/train_gsm8k.py",
-    "math-group": "examples/grpo/train_math_group.py",
-    "math-python": "examples/grpo/train_math_python.py",
-    "reverse-text": "examples/grpo/train_reverse_text.py",
-    "self-reward": "examples/grpo/train_self_reward.py",
-    "sentence-repeater": "examples/grpo/train_sentence_repeater.py",
     "tool-test": "examples/grpo/train_tool_test.py",
-    "wiki-search": "examples/grpo/train_wiki_search.py",
-    "arc-1d": "examples/grpo/train_arc_1d.py",
-    "bfcl-single-turn": "examples/grpo/train_bfcl_single_turn.py",
 }
 
 # GPU configurations
@@ -558,6 +549,8 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
         "--max-model-len", "4096",
         "--gpu-memory-utilization", "0.5",  # Increased for 3B model
         "--block-size", "16",
+        "--enable-auto-tool-choice",  # Required for tool calling
+        "--tool-call-parser", "hermes",  # Parser for tool calls
     ]
     
     # Start vLLM in background
