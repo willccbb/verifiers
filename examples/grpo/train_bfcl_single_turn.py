@@ -34,6 +34,9 @@ def main(args):
     # Set up training arguments
     training_args = vf.grpo_defaults(run_name=run_name)
     
+    # Configure wandb reporting based on API key availability
+    training_args.report_to = "wandb" if os.environ.get("WANDB_API_KEY") else []
+    
     # Optimize for function calling with appropriate batch sizes and context length
     training_args.per_device_train_batch_size = 2  # Small batch size for 3B model
     training_args.num_generations = 8  # Multiple generations for better exploration
