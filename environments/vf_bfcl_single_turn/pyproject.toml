@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vf-bfcl-single-turn"
+version = "0.1.0"
+description = "BFCL v3 single turn function calling environment for verifiers"
+dependencies = ["verifiers", "datasets"]
+
+[project.entry-points."verifiers.envs"]
+vf-bfcl-single-turn = "vf_bfcl_single_turn:load_environment"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vf_bfcl_single_turn*"]

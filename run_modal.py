@@ -40,6 +40,7 @@ TRAINING_SCRIPTS = {
     "tool-test": "examples/grpo/train_tool_test.py",
     "wiki-search": "examples/grpo/train_wiki_search.py",
     "arc-1d": "examples/grpo/train_arc_1d.py",
+    "bfcl-single-turn": "examples/grpo/train_bfcl_single_turn.py",
 }
 
 # GPU configurations
@@ -338,6 +339,8 @@ if __name__ == "__main__":
                     '''# Use Qwen2.5 models based on size
     if size == "1.7B":
         model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "3B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
     elif size == "4B":
         model_name = "Qwen/Qwen2.5-3B-Instruct"
     else:
@@ -468,9 +471,22 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     base_env = env.replace("-sft", "")
     env_name = f"vf_{base_env.replace('-', '_')}"
     env_path = f"environments/{env_name}"
+    print(f"🔍 Looking for environment: {env_name} at {env_path}")
+    print(f"🔍 Environment exists: {os.path.exists(env_path)}")
     if os.path.exists(env_path):
         print(f"📦 Installing {env_name} environment...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
+        result = subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True, capture_output=True, text=True)
+        print("✅ Environment installation completed")
+        print(f"Install output: {result.stdout}")
+    else:
+        print(f"❌ Environment {env_name} not found at {env_path}")
+        print("Available environments:")
+        if os.path.exists("environments"):
+            for env_dir in os.listdir("environments"):
+                if os.path.isdir(f"environments/{env_dir}"):
+                    print(f"  - {env_dir}")
+        else:
+            print("  No environments directory found")
     
     # Fix training scripts to use correct model names
     script_path = TRAINING_SCRIPTS.get(env, f"examples/grpo/train_{env}.py")
@@ -501,6 +517,8 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
                 '''# Use Qwen2.5 models based on size
     if size == "1.7B":
         model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+    elif size == "3B":
+        model_name = "Qwen/Qwen2.5-3B-Instruct"
     elif size == "4B":
         model_name = "Qwen/Qwen2.5-3B-Instruct"
     else:
@@ -513,13 +531,19 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
             with open(script_path, 'w') as f:
                 f.write(content)
     
-    # Model name mapping
-    if size == "1.7B":
-        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-    elif size == "4B":
-        model_name = "Qwen/Qwen2.5-3B-Instruct"
+    # Use xLAM model for function calling tasks
+    if env == "bfcl-single-turn":
+        model_name = "Salesforce/xLAM-2-3b-fc-r"
     else:
-        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+        # Model name mapping for other environments
+        if size == "1.7B":
+            model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+        elif size == "3B":
+            model_name = "Qwen/Qwen2.5-3B-Instruct"
+        elif size == "4B":
+            model_name = "Qwen/Qwen2.5-3B-Instruct"
+        else:
+            model_name = "Qwen/Qwen2.5-0.5B-Instruct"
     
     # Start standard vLLM OpenAI API server (no weight sync needed)
     print(f"\n🌐 Starting vLLM server with {model_name}...")
@@ -532,7 +556,7 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
         "--disable-log-requests",
         "--trust-remote-code",
         "--max-model-len", "4096",
-        "--gpu-memory-utilization", "0.3",  # Reduced to leave more memory for training
+        "--gpu-memory-utilization", "0.5",  # Increased for 3B model
         "--block-size", "16",
     ]
     
@@ -549,6 +573,9 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:128"
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     os.environ["PYTORCH_NO_CUDA_MEMORY_CACHING"] = "1"
+    
+    # Add environments to Python path for module discovery
+    os.environ["PYTHONPATH"] = f"/app/verifiers/environments:{os.environ.get('PYTHONPATH', '')}"
     
     # Create configuration to use OpenAI client instead of VLLMClient
     vllm_config = {
@@ -592,7 +619,7 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
 # Simplified entry point - single GPU by default
 @app.function(
     image=image,
-    gpu="A10G",  # Use A10G for RL training (24GB memory is sufficient)
+    gpu="A100-40GB",  # Use A100 for 3B model training (40GB memory)
     cpu=8.0,
     memory=32768,
     timeout=14400,  # 4 hours for longer training runs
