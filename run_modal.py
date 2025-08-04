@@ -31,7 +31,8 @@ app = modal.App("verifiers")
 TRAINING_SCRIPTS = {
     "wordle": "examples/grpo/train_wordle.py",
     "wordle-sft": "examples/sft/train_wordle_sft.py",  # SFT version without vLLM
-    "tool-test": "examples/grpo/train_tool_test.py",
+    "tool-test": "examples/grpo/train_bfcl.py",  # Legacy alias
+    "bfcl": "examples/grpo/train_bfcl.py",  # BFCL function calling training
 }
 
 # GPU configurations
@@ -347,7 +348,11 @@ if __name__ == "__main__":
     # Install environment
     # For SFT versions, use the base environment name
     base_env = env.replace("-sft", "")
-    env_name = f"vf_{base_env.replace('-', '_')}"
+    # Special case for bfcl which maps to vf_bfcl_single_turn
+    if base_env == "bfcl":
+        env_name = "vf_bfcl_single_turn"
+    else:
+        env_name = f"vf_{base_env.replace('-', '_')}"
     env_path = f"environments/{env_name}"
     if os.path.exists(env_path):
         print(f"📦 Installing {env_name} environment...")
@@ -460,7 +465,11 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     
     # Install environment
     base_env = env.replace("-sft", "")
-    env_name = f"vf_{base_env.replace('-', '_')}"
+    # Special case for bfcl which maps to vf_bfcl_single_turn
+    if base_env == "bfcl":
+        env_name = "vf_bfcl_single_turn"
+    else:
+        env_name = f"vf_{base_env.replace('-', '_')}"
     env_path = f"environments/{env_name}"
     print(f"🔍 Looking for environment: {env_name} at {env_path}")
     print(f"🔍 Environment exists: {os.path.exists(env_path)}")
@@ -671,7 +680,11 @@ def evaluate(env: str = "wordle", model: str = None, num_examples: int = 10):
     # Install environment
     # For SFT versions, use the base environment name
     base_env = env.replace("-sft", "")
-    env_name = f"vf_{base_env.replace('-', '_')}"
+    # Special case for bfcl which maps to vf_bfcl_single_turn
+    if base_env == "bfcl":
+        env_name = "vf_bfcl_single_turn"
+    else:
+        env_name = f"vf_{base_env.replace('-', '_')}"
     env_path = f"environments/{env_name}"
     if os.path.exists(env_path):
         subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
