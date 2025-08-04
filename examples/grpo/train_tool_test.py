@@ -1,66 +1,63 @@
 import argparse
+import verifiers as vf
 import os
 
-import verifiers as vf
-
 """
+# GRPO Training for Tool Calling with Terminal-Bench-RL Optimizations
+
+This script includes optimizations from the terminal-bench-rl study:
+- Higher temperature (1.2) for exploration diversity
+- Lower KL penalty (beta=0.001) for more exploration
+- 16 rollouts per batch for better policy learning
+- Conservative gradient clipping (0.1)
+- GRPO-specific settings: dr_grpo loss, PPO clipping, reward scaling
+
 # install
-vf-install vf-tool-test (-p /path/to/environments)
+vf-install vf-tool-test --from-repo
 
 # quick eval
-vf-eval vf-tool-test -m (model_name in endpoints.py)
+vf-eval vf-tool-test (-m model_name in endpoints.py)
 
-1.7b inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-Instruct \
-    --data-parallel-size 6 --enforce-eager --disable-log-requests
+# inference:
+CUDA_VISIBLE_DEVICES=0 vf-vllm --model Qwen/Qwen2.5-0.5B-Instruct \
+    --enforce-eager --disable-log-requests
 
-1.7b training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
-    --config-file configs/zero3.yaml examples/grpo/train_tool_test.py --size 1.7B
-
-4b inference:
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model Qwen/Qwen2.5-3B-Instruct \
-    --data-parallel-size 6 --enforce-eager --disable-log-requests
-
-4b training:
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
-    --config-file configs/zero3.yaml examples/grpo/train_tool_test.py --size 4B
+# training:
+CUDA_VISIBLE_DEVICES=1 accelerate launch --num-processes 1 \
+    --config-file configs/zero3.yaml examples/grpo/train_tool_test.py
 """
 
-
-def train(model_size: str, max_steps: int = None):
-    model_names = {
-        "0.5B": "Qwen/Qwen2.5-0.5B-Instruct",
-        "1.7B": "Qwen/Qwen2.5-1.5B-Instruct",
-        "4B": "Qwen/Qwen2.5-3B-Instruct",
-    }
-    assert model_size in model_names, f"Invalid model size: {model_size}"
-    model_name = model_names[model_size]
-
-    # Load model and tokenizer (disable flash attention since it's not installed)
-    model_kwargs = {"attn_implementation": "eager"}
-    model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs=model_kwargs)
-
-    # Load environment
-    env = vf.load_environment("vf_tool_test")
-
-    # Training
-    training_args = vf.GRPOConfig(
-        output_dir=f"outputs/tool-test-{model_size}-grpo",
-        run_name=f"tool-test-{model_size}-grpo",
-        learning_rate=5e-7,
+def main(args):
+    # Load the tool test environment
+    vf_env = vf.load_environment(env_id="vf_tool_test", num_eval_examples=100)
+    
+    # Use Qwen model for tool testing
+    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+    
+    run_name = "tool-test-grpo_" + model_name.split("/")[-1].lower()
+    
+    # Load model and tokenizer
+    model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})
+    
+    # Set up training arguments
+    # Create GRPOConfig directly to avoid bf16 issue on CPU/Mac
+    from verifiers.trainers import GRPOConfig
+    training_args = GRPOConfig(
+        output_dir=f"outputs/{run_name}",
+        run_name=run_name,
+        learning_rate=1e-6,
         lr_scheduler_type="constant_with_warmup",
-        warmup_steps=10,
-        max_steps=max_steps if max_steps is not None else 200,
-        bf16=False,  # Disable bf16 on Mac
-        fp16=False,  # Also disable fp16
-        max_grad_norm=0.1,
-        beta=0.0,
+        warmup_steps=50,
+        max_steps=int(os.environ.get("VERIFIERS_MAX_STEPS", "500")),
+        bf16=False,  # Disable bf16 for CPU/Mac
+        fp16=False,  # Disable fp16 for CPU/Mac
+        max_grad_norm=0.1,  # Terminal-bench-rl uses 0.1 for more conservative clipping
         num_iterations=1,
-        max_seq_len=2048,
-        per_device_train_batch_size=4,
-        num_generations=4,
-        gradient_accumulation_steps=8,
+        max_seq_len=4096,
+        per_device_train_batch_size=16,  # Increased to match num_generations
+        per_device_eval_batch_size=16,  # Match train batch size for num_generations
+        num_generations=16,  # Terminal-bench-rl uses 16 rollouts for better exploration
+        gradient_accumulation_steps=2,  # Reduced to maintain effective batch size
         gradient_checkpointing=True,
         save_strategy="steps",
         save_steps=100,
@@ -68,26 +65,49 @@ def train(model_size: str, max_steps: int = None):
         logging_steps=1,
         log_on_each_node=False,
         log_completions=True,
-        report_to="wandb" if os.environ.get("WANDB_API_KEY") else [],
+        eval_strategy="steps",
+        eval_steps=20,
+        max_tokens=512,
+        # Terminal-bench-rl optimizations
+        temperature=1.2,  # Higher temperature for diversity (terminal-bench-rl finding)
+        beta=0.001,  # Lower KL penalty for more exploration (terminal-bench-rl finding)
+        # GRPO-specific settings from best practices
+        loss_type="dr_grpo",  # Length-unbiased loss
+        epsilon=0.2,  # PPO-style clipping
+        scale_rewards=True,
+        mask_env_responses=True,
+        mask_truncated_completions=True,
     )
+    
+    # Configure wandb reporting based on API key availability
+    training_args.report_to = "wandb" if os.environ.get("WANDB_API_KEY") else []
+    
     
     # Check if we should disable weight sync (when using standard vLLM OpenAI API)
     if os.environ.get("VLLM_USE_OPENAI_CLIENT") == "1":
         training_args.disable_weight_sync = True
-
+    
+    # Create trainer with LoRA configuration
     trainer = vf.GRPOTrainer(
         model=model,
         processing_class=tokenizer,
-        env=env,
+        env=vf_env,
         args=training_args,
-        # lora_config=vf.lora_defaults()
+        peft_config=vf.lora_defaults(),
     )
+    
+    # Start training
     trainer.train()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--size", "-s", type=str, default="0.5B")
-    parser.add_argument("--steps", type=int, default=None, help="Maximum number of training steps")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode with fewer steps")
+    parser.add_argument("--steps", type=int, help="Number of training steps")
     args = parser.parse_args()
-    train(args.size, args.steps)
+    
+    if args.debug:
+        os.environ["VERIFIERS_MAX_STEPS"] = "50"
+    elif args.steps:
+        os.environ["VERIFIERS_MAX_STEPS"] = str(args.steps)
+    
+    main(args)

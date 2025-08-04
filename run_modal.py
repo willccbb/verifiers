@@ -588,7 +588,12 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     try:
         # Run training script directly
         script = TRAINING_SCRIPTS.get(env, f"examples/grpo/train_{env}.py")
-        train_cmd = [sys.executable, script, "--size", size]
+        train_cmd = [sys.executable, script]
+        
+        # Only add --size for scripts that support it (not tool-test)
+        if env != "tool-test":
+            train_cmd.extend(["--size", size])
+            
         if steps:
             train_cmd.extend(["--steps", str(steps)])
         result = subprocess.run(train_cmd)
