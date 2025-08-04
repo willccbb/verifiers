@@ -23,9 +23,19 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Load environment variables from .env file
 load_dotenv()
 
-app = modal.App("verifiers")
+# Explicitly grab required keys from environment
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+WANDB_API_KEY = os.environ.get("WANDB_API_KEY") 
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
+# Get experimenter and experiment names for app naming
+experimenter = os.environ.get("EXPERIMENTER", "default")
+experiment_name = os.environ.get("EXPERIMENT_NAME", "default")
+app_name = f"verifiers_{experimenter}_{experiment_name}"
+app = modal.App(app_name)
 
 # Training scripts mapping
 TRAINING_SCRIPTS = {
@@ -73,9 +83,9 @@ image = (
     .add_local_dir(".", remote_path="/app/verifiers")
 )
 
-# Persistent volumes
-cache_volume = modal.Volume.from_name("verifiers-cache", create_if_missing=True)
-outputs_volume = modal.Volume.from_name("verifiers-outputs", create_if_missing=True)
+# Persistent volumes - experiment-specific
+cache_volume = modal.Volume.from_name(f"verifiers-cache-{experimenter}-{experiment_name}", create_if_missing=True)
+outputs_volume = modal.Volume.from_name(f"verifiers-outputs-{experimenter}-{experiment_name}", create_if_missing=True)
 
 # Single GPU training function
 @app.function(
@@ -163,7 +173,7 @@ def _train(env: str, size: str, steps: int, batch_size: int, learning_rate: floa
     # Set environment variables
     os.environ["HF_HOME"] = "/cache"
     os.environ["TRANSFORMERS_CACHE"] = "/cache"
-    os.environ["WANDB_PROJECT"] = wandb_project or "verifiers"
+    os.environ["WANDB_PROJECT"] = wandb_project or f"verifiers-{experimenter}-{experiment_name}"
     if wandb_run_name:
         os.environ["WANDB_RUN_NAME"] = wandb_run_name
     
@@ -272,7 +282,7 @@ def main(args):
         warmup_steps=10,
         bf16=torch.cuda.is_bf16_supported(),
         fp16=not torch.cuda.is_bf16_supported(),
-        report_to="wandb" if os.environ.get("WANDB_API_KEY") else "none",
+        report_to="wandb" if WANDB_API_KEY else "none",
         remove_unused_columns=True,
         max_steps=int(os.environ.get("VERIFIERS_MAX_STEPS", "20")),
         logging_dir=f"./logs/{run_name}",
@@ -451,7 +461,7 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     os.environ["HF_HOME"] = "/cache"
     os.environ["TRANSFORMERS_CACHE"] = "/cache"
     os.environ["WANDB_PROJECT"] = "verifiers"
-    os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "dummy-key-for-vllm")
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY or "dummy-key-for-vllm"
     
     # Change to the mounted verifiers repository
     print("\n📥 Setting up verifiers repository...")
