@@ -1,6 +1,7 @@
 import json
 from typing import List, Dict, Any, Optional
 import random
+import re
 
 from datasets import load_dataset, Dataset
 
@@ -18,7 +19,7 @@ def load_environment(
     **kwargs
 ) -> vf.SingleTurnEnv:
     """
-    Loads the BFCL v3 single turn function calling environment with fixed rewards.
+    Loads the BFCL v3 single turn function calling environment with reward shaping.
     """
     # Load the BFCL dataset
     # Try multiple potential sources for BFCL data
@@ -84,14 +85,18 @@ def load_environment(
                     continue
         tools = cleaned_tools
         
-        # Format the prompt for xLAM-style function calling
+        # Format the prompt with a clear example
         system_prompt = f"""You are a helpful assistant with access to the following functions:
 
 {format_tools_for_prompt(tools)}
 
-To use these functions, respond with a JSON array of function calls inside <function_calls> tags.
+To use these functions, you must respond with a JSON array of function calls inside <function_calls> tags.
 Each function call should have "name" and "arguments" fields.
-Example: <function_calls>[{{"name": "function_name", "arguments": {{"param1": "value1"}}}}]</function_calls>"""
+
+Example format:
+<function_calls>[{{"name": "function_name", "arguments": {{"param1": "value1"}}}}]</function_calls>
+
+Always use this exact format with the <function_calls> tags."""
         
         prompt = [
             {"role": "system", "content": system_prompt},
@@ -177,90 +182,118 @@ Example: <function_calls>[{{"name": "function_name", "arguments": {{"param1": "v
         answer_field="function_calls"
     )
     
-    # Define reward function that properly handles message format
+    # Define reward function with reward shaping
     def function_call_reward(completion, info):
-        """Reward function that checks if the model made correct function calls."""
+        """Reward function with shaping to help model learn the format."""
         try:
-            # Debug print first few times
-            if hasattr(function_call_reward, 'debug_count'):
-                function_call_reward.debug_count += 1
+            # Get the completion content
+            if isinstance(completion, list) and len(completion) > 0:
+                content = completion[-1].get('content', '')
             else:
-                function_call_reward.debug_count = 1
+                return 0.0
             
-            if function_call_reward.debug_count <= 3:
-                print(f"\n[DEBUG {function_call_reward.debug_count}] Reward function called")
-                print(f"Completion type: {type(completion)}")
-                if isinstance(completion, list) and len(completion) > 0:
-                    print(f"First message: {completion[0]}")
+            # Debug logging
+            if not hasattr(function_call_reward, 'call_count'):
+                function_call_reward.call_count = 0
+            function_call_reward.call_count += 1
             
-            # Parse function calls from completion using the parser
+            if function_call_reward.call_count <= 5:
+                print(f"\n[Reward {function_call_reward.call_count}] Content: {content[:100]}...")
+            
+            # Reward shaping - give partial credit for progress
+            reward = 0.0
+            
+            # Check for XML tags (highest reward component)
+            has_opening_tag = '<function_calls>' in content
+            has_closing_tag = '</function_calls>' in content
+            has_both_tags = has_opening_tag and has_closing_tag
+            
+            if has_both_tags:
+                reward += 0.3  # Major reward for using correct format
+            elif has_opening_tag or has_closing_tag:
+                reward += 0.1  # Partial reward for attempting tags
+            
+            # Check for JSON structure
+            has_json_array = '[' in content and ']' in content
+            has_json_object = '{' in content and '}' in content
+            has_name_field = '"name"' in content
+            has_arguments_field = '"arguments"' in content
+            
+            if has_json_array:
+                reward += 0.1
+            if has_json_object:
+                reward += 0.1
+            if has_name_field:
+                reward += 0.1
+            if has_arguments_field:
+                reward += 0.1
+            
+            # Try to parse with the XML parser
             parsed_calls = parser.parse_answer(completion)
             
-            if function_call_reward.debug_count <= 3:
-                print(f"Parsed calls: {parsed_calls}")
+            if parsed_calls:
+                reward += 0.3  # Successfully parsed!
+                
+                try:
+                    # Parse the JSON
+                    called_functions = json.loads(parsed_calls)
+                    if isinstance(called_functions, dict):
+                        called_functions = [called_functions]
+                    
+                    expected_calls = info.get("expected_calls", [])
+                    
+                    # Normalize and compare
+                    def normalize_call(call):
+                        return {
+                            "name": call.get("name", ""),
+                            "arguments": call.get("arguments", {})
+                        }
+                    
+                    if expected_calls:
+                        normalized_called = [normalize_call(c) for c in called_functions]
+                        normalized_expected = [normalize_call(c) for c in expected_calls]
+                        
+                        # Check for correct function names
+                        expected_names = {c["name"] for c in normalized_expected}
+                        called_names = {c["name"] for c in normalized_called}
+                        
+                        # Reward for calling correct functions
+                        correct_names = expected_names.intersection(called_names)
+                        if correct_names:
+                            reward += 0.2 * (len(correct_names) / len(expected_names))
+                        
+                        # Full reward for exact match
+                        matches = 0
+                        for expected in normalized_expected:
+                            for called in normalized_called:
+                                if (expected["name"] == called["name"] and 
+                                    expected["arguments"] == called["arguments"]):
+                                    matches += 1
+                                    break
+                        
+                        if matches == len(normalized_expected) and len(normalized_called) == len(normalized_expected):
+                            reward = 1.0  # Perfect match!
+                        else:
+                            # Add match bonus
+                            reward += 0.2 * (matches / len(normalized_expected))
+                    else:
+                        # No expected calls - reward for not making calls
+                        if not called_functions:
+                            reward = 1.0
+                        
+                except:
+                    pass  # JSON parsing failed, but we still have partial rewards
             
-            if not parsed_calls:
-                return 0.0
+            # Log reward breakdown for debugging
+            if function_call_reward.call_count <= 5:
+                print(f"[Reward {function_call_reward.call_count}] Total: {reward:.3f}")
+                print(f"  Tags: {has_both_tags}, JSON: {has_json_array or has_json_object}")
+                print(f"  Parsed: {parsed_calls is not None}")
             
-            # Parse the JSON array of function calls
-            try:
-                called_functions = json.loads(parsed_calls)
-            except:
-                return 0.0
-            
-            # Ensure it's a list
-            if isinstance(called_functions, dict):
-                called_functions = [called_functions]
-            
-            expected_calls = info.get("expected_calls", [])
-            
-            if function_call_reward.debug_count <= 3:
-                print(f"Called functions: {called_functions}")
-                print(f"Expected calls: {expected_calls}")
-            
-            # If no expected calls, check that no calls were made
-            if not expected_calls:
-                reward = 0.0 if called_functions else 1.0
-                if function_call_reward.debug_count <= 3:
-                    print(f"No expected calls, reward: {reward}")
-                return reward
-            
-            # Normalize function calls for comparison
-            def normalize_call(call):
-                return {
-                    "name": call.get("name", ""),
-                    "arguments": call.get("arguments", {})
-                }
-            
-            normalized_called = [normalize_call(c) for c in called_functions]
-            normalized_expected = [normalize_call(c) for c in expected_calls]
-            
-            # Check exact match (order doesn't matter)
-            if len(normalized_called) != len(normalized_expected):
-                if function_call_reward.debug_count <= 3:
-                    print(f"Length mismatch: {len(normalized_called)} vs {len(normalized_expected)}")
-                return 0.0
-            
-            # Check each expected call is present
-            matches = 0
-            for expected in normalized_expected:
-                for called in normalized_called:
-                    if (expected["name"] == called["name"] and 
-                        expected["arguments"] == called["arguments"]):
-                        matches += 1
-                        break
-            
-            # Calculate partial reward based on matches
-            reward = matches / len(normalized_expected) if normalized_expected else 0.0
-            
-            if function_call_reward.debug_count <= 3:
-                print(f"Matches: {matches}/{len(normalized_expected)}, Reward: {reward}")
-            
-            return reward
+            return min(reward, 1.0)  # Cap at 1.0
             
         except Exception as e:
-            if function_call_reward.debug_count <= 3:
-                print(f"Error in reward function: {e}")
+            print(f"Error in reward function: {e}")
             return 0.0
     
     # Create rubric with proper reward function
