@@ -98,6 +98,18 @@ def main(args):
         peft_config=vf.lora_defaults(),
     )
     
+    # Log W&B run URL if available
+    if hasattr(trainer, 'accelerator') and trainer.accelerator.is_main_process:
+        try:
+            import wandb
+            if wandb.run:
+                print(f"\n{'='*60}")
+                print(f"🔗 W&B Run URL: {wandb.run.get_url()}")
+                print(f"📊 Run Name: {wandb.run.name}")
+                print(f"{'='*60}\n")
+        except:
+            pass
+    
     # Start training
     trainer.train()
 

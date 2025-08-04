@@ -16,9 +16,9 @@ def load_environment(
     num_train_examples: int = 5000, 
     num_eval_examples: int = 500,
     **kwargs
-) -> vf.ToolEnv:
+) -> vf.SingleTurnEnv:
     """
-    Loads the BFCL v3 single turn function calling environment.
+    Loads the BFCL v3 single turn function calling environment with fixed rewards.
     """
     # Load the BFCL dataset
     # Try multiple potential sources for BFCL data
@@ -177,12 +177,28 @@ Example: <function_calls>[{{"name": "function_name", "arguments": {{"param1": "v
         answer_field="function_calls"
     )
     
-    # Define reward function
+    # Define reward function that properly handles message format
     def function_call_reward(completion, info):
         """Reward function that checks if the model made correct function calls."""
         try:
-            # Parse function calls from completion
+            # Debug print first few times
+            if hasattr(function_call_reward, 'debug_count'):
+                function_call_reward.debug_count += 1
+            else:
+                function_call_reward.debug_count = 1
+            
+            if function_call_reward.debug_count <= 3:
+                print(f"\n[DEBUG {function_call_reward.debug_count}] Reward function called")
+                print(f"Completion type: {type(completion)}")
+                if isinstance(completion, list) and len(completion) > 0:
+                    print(f"First message: {completion[0]}")
+            
+            # Parse function calls from completion using the parser
             parsed_calls = parser.parse_answer(completion)
+            
+            if function_call_reward.debug_count <= 3:
+                print(f"Parsed calls: {parsed_calls}")
+            
             if not parsed_calls:
                 return 0.0
             
@@ -198,9 +214,16 @@ Example: <function_calls>[{{"name": "function_name", "arguments": {{"param1": "v
             
             expected_calls = info.get("expected_calls", [])
             
+            if function_call_reward.debug_count <= 3:
+                print(f"Called functions: {called_functions}")
+                print(f"Expected calls: {expected_calls}")
+            
             # If no expected calls, check that no calls were made
             if not expected_calls:
-                return 0.0 if called_functions else 1.0
+                reward = 0.0 if called_functions else 1.0
+                if function_call_reward.debug_count <= 3:
+                    print(f"No expected calls, reward: {reward}")
+                return reward
             
             # Normalize function calls for comparison
             def normalize_call(call):
@@ -214,38 +237,37 @@ Example: <function_calls>[{{"name": "function_name", "arguments": {{"param1": "v
             
             # Check exact match (order doesn't matter)
             if len(normalized_called) != len(normalized_expected):
+                if function_call_reward.debug_count <= 3:
+                    print(f"Length mismatch: {len(normalized_called)} vs {len(normalized_expected)}")
                 return 0.0
             
             # Check each expected call is present
+            matches = 0
             for expected in normalized_expected:
-                found = False
                 for called in normalized_called:
                     if (expected["name"] == called["name"] and 
                         expected["arguments"] == called["arguments"]):
-                        found = True
+                        matches += 1
                         break
-                if not found:
-                    return 0.0
             
-            return 1.0
+            # Calculate partial reward based on matches
+            reward = matches / len(normalized_expected) if normalized_expected else 0.0
+            
+            if function_call_reward.debug_count <= 3:
+                print(f"Matches: {matches}/{len(normalized_expected)}, Reward: {reward}")
+            
+            return reward
             
         except Exception as e:
+            if function_call_reward.debug_count <= 3:
+                print(f"Error in reward function: {e}")
             return 0.0
     
-    # Create rubric
-    rubric = vf.ToolRubric()
-    rubric.add_reward_func(function_call_reward)
-    
-    # Extract all unique tools from the dataset
-    all_tools = []
-    seen_tools = set()
-    for item in train_data + eval_data:
-        tools = item["info"].get("tools", [])
-        for tool in tools:
-            tool_str = json.dumps(tool, sort_keys=True)
-            if tool_str not in seen_tools:
-                seen_tools.add(tool_str)
-                all_tools.append(tool)
+    # Create rubric with proper reward function
+    rubric = vf.Rubric(
+        funcs=[function_call_reward],
+        weights=[1.0]
+    )
     
     # Create environment
     vf_env = vf.SingleTurnEnv(
