@@ -57,7 +57,7 @@ def main(args):
         num_iterations=1,
         max_seq_len=4096,
         per_device_train_batch_size=8,  # Reduced for stability
-        per_device_eval_batch_size=8,  # Match train batch size
+        per_device_eval_batch_size=16,  # Must be divisible by num_generations
         num_generations=16,  # Terminal-bench-rl uses 16 rollouts for better exploration
         gradient_accumulation_steps=4,  # Effective batch size of 32
         gradient_checkpointing=True,
