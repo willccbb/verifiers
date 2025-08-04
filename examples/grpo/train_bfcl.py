@@ -110,6 +110,29 @@ def main(args):
         except:
             pass
     
+    # Start training with callbacks for monitoring
+    class ProgressCallback:
+        def __init__(self):
+            self.step = 0
+            self.rewards = []
+            
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if logs:
+                self.step = state.global_step
+                if "train/rewards/function_call_reward" in logs:
+                    reward = logs["train/rewards/function_call_reward"]
+                    self.rewards.append(reward)
+                    print(f"\n{'='*60}")
+                    print(f"📊 Step {self.step}: Avg Reward = {reward:.3f}")
+                    if len(self.rewards) > 5:
+                        recent_avg = sum(self.rewards[-5:]) / 5
+                        print(f"📈 5-step avg: {recent_avg:.3f}")
+                    print(f"{'='*60}\n")
+    
+    # Add callback
+    progress_callback = ProgressCallback()
+    trainer.add_callback(progress_callback)
+    
     # Start training
     trainer.train()
 
