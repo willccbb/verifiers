@@ -111,8 +111,11 @@ def main(args):
             pass
     
     # Start training with callbacks for monitoring
-    class ProgressCallback:
+    from transformers import TrainerCallback
+    
+    class ProgressCallback(TrainerCallback):
         def __init__(self):
+            super().__init__()
             self.step = 0
             self.rewards = []
             
