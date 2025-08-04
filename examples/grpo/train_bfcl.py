@@ -47,7 +47,7 @@ def main(args):
     training_args = GRPOConfig(
         output_dir=f"outputs/{run_name}",
         run_name=run_name,
-        learning_rate=5e-7,  # Lower learning rate for more stable training
+        learning_rate=1e-6,  # Slightly higher to help model learn the format
         lr_scheduler_type="cosine",  # Cosine schedule for smoother decay
         warmup_steps=100,  # Longer warmup for stability
         max_steps=int(os.environ.get("VERIFIERS_MAX_STEPS", "200")),  # More steps for convergence

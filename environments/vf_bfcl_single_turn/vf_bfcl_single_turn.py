@@ -96,6 +96,11 @@ Each function call should have "name" and "arguments" fields.
 Example format:
 <function_calls>[{{"name": "function_name", "arguments": {{"param1": "value1"}}}}]</function_calls>
 
+IMPORTANT: You MUST wrap your function calls in <function_calls>...</function_calls> tags.
+
+Example response for "What's the weather in Paris?":
+<function_calls>[{{"name": "get_weather", "arguments": {{"location": "Paris, France"}}}}]</function_calls>
+
 Always use this exact format with the <function_calls> tags."""
         
         prompt = [
@@ -213,20 +218,32 @@ Always use this exact format with the <function_calls> tags."""
             elif has_opening_tag or has_closing_tag:
                 reward += 0.1  # Partial reward for attempting tags
             
-            # Check for JSON structure
+            # Check for JSON structure - reduced rewards to encourage XML tag usage
             has_json_array = '[' in content and ']' in content
             has_json_object = '{' in content and '}' in content
             has_name_field = '"name"' in content
             has_arguments_field = '"arguments"' in content
             
-            if has_json_array:
-                reward += 0.1
-            if has_json_object:
-                reward += 0.1
-            if has_name_field:
-                reward += 0.1
-            if has_arguments_field:
-                reward += 0.1
+            # Only give small rewards for JSON without XML tags
+            if not has_both_tags:
+                if has_json_array:
+                    reward += 0.05  # Reduced from 0.1
+                if has_json_object:
+                    reward += 0.05  # Reduced from 0.1
+                if has_name_field:
+                    reward += 0.05  # Reduced from 0.1
+                if has_arguments_field:
+                    reward += 0.05  # Reduced from 0.1
+            else:
+                # Give full JSON rewards when XML tags are present
+                if has_json_array:
+                    reward += 0.1
+                if has_json_object:
+                    reward += 0.1
+                if has_name_field:
+                    reward += 0.1
+                if has_arguments_field:
+                    reward += 0.1
             
             # Try to parse with the XML parser
             parsed_calls = parser.parse_answer(completion)
