@@ -3,14 +3,15 @@
 Modal runner for verifiers training.
 
 Usage:
-    # Train Wordle environment
-    modal run run_modal.py::train --env wordle --size 0.5B
+    # Train with direct parameters
+    modal run run_modal.py::train --env wordle --steps 200
     
-    # Train GSM8K environment  
-    modal run run_modal.py::train --env gsm8k
+    # Train with config file (recommended)
+    modal run run_modal.py::train --config-path configs/modal_training_config.yaml
+    modal run run_modal.py::train_with_config --config-path configs/modal_training_config.yaml
     
-    # Train with custom config
-    modal run run_modal.py::train --env math-python --gpus 2 --steps 500
+    # Train with mixed (config + override)
+    modal run run_modal.py::train --config-path configs/modal_training_config.yaml --env gsm8k
     
     # Run evaluation
     modal run run_modal.py::evaluate --env wordle --model Qwen/Qwen2.5-0.5B-Instruct
@@ -20,6 +21,7 @@ import modal
 import os
 import sys
 import re
+import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -39,10 +41,9 @@ app = modal.App(app_name)
 
 # Training scripts mapping
 TRAINING_SCRIPTS = {
-    "wordle": "examples/grpo/train_wordle.py",
-    "wordle-sft": "examples/sft/train_wordle_sft.py",  # SFT version without vLLM
-    "tool-test": "examples/grpo/train_bfcl.py",  # Legacy alias
-    "bfcl": "examples/grpo/train_bfcl.py",  # BFCL function calling training
+    "vf-wordle": "examples/grpo/train_wordle.py",
+    "vf-tool-test": "examples/grpo/train_bfcl.py",  # Legacy alias
+    "vf-bfcl-single-turn": "examples/grpo/train_bfcl.py",  # BFCL function calling training
 }
 
 # GPU configurations
@@ -87,374 +88,26 @@ image = (
 cache_volume = modal.Volume.from_name(f"verifiers-cache-{experimenter}-{experiment_name}", create_if_missing=True)
 outputs_volume = modal.Volume.from_name(f"verifiers-outputs-{experimenter}-{experiment_name}", create_if_missing=True)
 
-# Single GPU training function
-@app.function(
-    image=image,
-    gpu="T4",
-    cpu=8.0,
-    memory=32768,
-    timeout=14400,  # Increase timeout to 4 hours
-    volumes={
-        "/cache": cache_volume,
-        "/outputs": outputs_volume,
-    },
-    secrets=[modal.Secret.from_dotenv()],
-)
-def train_1gpu(env: str, size: str = "0.5B", steps: int = 200, batch_size: int = None, 
-               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
-    """Single GPU training."""
-    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=1)
 
-# 2 GPU training function
-@app.function(
-    image=image,
-    gpu="A10G:2",
-    cpu=8.0,
-    memory=32768,
-    timeout=14400,  # Increase timeout to 4 hours
-    volumes={
-        "/cache": cache_volume,
-        "/outputs": outputs_volume,
-    },
-    secrets=[modal.Secret.from_dotenv()],
-)
-def train_2gpu(env: str, size: str = "0.5B", steps: int = 200, batch_size: int = None,
-               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
-    """2 GPU training."""
-    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=2)
+def load_config(config_path: str) -> dict:
+    """Load configuration from YAML file."""
+    # Handle both absolute and relative paths
+    if not os.path.isabs(config_path):
+        # If we're in the Modal container, adjust the path
+        if os.path.exists("/app/verifiers"):
+            config_path = os.path.join("/app/verifiers", config_path)
+    
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
-# 4 GPU training function
-@app.function(
-    image=image,
-    gpu="A100-40GB:4",
-    cpu=8.0,
-    memory=32768,
-    timeout=14400,  # Increase timeout to 4 hours
-    volumes={
-        "/cache": cache_volume,
-        "/outputs": outputs_volume,
-    },
-    secrets=[modal.Secret.from_dotenv()],
-)
-def train_4gpu(env: str, size: str = "1.7B", steps: int = 200, batch_size: int = None,
-               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
-    """4 GPU training."""
-    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=4)
-
-# 8 GPU training function
-@app.function(
-    image=image,
-    gpu="H100:8",
-    cpu=8.0,
-    memory=32768,
-    timeout=14400,  # Increase timeout to 4 hours
-    volumes={
-        "/cache": cache_volume,
-        "/outputs": outputs_volume,
-    },
-    secrets=[modal.Secret.from_dotenv()],
-)
-def train_8gpu(env: str, size: str = "4B", steps: int = 200, batch_size: int = None,
-               learning_rate: float = None, wandb_project: str = None, wandb_run_name: str = None):
-    """8 GPU training."""
-    return _train(env, size, steps, batch_size, learning_rate, wandb_project, wandb_run_name, gpus=8)
-
-def _train(env: str, size: str, steps: int, batch_size: int, learning_rate: float, 
-           wandb_project: str, wandb_run_name: str, gpus: int):
-    """Shared training logic."""
-    import subprocess
-    import torch
-    
-    print(f"🚀 Starting Verifiers training")
-    print(f"📚 Environment: {env}")
-    print(f"📏 Model size: {size}")
-    print(f"🖥️ GPUs: {gpus}")
-    
-    # Set environment variables
-    os.environ["HF_HOME"] = "/cache"
-    os.environ["TRANSFORMERS_CACHE"] = "/cache"
-    os.environ["WANDB_PROJECT"] = wandb_project or f"verifiers-{experimenter}-{experiment_name}"
-    if wandb_run_name:
-        os.environ["WANDB_RUN_NAME"] = wandb_run_name
-    
-    # Log GPU info
-    if torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
-    
-    # Change to the mounted verifiers repository
-    print("\n📥 Setting up verifiers repository...")
-    os.chdir("/app/verifiers")
-    print(f"Current directory: {os.getcwd()}")
-    print(f"Contents: {os.listdir('.')}")
-    
-    # Install verifiers
-    print("📦 Installing verifiers...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
-    
-    # Create SFT training script if it doesn't exist
-    sft_dir = "examples/sft"
-    os.makedirs(sft_dir, exist_ok=True)
-    sft_script_path = "examples/sft/train_wordle_sft.py"
-    if not os.path.exists(sft_script_path):
-        with open(sft_script_path, 'w') as f:
-            f.write('''import argparse
-import verifiers as vf
-from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
-import torch
-import os
-
-def main(args):
-    size = args.size
-    # Use Qwen models with proper HF authentication
-    if size == "1.7B":
-        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-    elif size == "4B":
-        model_name = "Qwen/Qwen2.5-3B-Instruct"
-    else:
-        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-    
-    print(f"Loading model: {model_name}")
-    model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})
-    
-    # Ensure pad token is set
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
-    # Load wordle environment to get dataset
-    vf_env = vf.load_environment(env_id="vf_wordle")
-    
-    # Get train dataset
-    dataset = vf_env.dataset
-    print(f"Dataset size: {len(dataset)}")
-    
-    # Tokenize dataset
-    def tokenize_function(examples):
-        # Format the prompts
-        texts = []
-        for i in range(len(examples["prompt"])):
-            messages = examples["prompt"][i]
-            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            text += f"Let me think about this Wordle puzzle...\\n\\nAnswer: {examples['answer'][i]}"
-            texts.append(text)
-        
-        # Tokenize
-        model_inputs = tokenizer(
-            texts,
-            max_length=512,
-            truncation=True,
-            padding="max_length",
-            return_tensors=None,
-        )
-        
-        # Set labels (same as input_ids for causal LM)
-        model_inputs["labels"] = model_inputs["input_ids"].copy()
-        
-        return model_inputs
-    
-    # Tokenize the dataset
-    tokenized_dataset = dataset.map(
-        tokenize_function,
-        batched=True,
-        remove_columns=dataset.column_names,
-        desc="Tokenizing dataset",
-    )
-    
-    # Data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,  # We're doing causal LM, not masked LM
-    )
-    
-    # Training arguments
-    run_name = f"wordle-sft-{size}"
-    training_args = TrainingArguments(
-        output_dir=f"./outputs/{run_name}",
-        run_name=run_name,
-        num_train_epochs=1,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
-        learning_rate=5e-5,
-        logging_steps=1,
-        save_steps=50,
-        eval_strategy="no",
-        save_strategy="steps",
-        warmup_steps=10,
-        bf16=torch.cuda.is_bf16_supported(),
-        fp16=not torch.cuda.is_bf16_supported(),
-        report_to="wandb" if WANDB_API_KEY else "none",
-        remove_unused_columns=True,
-        max_steps=int(os.environ.get("VERIFIERS_MAX_STEPS", "20")),
-        logging_dir=f"./logs/{run_name}",
-    )
-    
-    # Create standard Trainer (not SFTTrainer to avoid compatibility issues)
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=tokenized_dataset,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-    )
-    
-    # Train
-    print("Starting training...")
-    trainer.train()
-    
-    # Save model and tokenizer
-    print("Saving model...")
-    trainer.save_model()
-    tokenizer.save_pretrained(training_args.output_dir)
-    print(f"Model saved to {training_args.output_dir}")
-    
-    # Copy outputs to Modal volume if available
-    if os.path.exists("/outputs"):
-        import shutil
-        shutil.copytree(training_args.output_dir, f"/outputs/{run_name}", dirs_exist_ok=True)
-        print(f"Model copied to Modal volume: /outputs/{run_name}")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--size", "-s", type=str, default="0.5B")
-    args = parser.parse_args()
-    main(args)
-''')
-    
-    # Fix training scripts to use correct model names and environment IDs
-    for _, script_path in TRAINING_SCRIPTS.items():
-        if os.path.exists(script_path):
-            with open(script_path, 'r') as f:
-                content = f.read()
-            
-            modified = False
-            
-            # Fix environment ID (vf-wordle -> vf_wordle)
-            if 'env_id="vf-' in content:
-                content = re.sub(r'env_id="vf-([^"]+)"', r'env_id="vf_\1"', content)
-                modified = True
-            
-            # Fix old model references
-            if 'willcb/Qwen3' in content or 'model_name = f"willcb/Qwen3-{size}-Wordle"' in content:
-                # Find and replace the model_name assignment
-                content = re.sub(
-                    r'model_name = .*Qwen3.*',
-                    '''# Use Qwen2.5 models based on size
-    if size == "1.7B":
-        model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-    elif size == "3B":
-        model_name = "Qwen/Qwen2.5-3B-Instruct"
-    elif size == "4B":
-        model_name = "Qwen/Qwen2.5-3B-Instruct"
-    else:
-        model_name = "Qwen/Qwen2.5-0.5B-Instruct"''',
-                    content
-                )
-                modified = True
-            
-            if modified:
-                with open(script_path, 'w') as f:
-                    f.write(content)
-    
-    # Install environment
-    # For SFT versions, use the base environment name
-    base_env = env.replace("-sft", "")
-    # Special case for bfcl which maps to vf_bfcl_single_turn
-    if base_env == "bfcl":
-        env_name = "vf_bfcl_single_turn"
-    else:
-        env_name = f"vf_{base_env.replace('-', '_')}"
-    env_path = f"environments/{env_name}"
-    if os.path.exists(env_path):
-        print(f"📦 Installing {env_name} environment...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
-    else:
-        print(f"❌ Environment {env_name} not found at {env_path}")
-        print("Available environments:")
-        if os.path.exists("environments"):
-            for env_dir in os.listdir("environments"):
-                if os.path.isdir(f"environments/{env_dir}"):
-                    print(f"  - {env_dir}")
-        else:
-            print("  No environments directory found")
-    
-    # Build training command
-    script = TRAINING_SCRIPTS.get(env)
-    if not script:
-        raise ValueError(f"Unknown environment: {env}")
-    
-    # Configure based on GPU count
-    if gpus > 1:
-        # Multi-GPU with accelerate
-        cmd = [
-            "accelerate", "launch",
-            "--num-processes", str(gpus),
-            "--config-file", "configs/zero3.yaml",
-            script
-        ]
-    else:
-        # Single GPU
-        cmd = [sys.executable, script]
-    
-    # Add arguments
-    cmd.extend(["--size", size])
-    
-    # Override training args if provided
-    if steps:
-        os.environ["VERIFIERS_MAX_STEPS"] = str(steps)
-        # Also update the training script to use the max_steps
-        if script and os.path.exists(script):
-            with open(script, 'r') as f:
-                content = f.read()
-            # Replace max_steps value
-            content = re.sub(r'training_args\.max_steps = \d+', f'training_args.max_steps = {steps}', content)
-            with open(script, 'w') as f:
-                f.write(content)
-    if batch_size:
-        os.environ["VERIFIERS_BATCH_SIZE"] = str(batch_size)
-    if learning_rate:
-        os.environ["VERIFIERS_LR"] = str(learning_rate)
-    
-    # Disable flash attention if needed
-    os.environ["TRANSFORMERS_DISABLE_FLASH_ATTN"] = "1"
-    os.environ["ATTN_IMPLEMENTATION"] = "sdpa"
-    os.environ["FLASH_ATTENTION_SKIP_IMPORT"] = "1"
-    
-    # Add attn_implementation to model loading
-    if script and os.path.exists(script):
-        with open(script, 'r') as f:
-            content = f.read()
-        # Add attn_implementation parameter
-        content = content.replace(
-            'model, tokenizer = vf.get_model_and_tokenizer(model_name)',
-            'model, tokenizer = vf.get_model_and_tokenizer(model_name, model_kwargs={"attn_implementation": "sdpa"})'
-        )
-        with open(script, 'w') as f:
-            f.write(content)
-    
-    # Run training
-    print(f"\n🏃 Running: {' '.join(cmd)}")
-    print("=" * 60)
-    
-    result = subprocess.run(cmd)
-    
-    print("=" * 60)
-    print(f"✅ Training completed with exit code: {result.returncode}")
-    
-    # Save outputs
-    if os.path.exists("outputs"):
-        print("💾 Saving outputs...")
-        subprocess.run(["cp", "-r", "outputs", "/outputs/"], check=False)
-    
-    return result.returncode == 0
-
-def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
+def _train_with_vllm(env: str, gpu_type: str, steps: int, gpus: int, config: dict = None):
     """Training with embedded vLLM server for RL."""
     import subprocess
     import time
     
     print(f"🚀 Starting Verifiers RL training with embedded vLLM")
     print(f"📚 Environment: {env}")
-    print(f"📏 Model size: {size}")
+    print(f"📏 GPU TYPE: {gpu_type}")
     print(f"🖥️ GPUs: {gpus}")
     
     # Set environment variables
@@ -474,12 +127,7 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], check=True)
     
     # Install environment
-    base_env = env.replace("-sft", "")
-    # Special case for bfcl which maps to vf_bfcl_single_turn
-    if base_env == "bfcl":
-        env_name = "vf_bfcl_single_turn"
-    else:
-        env_name = f"vf_{base_env.replace('-', '_')}"
+    env_name = env.replace("-", "_")
     env_path = f"environments/{env_name}"
     print(f"🔍 Looking for environment: {env_name} at {env_path}")
     print(f"🔍 Environment exists: {os.path.exists(env_path)}")
@@ -541,43 +189,53 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
             with open(script_path, 'w') as f:
                 f.write(content)
     
-    # Use xLAM model for function calling tasks
-    if env == "bfcl-single-turn":
-        model_name = "Salesforce/xLAM-2-3b-fc-r"
+    # Use model from config or default based on environment
+    if config and 'model' in config:
+        model_config = config['model']
+        # Check for environment-specific overrides
+        if 'overrides' in model_config and env in model_config['overrides']:
+            model_name = model_config['overrides'][env]
+        else:
+            model_name = model_config.get('base_model', 'Qwen/Qwen2.5-0.5B-Instruct')
     else:
-        # Model name mapping for other environments
-        if size == "1.7B":
-            model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-        elif size == "3B":
-            model_name = "Qwen/Qwen2.5-3B-Instruct"
-        elif size == "4B":
-            model_name = "Qwen/Qwen2.5-3B-Instruct"
+        # Fallback to original logic
+        if env == "vf-bfcl-single-turn":
+            model_name = "Salesforce/xLAM-2-3b-fc-r"
         else:
             model_name = "Qwen/Qwen2.5-0.5B-Instruct"
     
     # Start standard vLLM OpenAI API server (no weight sync needed)
     print(f"\n🌐 Starting vLLM server with {model_name}...")
+    
+    # Get vLLM config from config file or use defaults
+    vllm_config = config.get('vllm', {}) if config else {}
+    
     vllm_cmd = [
         sys.executable, "-m", "vllm.entrypoints.openai.api_server",
         "--model", model_name,
         "--host", "127.0.0.1",
         "--port", "8000",
-        "--enforce-eager",
         "--disable-log-requests",
         "--trust-remote-code",
-        "--max-model-len", "4096",
-        "--gpu-memory-utilization", "0.5",  # Increased for 3B model
-        "--block-size", "16",
-        "--enable-auto-tool-choice",  # Required for tool calling
-        "--tool-call-parser", "hermes",  # Parser for tool calls
+        "--max-model-len", str(vllm_config.get('max_model_len', 4096)),
+        "--gpu-memory-utilization", str(vllm_config.get('gpu_memory_utilization', 0.5)),
+        "--block-size", str(vllm_config.get('block_size', 16)),
     ]
+    
+    # Add optional flags based on config
+    if vllm_config.get('enforce_eager', True):
+        vllm_cmd.append("--enforce-eager")
+    if vllm_config.get('enable_auto_tool_choice', True):
+        vllm_cmd.append("--enable-auto-tool-choice")
+    if 'tool_call_parser' in vllm_config:
+        vllm_cmd.extend(["--tool-call-parser", vllm_config['tool_call_parser']])
     
     # Start vLLM in background
     vllm_process = subprocess.Popen(vllm_cmd)
     
     # Wait for vLLM to start
     print("⏳ Waiting for vLLM server to start...")
-    time.sleep(30)  # Give vLLM time to load model
+    time.sleep(60)  # Give vLLM more time to load model
     
     # Disable flash attention and optimize memory
     os.environ["TRANSFORMERS_DISABLE_FLASH_ATTN"] = "1"
@@ -609,10 +267,7 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
         script = TRAINING_SCRIPTS.get(env, f"examples/grpo/train_{env}.py")
         train_cmd = [sys.executable, script]
         
-        # Only add --size for scripts that support it (not tool-test or bfcl)
-        if env not in ["tool-test", "bfcl"]:
-            train_cmd.extend(["--size", size])
-            
+        # Add steps if provided
         if steps:
             train_cmd.extend(["--steps", str(steps)])
         result = subprocess.run(train_cmd)
@@ -646,25 +301,40 @@ def _train_with_vllm(env: str, size: str, steps: int, gpus: int):
     },
     secrets=[modal.Secret.from_dotenv()],
 )
-def train(env: str = "wordle", size: str = "0.5B", steps: int = 200, rl: bool = False):
+def train(env: str = "wordle", gpu_count: int = 1, gpu_type: str = "T4", steps: int = 200, config_path: str = None):
     """Default training function - single GPU.
     
     Args:
         env: Environment name (e.g., 'wordle', 'gsm8k')
-        size: Model size ('0.5B', '1.7B', '4B')
+        gpu_count: Number of GPUs to use
+        gpu_type: Type of GPU to use ('T4', 'A10G', 'A100', 'H100')
         steps: Number of training steps
-        rl: Use RL (GRPO) training. If False, uses SFT training.
+        config_path: Path to configuration YAML file
     """
-    if rl:
-        print("🚀 Using RL (GRPO) training with embedded vLLM server")
-        # For RL, use the original environment name
-        return _train_with_vllm(env, size, steps, gpus=1)
-    else:
-        print("📚 Using SFT (Supervised Fine-Tuning)")
-        # For SFT, add -sft suffix if not present
-        if not env.endswith("-sft"):
-            env = f"{env}-sft"
-        return _train(env, size, steps, None, None, None, None, gpus=1)
+    
+    config = None
+    if config_path:
+        print(f"📄 Loading configuration from {config_path}")
+        config = load_config(config_path)
+        
+        # Override parameters with config values if not explicitly provided
+        training_config = config.get('training', {})
+        modal_config = config.get('modal', {})
+        
+        # Use config values if CLI args are defaults
+        if env == "wordle" and 'environment' in training_config:
+            env = training_config['environment']
+        if steps == 200 and 'steps' in training_config:
+            steps = training_config['steps']
+        if gpu_count == 1 and 'gpu' in modal_config:
+            gpu_count = modal_config['gpu'].get('count', 1)
+        if gpu_type == "T4" and 'gpu' in modal_config:
+            gpu_type = modal_config['gpu'].get('type', 'T4')
+    
+    print("🚀 Using RL (GRPO) training with embedded vLLM server")
+    # For RL, use the original environment name
+    return _train_with_vllm(env, gpu_type, steps, gpus=gpu_count, config=config)
+    
 
 @app.function(
     image=image,
@@ -689,12 +359,7 @@ def evaluate(env: str = "wordle", model: str = None, num_examples: int = 10):
     
     # Install environment
     # For SFT versions, use the base environment name
-    base_env = env.replace("-sft", "")
-    # Special case for bfcl which maps to vf_bfcl_single_turn
-    if base_env == "bfcl":
-        env_name = "vf_bfcl_single_turn"
-    else:
-        env_name = f"vf_{base_env.replace('-', '_')}"
+    env_name = env.replace("-", "_")
     env_path = f"environments/{env_name}"
     if os.path.exists(env_path):
         subprocess.run([sys.executable, "-m", "pip", "install", "-e", env_path], check=True)
@@ -711,14 +376,72 @@ def evaluate(env: str = "wordle", model: str = None, num_examples: int = 10):
     
     return result.returncode == 0
 
+# Train with config file - dynamically allocates resources
+@app.function(
+    image=image,
+    cpu=1.0,  # Minimal CPU for initial config loading
+    timeout=60,
+    secrets=[modal.Secret.from_dotenv()],
+)
+def train_with_config(config_path: str):
+    """Load config and create a new Modal function with specified resources."""
+    import subprocess
+    
+    print(f"📄 Loading configuration from {config_path}")
+    config = load_config(config_path)
+    
+    # Extract Modal configuration
+    modal_config = config.get('modal', {})
+    gpu_config = modal_config.get('gpu', {})
+    
+    # Format GPU string
+    gpu_count = gpu_config.get('count', 1)
+    gpu_type = gpu_config.get('type', 'A100-40GB')
+    if gpu_count == 1:
+        gpu_str = gpu_type
+    else:
+        gpu_str = f"{gpu_type}:{gpu_count}"
+    
+    # Extract training parameters
+    training_config = config.get('training', {})
+    env = training_config.get('environment', 'wordle')
+    steps = training_config.get('steps', 200)
+    
+    print(f"🚀 Launching training with config:")
+    print(f"   Environment: {env}")
+    print(f"   Steps: {steps}")
+    print(f"   GPU: {gpu_str}")
+    print(f"   CPUs: {modal_config.get('cpus', 8.0)}")
+    print(f"   Memory: {modal_config.get('memory', 32768)} MB")
+    
+    # Create the actual training command with proper resource allocation
+    cmd = [
+        "modal", "run", "run_modal.py::train",
+        "--env", env,
+        "--steps", str(steps),
+        "--gpu-count", str(gpu_count),
+        "--gpu-type", gpu_type,
+        "--config-path", config_path
+    ]
+    
+    # Run the command
+    result = subprocess.run(cmd)
+    return result.returncode == 0
+
 # Simple local entry point for testing
 @app.local_entrypoint()
 def main():
     """Local testing."""
     print("🎯 Modal runner for verifiers")
     print("\nUsage examples:")
-    print("  modal run run_modal.py::train --env wordle --size 0.5B")
-    print("  modal run run_modal.py::train_2gpu --env gsm8k --size 1.7B")
+    print("  # Using direct parameters:")
+    print("  modal run run_modal.py::train --env wordle --steps 200")
+    print("  ")
+    print("  # Using config file:")
+    print("  modal run run_modal.py::train --config-path configs/modal_training_config.yaml")
+    print("  modal run run_modal.py::train_with_config --config-path configs/modal_training_config.yaml")
+    print("  ")
+    print("  # Evaluate:")
     print("  modal run run_modal.py::evaluate --env wordle")
     
 if __name__ == "__main__":
