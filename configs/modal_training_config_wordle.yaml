@@ -1,0 +1,62 @@
+# Modal Training Configuration - Wordle
+name: "modal-training-wordle"
+
+# Modal compute resources
+modal:
+  # Number of CPUs (float)
+  cpus: 8.0
+  
+  # Memory in MB
+  memory: 32768
+  
+  # GPU configuration
+  gpu:
+    # Number of GPUs
+    count: 1
+    
+    # GPU type: T4, A10G, A100, A100-40GB, A100-80GB, H100
+    type: "A100-40GB"
+  
+  # Timeout in seconds
+  timeout: 14400  # 4 hours
+
+# Model configuration
+model:
+  # Base model to use for training
+  base_model: "Qwen/Qwen2.5-1.5B-Instruct"
+  
+  # Model-specific settings
+  max_token_length: 4096
+  dtype: "bfloat16"
+  attn_implementation: "sdpa"
+
+# Training configuration
+training:
+  # Environment to train on
+  environment: "vf-wordle"
+  
+  # Number of training steps
+  steps: 200
+  
+  # Training hyperparameters
+  batch_size: 8
+  gradient_accumulation_steps: 8
+  learning_rate: 3e-6
+  max_grad_norm: 0.1
+
+# vLLM server configuration
+vllm:
+  gpu_memory_utilization: 0.5
+  max_model_len: 4096
+  block_size: 16
+  enforce_eager: true
+
+# WandB configuration
+wandb:
+  project: "verifiers"
+  enabled: true
+
+# Volume names (will be suffixed with experimenter and experiment name)
+volumes:
+  cache: "verifiers-cache"
+  outputs: "verifiers-outputs"
