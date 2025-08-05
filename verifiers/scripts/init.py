@@ -35,9 +35,7 @@ def load_environment(**kwargs) -> vf.Environment:
 """
 
 
-def init_environment(
-    env: str, path: str = "./environments", skip_vf_prefix: bool = False
-) -> Path:
+def init_environment(env: str, path: str = "./environments") -> Path:
     """
     Initialize a new verifiers environment.
 
@@ -45,15 +43,12 @@ def init_environment(
         env: The environment id to init ('vf-' prefix is optional but recommended,
              included by default unless skip_vf_prefix is True)
         path: Path to environments directory (default: ./environments)
-        skip_vf_prefix: Skip the vf- prefix in the environment id
 
     Returns:
         Path to the created environment directory
     """
-    if skip_vf_prefix or env.startswith("vf-"):
-        env_id = env
-    else:
-        env_id = f"vf-{env}"
+
+    env_id = env.replace("_", "-")
 
     # make environment parent directory if it doesn't exist
     local_dir = Path(path) / env_id.replace("-", "_")
@@ -105,14 +100,9 @@ def main():
         default="./environments",
         help="Path to environments directory (default: ./environments)",
     )
-    parser.add_argument(
-        "--skip-vf-prefix",
-        action="store_true",
-        help="Skip the vf- prefix in the environment id",
-    )
     args = parser.parse_args()
 
-    init_environment(args.env, args.path, args.skip_vf_prefix)
+    init_environment(args.env, args.path)
 
 
 if __name__ == "__main__":
