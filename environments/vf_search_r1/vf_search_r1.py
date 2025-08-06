@@ -9,6 +9,7 @@ import requests
 from datasets import Dataset, load_dataset
 
 import verifiers as vf
+from verifiers.parsers.parser import Parser
 
 
 # Track launched background processes to ensure teardown
@@ -132,99 +133,85 @@ def _search_factory(retriever_url: str, default_topk: int):
     return search
 
 
-# --- Reward (qa_em_format) ---
-import re
-import string
+# --- Parser specialized for Search-R1 tags ---
+class SearchR1Parser(Parser):
+    """Parser for Search-R1-style rollouts using <think>, <information>, <answer> tags.
 
-# Message-based helpers
+    Works over chat messages (assistant/tool) without requiring a specific chat template.
+    """
 
-def _count_tags_in_text(text: str, tag: str) -> int:
-    return len(re.findall(fr"<{tag}>", text)) + len(re.findall(fr"</{tag}>", text))
-
-
-def _is_valid_sequence_messages(completion: List[Dict[str, Any]]) -> tuple[bool, str]:
-    # Balanced tags across assistant/tool messages
-    tags = ["think", "search", "information", "answer"]
-    for tag in tags:
-        opens = sum(len(re.findall(fr"<{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
-        closes = sum(len(re.findall(fr"</{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
-        if opens != closes:
-            return False, f"Mismatch in {tag} tags: {opens} opening vs {closes} closing tags"
-
-    # Order validation via tag stream without concatenation
-    state = "start"
-    for msg in completion:
-        if msg.get("role") not in ("assistant", "tool"):
-            continue
-        content = str(msg.get("content", ""))
-        # iterate tags in this message in order
-        for part in re.split(r"(</?(?:think|search|information|answer)>)", content):
-            if not part or not part.strip():
+    def extract_information_blocks(self, completion: List[Dict[str, Any]]) -> List[str]:
+        blocks: List[str] = []
+        for msg in completion:
+            if msg.get("role") not in ("assistant", "tool"):
                 continue
-            if re.match(r"</?(?:think|search|information|answer)>", part):
-                if part == "<think>" and state in ["start", "information"]:
-                    state = "in_think"
-                elif part == "</think>" and state == "in_think":
-                    state = "after_think"
-                elif part == "<information>" and state in ["after_think", "information"]:
-                    state = "in_information"
-                elif part == "</information>" and state == "in_information":
-                    state = "information"
-                elif part == "<answer>" and state in ["after_think", "information"]:
-                    state = "in_answer"
-                elif part == "</answer>" and state == "in_answer":
-                    state = "end"
+            content = str(msg.get("content", ""))
+            for m in re.finditer(r"<information>(.*?)</information>", content, re.DOTALL):
+                blocks.append(m.group(1).strip())
+        return blocks
+
+    def get_last_answer(self, completion: List[Dict[str, Any]]) -> Optional[str]:
+        matches: List[str] = []
+        for msg in completion:
+            if msg.get("role") != "assistant":
+                continue
+            content = str(msg.get("content", ""))
+            for m in re.finditer(r"<answer>(.*?)</answer>", content, re.DOTALL):
+                matches.append(m.group(1).strip())
+        if not matches:
+            return None
+        return matches[-1]
+
+    def is_valid_sequence(self, completion: List[Dict[str, Any]]) -> tuple[bool, str]:
+        tags = ["think", "search", "information", "answer"]
+        for tag in tags:
+            opens = sum(len(re.findall(fr"<{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
+            closes = sum(len(re.findall(fr"</{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
+            if opens != closes:
+                return False, f"Mismatch in {tag} tags: {opens} opening vs {closes} closing tags"
+
+        state = "start"
+        for msg in completion:
+            if msg.get("role") not in ("assistant", "tool"):
+                continue
+            content = str(msg.get("content", ""))
+            for part in re.split(r"(</?(?:think|search|information|answer)>)", content):
+                if not part or not part.strip():
+                    continue
+                if re.match(r"</?(?:think|search|information|answer)>", part):
+                    if part == "<think>" and state in ["start", "information"]:
+                        state = "in_think"
+                    elif part == "</think>" and state == "in_think":
+                        state = "after_think"
+                    elif part == "<information>" and state in ["after_think", "information"]:
+                        state = "in_information"
+                    elif part == "</information>" and state == "in_information":
+                        state = "information"
+                    elif part == "<answer>" and state in ["after_think", "information"]:
+                        state = "in_answer"
+                    elif part == "</answer>" and state == "in_answer":
+                        state = "end"
+                    else:
+                        if part in ("<search>", "</search>"):
+                            continue
+                        return False, f"Unexpected tag {part} in state {state}"
                 else:
-                    # ignore <search> tags for ToolEnv
-                    if part in ("<search>", "</search>"):
-                        continue
-                    return False, f"Unexpected tag {part} in state {state}"
-            else:
-                if state in ["in_think", "in_information", "in_answer"]:
-                    pass
-                elif state in ["start", "after_think", "information"]:
-                    if part.strip():
-                        return False, f"Unexpected content between tags (state: {state})"
-                else:
-                    return False, f"Unexpected content in state {state}"
-    if state != "end":
-        return False, f"Incomplete sequence, ended in state {state}"
-    return True, "Valid sequence format"
-
-
-def _extract_answer_from_messages(completion: List[Dict[str, Any]]) -> Optional[str]:
-    matches: List[str] = []
-    for msg in completion:
-        if msg.get("role") != "assistant":
-            continue
-        content = str(msg.get("content", ""))
-        for m in re.finditer(r"<answer>(.*?)</answer>", content, re.DOTALL):
-            matches.append(m.group(1).strip())
-    if not matches:
-        return None
-    return matches[-1]
-
-
-def _information_blocks_from_messages(completion: List[Dict[str, Any]]) -> List[str]:
-    blocks: List[str] = []
-    for msg in completion:
-        if msg.get("role") not in ("assistant", "tool"):
-            continue
-        content = str(msg.get("content", ""))
-        for m in re.finditer(r"<information>(.*?)</information>", content, re.DOTALL):
-            blocks.append(m.group(1).strip())
-    return blocks
-
-
-def _is_retrieval_correct_messages(completion: List[Dict[str, Any]], golden_answers: List[str]) -> bool:
-    for block in _information_blocks_from_messages(completion):
-        for ga in golden_answers:
-            if _normalize_answer(ga) in _normalize_answer(block):
-                return True
-    return False
+                    if state in ["in_think", "in_information", "in_answer"]:
+                        pass
+                    elif state in ["start", "after_think", "information"]:
+                        if part.strip():
+                            return False, f"Unexpected content between tags (state: {state})"
+                    else:
+                        return False, f"Unexpected content in state {state}"
+        if state != "end":
+            return False, f"Incomplete sequence, ended in state {state}"
+        return True, "Valid sequence format"
 
 
 # String-based helpers retained for normalization only
+import re
+import string
+
 
 def _normalize_answer(s: str) -> str:
     def remove_articles(text: str) -> str:
@@ -256,7 +243,16 @@ def _em_check(prediction: str, golden_answers: Any) -> int:
     return score
 
 
-def _compute_score_em_messages(
+def _is_retrieval_correct_via_parser(parser: SearchR1Parser, completion: List[Dict[str, Any]], golden_answers: List[str]) -> bool:
+    for block in parser.extract_information_blocks(completion):
+        for ga in golden_answers:
+            if _normalize_answer(ga) in _normalize_answer(block):
+                return True
+    return False
+
+
+def _compute_score_em_parsed(
+    parser: SearchR1Parser,
     completion: List[Dict[str, Any]],
     ground_truth: Dict[str, Any],
     structure_format_score: float = 0.0,
@@ -264,11 +260,11 @@ def _compute_score_em_messages(
     retrieval_score: float = 0.0,
     score: float = 1.0,
 ) -> float:
-    is_valid_format, _ = _is_valid_sequence_messages(completion)
+    is_valid_format, _ = parser.is_valid_sequence(completion)
     retrieval_correct = False
     if is_valid_format:
-        retrieval_correct = _is_retrieval_correct_messages(completion, ground_truth["target"])
-    answer = _extract_answer_from_messages(completion)
+        retrieval_correct = _is_retrieval_correct_via_parser(parser, completion, ground_truth["target"])
+    answer = parser.get_last_answer(completion)
 
     if answer is None:
         if is_valid_format:
@@ -334,9 +330,7 @@ def load_environment(
     if data_limit is not None:
         dataset = Dataset.from_dict(dataset[: int(data_limit)])
 
-    search_tool = _search_factory(
-        retriever_url=retriever_url, default_topk=retriever_topk
-    )
+    search_tool = _search_factory(retriever_url=retriever_url, default_topk=retriever_topk)
 
     system_prompt = (
         "You are a research assistant with access to the following tools.\n"
@@ -347,16 +341,32 @@ def load_environment(
         "{tool_descriptions}"
     )
 
+    parser = SearchR1Parser()
+
     vf_env = vf.ToolEnv(
         dataset=dataset,
         system_prompt=system_prompt,
         tools=[search_tool],
         max_turns=max_turns,
+        parser=parser,
     )
 
     def reward_fn(parser: vf.Parser, completion: List[Dict[str, str]], info: Dict[str, Any], **kwargs) -> float:
-        # Score directly over the ordered chat messages; no string consolidation
-        return _compute_score_em_messages(
+        # Operate natively over the chat messages via the parser abstraction
+        if not isinstance(parser, SearchR1Parser):  # fallback if overridden externally
+            # minimal fallback: extract answer via basic XML pattern from assistant messages
+            tmp_parser = SearchR1Parser()
+            return _compute_score_em_parsed(
+                parser=tmp_parser,
+                completion=completion,  # type: ignore[arg-type]
+                ground_truth=info["ground_truth"],
+                structure_format_score=structure_format_score,
+                final_format_score=final_format_score,
+                retrieval_score=retrieval_score,
+                score=score,
+            )
+        return _compute_score_em_parsed(
+            parser=parser,
             completion=completion,  # type: ignore[arg-type]
             ground_truth=info["ground_truth"],
             structure_format_score=structure_format_score,
