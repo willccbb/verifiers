@@ -72,7 +72,16 @@ def _ensure_wiki18_index(
 
     # If already present, return immediately
     if Path(index_path).exists():
-        return index_path
+        # Verify existing index; if corrupt, remove and rebuild
+        try:
+            import faiss  # type: ignore
+            _ = faiss.read_index(index_path)
+            return index_path
+        except Exception:
+            try:
+                os.remove(index_path)
+            except Exception:
+                pass
 
     lock_path = index_path + ".lock"
     # Attempt to acquire a simple lock to avoid concurrent concatenation
