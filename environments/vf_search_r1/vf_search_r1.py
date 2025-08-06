@@ -204,7 +204,7 @@ def run_retriever_server(
             results.append(row)
         return {"result": results}
 
-    config = uvicorn.Config(app=app, host=host, port=port, log_level="warning")
+    config = uvicorn.Config(app=app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     server.run()
 
@@ -236,8 +236,6 @@ def _maybe_launch_retriever(
         proc = subprocess.Popen(
             retriever_launch_cmd,
             env={**os.environ, **(env or {})},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
         _LAUNCHED_PROCS.append(proc)
         _register_teardown()
@@ -261,8 +259,6 @@ def _maybe_launch_retriever(
                 code,
             ],
             env={**os.environ, **(env or {})},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
         )
         _LAUNCHED_PROCS.append(proc)
         _register_teardown()
