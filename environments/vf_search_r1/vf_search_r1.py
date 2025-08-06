@@ -1,10 +1,81 @@
 import os
+import atexit
+import time
+import socket
+import subprocess
 from typing import Any, Dict, List, Optional
 
 import requests
 from datasets import Dataset, load_dataset
 
 import verifiers as vf
+
+
+# Track launched background processes to ensure teardown
+_LAUNCHED_PROCS: List[subprocess.Popen] = []
+
+
+def _register_teardown() -> None:
+    def _teardown():
+        for p in _LAUNCHED_PROCS:
+            try:
+                if p.poll() is None:
+                    p.terminate()
+                    try:
+                        p.wait(timeout=5)
+                    except Exception:
+                        p.kill()
+            except Exception:
+                pass
+
+    atexit.register(_teardown)
+
+
+def _wait_for_port(host: str, port: int, timeout: int = 30) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1.0)
+            try:
+                if sock.connect_ex((host, port)) == 0:
+                    return
+            except Exception:
+                pass
+        time.sleep(0.3)
+    raise TimeoutError(f"Retriever not reachable at {host}:{port} within {timeout}s")
+
+
+def _maybe_launch_retriever(
+    *,
+    retriever_url: str,
+    retriever_launch_cmd: Optional[List[str]] = None,
+    retriever_ready_timeout: int = 30,
+    env: Optional[Dict[str, str]] = None,
+) -> None:
+    if not retriever_launch_cmd:
+        return
+    # Best-effort parse host:port from URL
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(retriever_url)
+        host = parsed.hostname or "127.0.0.1"
+        port = int(parsed.port or 8000)
+    except Exception:
+        host, port = "127.0.0.1", 8000
+
+    # Launch subprocess in background
+    proc = subprocess.Popen(
+        retriever_launch_cmd,
+        env={**os.environ, **(env or {})},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    _LAUNCHED_PROCS.append(proc)
+    _register_teardown()
+
+    # Wait for readiness by opening TCP port
+    _wait_for_port(host, port, timeout=retriever_ready_timeout)
 
 
 def _make_prefix(question: str) -> str:
@@ -31,7 +102,7 @@ def _format_passages(result: List[Dict[str, Any]]) -> str:
         parts = content.split("\n")
         title = parts[0].strip('"') if parts else ""
         text = "\n".join(parts[1:]) if len(parts) > 1 else ""
-        formatted.append(f"Doc {idx+1}(Title: {title}) {text}")
+        formatted.append(f"Doc {idx + 1}(Title: {title}) {text}")
     return "\n".join(formatted)
 
 
@@ -64,7 +135,6 @@ def _search_factory(retriever_url: str, default_topk: int):
 # --- Reward (qa_em_format) ---
 import re
 import string
-import random
 
 
 def _normalize_answer(s: str) -> str:
@@ -98,19 +168,17 @@ def _em_check(prediction: str, golden_answers: Any) -> int:
 
 
 def _is_valid_sequence(text: str) -> tuple[bool, str]:
-    assistant_pattern = r"<\|im_start\|>assistant\s*"
-    assistant_match = re.search(assistant_pattern, text)
-    if not assistant_match:
-        return False, "Missing assistant marker"
-    start_pos = assistant_match.end()
-    content = text[start_pos:]
-
+    # Adapted: operate directly on assistant-side content; no chat-template anchors.
+    content = text
     tags_to_check = ["think", "search", "information", "answer"]
     for tag in tags_to_check:
         opening_count = len(re.findall(f"<{tag}>", content))
         closing_count = len(re.findall(f"</{tag}>", content))
         if opening_count != closing_count:
-            return False, f"Mismatch in {tag} tags: {opening_count} opening vs {closing_count} closing tags"
+            return (
+                False,
+                f"Mismatch in {tag} tags: {opening_count} opening vs {closing_count} closing tags",
+            )
 
     split_pattern = r"(</?(?:think|search|information|answer)>)"
     parts = re.split(split_pattern, content)
@@ -188,7 +256,6 @@ def _compute_score_em(
         retrieval_correct = _is_retrieval_correct(solution_str, ground_truth["target"])
     answer = _extract_solution(solution_str)
 
-    # occasional debug in reference; omitted here per project rules
     if answer is None:
         if is_valid_format:
             if retrieval_correct:
@@ -196,7 +263,7 @@ def _compute_score_em(
             return structure_format_score
         return 0.0
     else:
-        if _em_check(answer, ground_truth["target"])):
+        if _em_check(answer, ground_truth["target"]):
             if is_valid_format:
                 return score
             return score - structure_format_score
@@ -219,11 +286,24 @@ def load_environment(
     score: float = 1.0,
     data_split: str = "train",
     data_limit: Optional[int] = None,
+    # background retriever management
+    retriever_launch_cmd: Optional[List[str]] = None,
+    retriever_ready_timeout: int = 30,
+    retriever_env: Optional[Dict[str, str]] = None,
 ) -> vf.Environment:
     """Load the Search-R1 environment using ToolEnv and the official dataset + reward.
 
-    Args are kept close to the upstream configuration while aligning with verifiers.
+    If retriever_launch_cmd is provided, a background retriever process is launched and
+    torn down automatically at interpreter exit.
     """
+    # Optionally provision a local retriever server in the background
+    _maybe_launch_retriever(
+        retriever_url=retriever_url,
+        retriever_launch_cmd=retriever_launch_cmd,
+        retriever_ready_timeout=retriever_ready_timeout,
+        env=retriever_env,
+    )
+
     dataset = load_dataset("RUC-NLPIR/FlashRAG_datasets", "nq")[data_split]  # type: ignore
 
     def map_example(ex: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,7 +320,9 @@ def load_environment(
     if data_limit is not None:
         dataset = Dataset.from_dict(dataset[: int(data_limit)])
 
-    search_tool = _search_factory(retriever_url=retriever_url, default_topk=retriever_topk)
+    search_tool = _search_factory(
+        retriever_url=retriever_url, default_topk=retriever_topk
+    )
 
     system_prompt = (
         "You are a research assistant with access to the following tools.\n"
@@ -258,9 +340,15 @@ def load_environment(
         max_turns=max_turns,
     )
 
-    def reward_fn(parser: vf.Parser, completion: List[Dict[str, str]], info: Dict[str, Any], **kwargs) -> float:
+    def reward_fn(
+        parser: vf.Parser,
+        completion: List[Dict[str, str]],
+        info: Dict[str, Any],
+        **kwargs,
+    ) -> float:
+        # Build sequence from assistant-side messages + tool returns only
         assistant_side = "".join(m.get("content", "") for m in completion)
-        sequences_str = f"<|im_start|>assistant{assistant_side}"
+        sequences_str = assistant_side
         return _compute_score_em(
             solution_str=sequences_str,
             ground_truth=info["ground_truth"],
