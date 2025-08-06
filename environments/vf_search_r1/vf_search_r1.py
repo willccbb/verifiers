@@ -239,6 +239,20 @@ def _is_retrieval_correct(text: str, golden_answers: List[str]) -> bool:
     return False
 
 
+def _messages_to_sequence(completion: List[Dict[str, Any]]) -> str:
+    """Build a linear text sequence from chat messages preserving order.
+
+    Concatenate only assistant and tool message contents in order, to reflect
+    ToolEnv's structure while remaining chat-template agnostic.
+    """
+    parts: List[str] = []
+    for msg in completion:
+        role = msg.get("role")
+        if role in ("assistant", "tool"):
+            parts.append(str(msg.get("content", "")))
+    return "".join(parts)
+
+
 def _compute_score_em(
     solution_str: str,
     ground_truth: Dict[str, Any],
@@ -337,15 +351,9 @@ def load_environment(
         max_turns=max_turns,
     )
 
-    def reward_fn(
-        parser: vf.Parser,
-        completion: List[Dict[str, str]],
-        info: Dict[str, Any],
-        **kwargs,
-    ) -> float:
-        # Build sequence from assistant-side messages + tool returns only
-        assistant_side = "".join(m.get("content", "") for m in completion)
-        sequences_str = assistant_side
+    def reward_fn(parser: vf.Parser, completion: List[Dict[str, str]], info: Dict[str, Any], **kwargs) -> float:
+        # Preserve message order across assistant/tool messages for scoring
+        sequences_str = _messages_to_sequence(completion)
         return _compute_score_em(
             solution_str=sequences_str,
             ground_truth=info["ground_truth"],
