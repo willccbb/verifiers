@@ -2,6 +2,8 @@
 name = "vf-search-r1"
 version = "0.1.0"
 dependencies = [
+    "datasets>=4.0.0",
+    "requests>=2.32.4",
     "verifiers>=0.1.2",
 ]
 
