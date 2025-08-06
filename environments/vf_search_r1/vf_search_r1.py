@@ -3,6 +3,10 @@ import atexit
 import time
 import socket
 import subprocess
+import json
+import gzip
+from pathlib import Path
+from threading import Thread
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -15,10 +19,18 @@ from verifiers.types import Messages
 
 # Track launched background processes to ensure teardown
 _LAUNCHED_PROCS: List[subprocess.Popen] = []
+_INPROCESS_SERVER: Dict[str, Any] = {"thread": None, "server": None}
 
 
 def _register_teardown() -> None:
     def _teardown():
+        # in-process server
+        try:
+            server = _INPROCESS_SERVER.get("server")
+            if server is not None:
+                server.should_exit = True  # type: ignore[attr-defined]
+        except Exception:
+            pass
         for p in _LAUNCHED_PROCS:
             try:
                 if p.poll() is None:
@@ -29,7 +41,6 @@ def _register_teardown() -> None:
                         p.kill()
             except Exception:
                 pass
-
     atexit.register(_teardown)
 
 
@@ -47,15 +58,128 @@ def _wait_for_port(host: str, port: int, timeout: int = 30) -> None:
     raise TimeoutError(f"Retriever not reachable at {host}:{port} within {timeout}s")
 
 
+# -------------------- Data fetching (wiki-18) --------------------
+def _ensure_wiki18_assets(cache_dir: str) -> tuple[str, str]:
+    from huggingface_hub import hf_hub_download
+
+    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    index_parts = ["part_aa", "part_ab"]
+    part_paths: List[str] = []
+    for part in index_parts:
+        path = hf_hub_download(
+            repo_id="PeterJinGo/wiki-18-e5-index",
+            filename=part,
+            repo_type="dataset",
+            local_dir=cache_dir,
+        )
+        part_paths.append(path)
+
+    index_path = str(Path(cache_dir) / "e5_Flat.index")
+    # Concatenate parts into FAISS index file
+    with open(index_path, "wb") as out_f:
+        for p in sorted(part_paths):
+            with open(p, "rb") as in_f:
+                out_f.write(in_f.read())
+
+    gz_path = hf_hub_download(
+        repo_id="PeterJinGo/wiki-18-corpus",
+        filename="wiki-18.jsonl.gz",
+        repo_type="dataset",
+        local_dir=cache_dir,
+    )
+    corpus_path = str(Path(cache_dir) / "wiki-18.jsonl")
+    if not Path(corpus_path).exists():
+        with gzip.open(gz_path, "rb") as gz_f, open(corpus_path, "wb") as out_f:
+            out_f.write(gz_f.read())
+
+    return index_path, corpus_path
+
+
+# -------------------- Retriever server (dense, e5) --------------------
+def run_retriever_server(
+    *,
+    index_path: str,
+    corpus_path: str,
+    topk: int = 3,
+    retriever_model: str = "intfloat/e5-base-v2",
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> None:
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+    import uvicorn
+    import faiss  # type: ignore
+    import numpy as np
+    from transformers import AutoTokenizer, AutoModel
+    import torch
+
+    # Load FAISS index
+    index = faiss.read_index(index_path)
+
+    # Load corpus
+    docs: List[Dict[str, Any]] = []
+    with open(corpus_path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                docs.append(json.loads(line))
+            except Exception:
+                continue
+
+    # Load encoder
+    tokenizer = AutoTokenizer.from_pretrained(retriever_model)
+    model = AutoModel.from_pretrained(retriever_model)
+    model.eval()
+
+    @torch.no_grad()
+    def encode(texts: List[str]) -> np.ndarray:
+        inputs = tokenizer(
+            [f"query: {q}" for q in texts], return_tensors="pt", padding=True, truncation=True, max_length=256
+        )
+        outputs = model(**inputs)
+        last_hidden = outputs.last_hidden_state  # [B, T, H]
+        mask = inputs["attention_mask"].unsqueeze(-1).bool()
+        last_hidden = last_hidden.masked_fill(~mask, 0.0)
+        emb = last_hidden.sum(dim=1) / inputs["attention_mask"].sum(dim=1, keepdim=True)
+        emb = torch.nn.functional.normalize(emb, dim=-1)
+        return emb.cpu().numpy().astype("float32")
+
+    class RetrieveRequest(BaseModel):
+        queries: List[str]
+        topk: Optional[int] = None
+        return_scores: bool = True
+
+    app = FastAPI()
+
+    @app.post("/retrieve")
+    def retrieve(req: RetrieveRequest):
+        k = req.topk or topk
+        embs = encode(req.queries)
+        scores, idxs = index.search(embs, k)
+        results = []
+        for row_idxs in idxs:
+            row = []
+            for idx in row_idxs.tolist():
+                doc = docs[int(idx)]
+                contents = doc.get("contents", "")
+                row.append({"document": {"contents": contents}})
+            results.append(row)
+        return {"result": results}
+
+    config = uvicorn.Config(app=app, host=host, port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    server.run()
+
+
 def _maybe_launch_retriever(
     *,
     retriever_url: str,
     retriever_launch_cmd: Optional[List[str]] = None,
     retriever_ready_timeout: int = 30,
     env: Optional[Dict[str, str]] = None,
+    auto_fetch_dir: Optional[str] = None,
+    default_topk: int = 3,
+    retriever_model: str = "intfloat/e5-base-v2",
 ) -> None:
-    if not retriever_launch_cmd:
-        return
     # Best-effort parse host:port from URL
     try:
         from urllib.parse import urlparse
@@ -66,18 +190,69 @@ def _maybe_launch_retriever(
     except Exception:
         host, port = "127.0.0.1", 8000
 
-    # Launch subprocess in background
-    proc = subprocess.Popen(
-        retriever_launch_cmd,
-        env={**os.environ, **(env or {})},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    _LAUNCHED_PROCS.append(proc)
-    _register_teardown()
+    if retriever_launch_cmd:
+        # Launch provided subprocess command
+        proc = subprocess.Popen(
+            retriever_launch_cmd,
+            env={**os.environ, **(env or {})},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _LAUNCHED_PROCS.append(proc)
+        _register_teardown()
+        _wait_for_port(host, port, timeout=retriever_ready_timeout)
+        return
 
-    # Wait for readiness by opening TCP port
-    _wait_for_port(host, port, timeout=retriever_ready_timeout)
+    # Auto fetch and spawn server using this module (no external scripts)
+    cache_dir = auto_fetch_dir or str(Path.home() / ".cache" / "vf_search_r1" / "wiki18")
+    index_path, corpus_path = _ensure_wiki18_assets(cache_dir)
+
+    # Prefer subprocess via python -c calling this module entrypoint
+    code = (
+        "import vf_search_r1 as m; "
+        f"m.run_retriever_server(index_path={index_path!r}, corpus_path={corpus_path!r}, topk={default_topk}, host={host!r}, port={port!r})"
+    )
+    try:
+        proc = subprocess.Popen(
+            [
+                "python",
+                "-c",
+                code,
+            ],
+            env={**os.environ, **(env or {})},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _LAUNCHED_PROCS.append(proc)
+        _register_teardown()
+        _wait_for_port(host, port, timeout=retriever_ready_timeout)
+        return
+    except Exception:
+        pass
+
+    # Fallback: in-process server
+    try:
+        from uvicorn import Config, Server  # type: ignore
+        config = None  # lazy build inside thread
+
+        def _serve():
+            nonlocal config
+            # Build app by directly calling run_retriever_server logic with uvicorn server
+            run_retriever_server(
+                index_path=index_path,
+                corpus_path=corpus_path,
+                topk=default_topk,
+                host=host,
+                port=port,
+            )
+
+        t = Thread(target=_serve, daemon=True)
+        t.start()
+        _INPROCESS_SERVER["thread"] = t
+        _register_teardown()
+        _wait_for_port(host, port, timeout=retriever_ready_timeout)
+    except Exception as e:
+        raise RuntimeError(f"Failed to launch retriever server: {e}")
 
 
 def _make_prefix(question: str) -> str:
@@ -298,7 +473,7 @@ def load_environment(
     *,
     retriever_url: str = "http://127.0.0.1:8000/retrieve",
     retriever_topk: int = 3,
-    max_turns: int = 2,
+    max_turns: int = 5,
     structure_format_score: float = 0.0,
     final_format_score: float = 0.0,
     retrieval_score: float = 0.0,
@@ -309,6 +484,7 @@ def load_environment(
     retriever_launch_cmd: Optional[List[str]] = None,
     retriever_ready_timeout: int = 30,
     retriever_env: Optional[Dict[str, str]] = None,
+    auto_data_dir: Optional[str] = None,
 ) -> vf.Environment:
     """Load the Search-R1 environment using ToolEnv and the official dataset + reward.
 
@@ -321,6 +497,8 @@ def load_environment(
         retriever_launch_cmd=retriever_launch_cmd,
         retriever_ready_timeout=retriever_ready_timeout,
         env=retriever_env,
+        auto_fetch_dir=auto_data_dir,
+        default_topk=retriever_topk,
     )
 
     dataset = load_dataset("RUC-NLPIR/FlashRAG_datasets", "nq")[data_split]  # type: ignore

@@ -3,8 +3,16 @@ name = "vf-search-r1"
 version = "0.1.0"
 dependencies = [
     "datasets>=4.0.0",
+    "faiss-cpu>=1.11.0.post1",
+    "fastapi>=0.116.1",
+    "huggingface-hub>=0.34.3",
+    "numpy>=2.3.2",
     "requests>=2.32.4",
     "ruff>=0.12.7",
+    "torch>=2.7.1",
+    "tqdm>=4.67.1",
+    "transformers>=4.55.0",
+    "uvicorn>=0.35.0",
     "verifiers>=0.1.2",
 ]
 
