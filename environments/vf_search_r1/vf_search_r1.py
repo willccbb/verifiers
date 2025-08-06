@@ -175,10 +175,7 @@ def _is_valid_sequence(text: str) -> tuple[bool, str]:
         opening_count = len(re.findall(f"<{tag}>", content))
         closing_count = len(re.findall(f"</{tag}>", content))
         if opening_count != closing_count:
-            return (
-                False,
-                f"Mismatch in {tag} tags: {opening_count} opening vs {closing_count} closing tags",
-            )
+            return False, f"Mismatch in {tag} tags: {opening_count} opening vs {closing_count} closing tags"
 
     split_pattern = r"(</?(?:think|search|information|answer)>)"
     parts = re.split(split_pattern, content)
@@ -187,28 +184,28 @@ def _is_valid_sequence(text: str) -> tuple[bool, str]:
         if not part.strip():
             continue
         if re.match(r"</?(?:think|search|information|answer)>", part):
+            # Native tool-calling: <information> may appear without explicit <search>
             if part == "<think>" and state in ["start", "information"]:
                 state = "in_think"
             elif part == "</think>" and state == "in_think":
                 state = "after_think"
-            elif part == "<search>" and state == "after_think":
-                state = "in_search"
-            elif part == "</search>" and state == "in_search":
-                state = "after_search"
-            elif part == "<information>" and state == "after_search":
+            elif part == "<information>" and state in ["after_think", "information"]:
                 state = "in_information"
             elif part == "</information>" and state == "in_information":
                 state = "information"
-            elif part == "<answer>" and state == "after_think":
+            elif part == "<answer>" and state in ["after_think", "information"]:
                 state = "in_answer"
             elif part == "</answer>" and state == "in_answer":
                 state = "end"
             else:
+                # Ignore <search> tags if present, but enforce order for others
+                if part in ("<search>", "</search>"):
+                    continue
                 return False, f"Unexpected tag {part} in state {state}"
         else:
-            if state in ["in_think", "in_search", "in_information", "in_answer"]:
+            if state in ["in_think", "in_information", "in_answer"]:
                 pass
-            elif state in ["start", "after_think", "after_search", "information"]:
+            elif state in ["start", "after_think", "information"]:
                 if part.strip():
                     return False, f"Unexpected content between tags (state: {state})"
             else:
