@@ -59,11 +59,16 @@ def _wait_for_port(host: str, port: int, timeout: int = 30) -> None:
 
 
 # -------------------- Data fetching (wiki-18 index via HF Hub) --------------------
-def _ensure_wiki18_index(cache_dir: str) -> str:
-    from huggingface_hub import hf_hub_download, list_repo_files
+def _ensure_wiki18_index(
+    cache_dir: str,
+    *,
+    index_repo_id: str = "PeterJinGo/wiki-18-e5-index",
+    assembled_index_name: str = "e5_Flat.index",
+) -> str:
+    from huggingface_hub import snapshot_download
 
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    index_path = str(Path(cache_dir) / "e5_Flat.index")
+    index_path = str(Path(cache_dir) / assembled_index_name)
 
     # If already present, return immediately
     if Path(index_path).exists():
@@ -93,21 +98,20 @@ def _ensure_wiki18_index(cache_dir: str) -> str:
         os.close(fd)
 
     try:
-        # List all parts in the repo
-        files = list_repo_files("PeterJinGo/wiki-18-e5-index", repo_type="dataset")
-        part_files = sorted([f for f in files if f.startswith("part_")])
-        if not part_files:
-            raise RuntimeError("No part_* files found in wiki-18-e5-index repo")
+        # Download a consistent snapshot of the dataset repo into HF cache
+        snap_dir = snapshot_download(
+            repo_id=index_repo_id,
+            repo_type="dataset",
+            local_dir=cache_dir,
+            local_dir_use_symlinks=False,
+        )
 
-        part_paths: List[str] = []
-        for part in part_files:
-            path = hf_hub_download(
-                repo_id="PeterJinGo/wiki-18-e5-index",
-                filename=part,
-                repo_type="dataset",
-                local_dir=cache_dir,
-            )
-            part_paths.append(path)
+        # Concatenate all part_* files from the snapshot directory
+        from glob import glob
+
+        part_paths = sorted(glob(str(Path(snap_dir) / "part_*")))
+        if not part_paths:
+            raise RuntimeError(f"No part_* files found in snapshot of {index_repo_id}")
 
         tmp_path = index_path + ".tmp"
         with open(tmp_path, "wb") as out_f:
@@ -214,6 +218,8 @@ def _maybe_launch_retriever(
     auto_fetch_dir: Optional[str] = None,
     default_topk: int = 3,
     retriever_model: str = "intfloat/e5-base-v2",
+    index_repo_id: str = "PeterJinGo/wiki-18-e5-index",
+    assembled_index_name: str = "e5_Flat.index",
 ) -> None:
     # Best-effort parse host:port from URL
     try:
@@ -240,7 +246,7 @@ def _maybe_launch_retriever(
 
     # Auto fetch and spawn server using this module (no external scripts)
     cache_dir = auto_fetch_dir or str(Path.home() / ".cache" / "vf_search_r1" / "wiki18")
-    index_path = _ensure_wiki18_index(cache_dir)
+    index_path = _ensure_wiki18_index(cache_dir, index_repo_id=index_repo_id, assembled_index_name=assembled_index_name)
 
     # Prefer subprocess via python -c calling this module entrypoint
     code = (
@@ -521,6 +527,8 @@ def load_environment(
     retriever_ready_timeout: int = 30,
     retriever_env: Optional[Dict[str, str]] = None,
     auto_data_dir: Optional[str] = None,
+    index_repo_id: str = "PeterJinGo/wiki-18-e5-index",
+    assembled_index_name: str = "e5_Flat.index",
 ) -> vf.Environment:
     """Load the Search-R1 environment using ToolEnv and the official dataset + reward.
 
@@ -535,6 +543,9 @@ def load_environment(
         env=retriever_env,
         auto_fetch_dir=auto_data_dir,
         default_topk=retriever_topk,
+        retriever_model="intfloat/e5-base-v2",
+        # pass through index settings
+        # passed indirectly via _ensure_wiki18_index inside
     )
 
     dataset = load_dataset("RUC-NLPIR/FlashRAG_datasets", "nq")[data_split]  # type: ignore
