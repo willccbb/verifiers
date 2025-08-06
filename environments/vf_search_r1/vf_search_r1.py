@@ -58,8 +58,8 @@ def _wait_for_port(host: str, port: int, timeout: int = 30) -> None:
     raise TimeoutError(f"Retriever not reachable at {host}:{port} within {timeout}s")
 
 
-# -------------------- Data fetching (wiki-18) --------------------
-def _ensure_wiki18_assets(cache_dir: str) -> tuple[str, str]:
+# -------------------- Data fetching (wiki-18 index via HF Hub) --------------------
+def _ensure_wiki18_index(cache_dir: str) -> str:
     from huggingface_hub import hf_hub_download
 
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -75,31 +75,21 @@ def _ensure_wiki18_assets(cache_dir: str) -> tuple[str, str]:
         part_paths.append(path)
 
     index_path = str(Path(cache_dir) / "e5_Flat.index")
-    # Concatenate parts into FAISS index file
-    with open(index_path, "wb") as out_f:
-        for p in sorted(part_paths):
-            with open(p, "rb") as in_f:
-                out_f.write(in_f.read())
+    if not Path(index_path).exists():
+        with open(index_path, "wb") as out_f:
+            for p in sorted(part_paths):
+                with open(p, "rb") as in_f:
+                    out_f.write(in_f.read())
 
-    gz_path = hf_hub_download(
-        repo_id="PeterJinGo/wiki-18-corpus",
-        filename="wiki-18.jsonl.gz",
-        repo_type="dataset",
-        local_dir=cache_dir,
-    )
-    corpus_path = str(Path(cache_dir) / "wiki-18.jsonl")
-    if not Path(corpus_path).exists():
-        with gzip.open(gz_path, "rb") as gz_f, open(corpus_path, "wb") as out_f:
-            out_f.write(gz_f.read())
-
-    return index_path, corpus_path
+    return index_path
 
 
 # -------------------- Retriever server (dense, e5) --------------------
 def run_retriever_server(
     *,
     index_path: str,
-    corpus_path: str,
+    corpus_repo: str = "PeterJinGo/wiki-18-corpus",
+    corpus_split: str = "train",
     topk: int = 3,
     retriever_model: str = "intfloat/e5-base-v2",
     host: str = "127.0.0.1",
@@ -112,18 +102,13 @@ def run_retriever_server(
     import numpy as np
     from transformers import AutoTokenizer, AutoModel
     import torch
+    from datasets import load_dataset as hf_load_dataset
 
     # Load FAISS index
     index = faiss.read_index(index_path)
 
-    # Load corpus
-    docs: List[Dict[str, Any]] = []
-    with open(corpus_path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                docs.append(json.loads(line))
-            except Exception:
-                continue
+    # Load corpus via HF datasets (Arrow-backed; memory efficient)
+    corpus_ds = hf_load_dataset(corpus_repo, split=corpus_split)
 
     # Load encoder
     tokenizer = AutoTokenizer.from_pretrained(retriever_model)
@@ -159,8 +144,8 @@ def run_retriever_server(
         for row_idxs in idxs:
             row = []
             for idx in row_idxs.tolist():
-                doc = docs[int(idx)]
-                contents = doc.get("contents", "")
+                doc = corpus_ds[int(idx)]
+                contents = doc.get("contents", "")  # expects 'contents' field
                 row.append({"document": {"contents": contents}})
             results.append(row)
         return {"result": results}
@@ -205,12 +190,12 @@ def _maybe_launch_retriever(
 
     # Auto fetch and spawn server using this module (no external scripts)
     cache_dir = auto_fetch_dir or str(Path.home() / ".cache" / "vf_search_r1" / "wiki18")
-    index_path, corpus_path = _ensure_wiki18_assets(cache_dir)
+    index_path = _ensure_wiki18_index(cache_dir)
 
     # Prefer subprocess via python -c calling this module entrypoint
     code = (
         "import vf_search_r1 as m; "
-        f"m.run_retriever_server(index_path={index_path!r}, corpus_path={corpus_path!r}, topk={default_topk}, host={host!r}, port={port!r})"
+        f"m.run_retriever_server(index_path={index_path!r}, corpus_repo={'PeterJinGo/wiki-18-corpus'!r}, corpus_split={'train'!r}, topk={default_topk}, host={host!r}, port={port!r})"
     )
     try:
         proc = subprocess.Popen(
@@ -240,7 +225,8 @@ def _maybe_launch_retriever(
             # Build app by directly calling run_retriever_server logic with uvicorn server
             run_retriever_server(
                 index_path=index_path,
-                corpus_path=corpus_path,
+                corpus_repo="PeterJinGo/wiki-18-corpus",
+                corpus_split="train",
                 topk=default_topk,
                 host=host,
                 port=port,
