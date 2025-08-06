@@ -136,6 +136,95 @@ def _search_factory(retriever_url: str, default_topk: int):
 import re
 import string
 
+# Message-based helpers
+
+def _count_tags_in_text(text: str, tag: str) -> int:
+    return len(re.findall(fr"<{tag}>", text)) + len(re.findall(fr"</{tag}>", text))
+
+
+def _is_valid_sequence_messages(completion: List[Dict[str, Any]]) -> tuple[bool, str]:
+    # Balanced tags across assistant/tool messages
+    tags = ["think", "search", "information", "answer"]
+    for tag in tags:
+        opens = sum(len(re.findall(fr"<{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
+        closes = sum(len(re.findall(fr"</{tag}>", msg.get("content", ""))) for msg in completion if msg.get("role") in ("assistant", "tool"))
+        if opens != closes:
+            return False, f"Mismatch in {tag} tags: {opens} opening vs {closes} closing tags"
+
+    # Order validation via tag stream without concatenation
+    state = "start"
+    for msg in completion:
+        if msg.get("role") not in ("assistant", "tool"):
+            continue
+        content = str(msg.get("content", ""))
+        # iterate tags in this message in order
+        for part in re.split(r"(</?(?:think|search|information|answer)>)", content):
+            if not part or not part.strip():
+                continue
+            if re.match(r"</?(?:think|search|information|answer)>", part):
+                if part == "<think>" and state in ["start", "information"]:
+                    state = "in_think"
+                elif part == "</think>" and state == "in_think":
+                    state = "after_think"
+                elif part == "<information>" and state in ["after_think", "information"]:
+                    state = "in_information"
+                elif part == "</information>" and state == "in_information":
+                    state = "information"
+                elif part == "<answer>" and state in ["after_think", "information"]:
+                    state = "in_answer"
+                elif part == "</answer>" and state == "in_answer":
+                    state = "end"
+                else:
+                    # ignore <search> tags for ToolEnv
+                    if part in ("<search>", "</search>"):
+                        continue
+                    return False, f"Unexpected tag {part} in state {state}"
+            else:
+                if state in ["in_think", "in_information", "in_answer"]:
+                    pass
+                elif state in ["start", "after_think", "information"]:
+                    if part.strip():
+                        return False, f"Unexpected content between tags (state: {state})"
+                else:
+                    return False, f"Unexpected content in state {state}"
+    if state != "end":
+        return False, f"Incomplete sequence, ended in state {state}"
+    return True, "Valid sequence format"
+
+
+def _extract_answer_from_messages(completion: List[Dict[str, Any]]) -> Optional[str]:
+    matches: List[str] = []
+    for msg in completion:
+        if msg.get("role") != "assistant":
+            continue
+        content = str(msg.get("content", ""))
+        for m in re.finditer(r"<answer>(.*?)</answer>", content, re.DOTALL):
+            matches.append(m.group(1).strip())
+    if not matches:
+        return None
+    return matches[-1]
+
+
+def _information_blocks_from_messages(completion: List[Dict[str, Any]]) -> List[str]:
+    blocks: List[str] = []
+    for msg in completion:
+        if msg.get("role") not in ("assistant", "tool"):
+            continue
+        content = str(msg.get("content", ""))
+        for m in re.finditer(r"<information>(.*?)</information>", content, re.DOTALL):
+            blocks.append(m.group(1).strip())
+    return blocks
+
+
+def _is_retrieval_correct_messages(completion: List[Dict[str, Any]], golden_answers: List[str]) -> bool:
+    for block in _information_blocks_from_messages(completion):
+        for ga in golden_answers:
+            if _normalize_answer(ga) in _normalize_answer(block):
+                return True
+    return False
+
+
+# String-based helpers retained for normalization only
 
 def _normalize_answer(s: str) -> str:
     def remove_articles(text: str) -> str:
@@ -167,105 +256,19 @@ def _em_check(prediction: str, golden_answers: Any) -> int:
     return score
 
 
-def _is_valid_sequence(text: str) -> tuple[bool, str]:
-    # Adapted: operate directly on assistant-side content; no chat-template anchors.
-    content = text
-    tags_to_check = ["think", "search", "information", "answer"]
-    for tag in tags_to_check:
-        opening_count = len(re.findall(f"<{tag}>", content))
-        closing_count = len(re.findall(f"</{tag}>", content))
-        if opening_count != closing_count:
-            return False, f"Mismatch in {tag} tags: {opening_count} opening vs {closing_count} closing tags"
-
-    split_pattern = r"(</?(?:think|search|information|answer)>)"
-    parts = re.split(split_pattern, content)
-    state = "start"
-    for part in parts:
-        if not part.strip():
-            continue
-        if re.match(r"</?(?:think|search|information|answer)>", part):
-            # Native tool-calling: <information> may appear without explicit <search>
-            if part == "<think>" and state in ["start", "information"]:
-                state = "in_think"
-            elif part == "</think>" and state == "in_think":
-                state = "after_think"
-            elif part == "<information>" and state in ["after_think", "information"]:
-                state = "in_information"
-            elif part == "</information>" and state == "in_information":
-                state = "information"
-            elif part == "<answer>" and state in ["after_think", "information"]:
-                state = "in_answer"
-            elif part == "</answer>" and state == "in_answer":
-                state = "end"
-            else:
-                # Ignore <search> tags if present, but enforce order for others
-                if part in ("<search>", "</search>"):
-                    continue
-                return False, f"Unexpected tag {part} in state {state}"
-        else:
-            if state in ["in_think", "in_information", "in_answer"]:
-                pass
-            elif state in ["start", "after_think", "information"]:
-                if part.strip():
-                    return False, f"Unexpected content between tags (state: {state})"
-            else:
-                return False, f"Unexpected content in state {state}"
-
-    if state != "end":
-        return False, f"Incomplete sequence, ended in state {state}"
-    return True, "Valid sequence format"
-
-
-def _extract_solution(solution_str: str) -> Optional[str]:
-    answer_pattern = r"<answer>(.*?)</answer>"
-    matches = list(re.finditer(answer_pattern, solution_str, re.DOTALL))
-    if len(matches) <= 1:
-        return None
-    return matches[-1].group(1).strip()
-
-
-def _extract_information_blocks(text: str) -> List[str]:
-    pattern = r"<information>(.*?)</information>"
-    matches = re.findall(pattern, text, re.DOTALL)
-    return [m.strip() for m in matches]
-
-
-def _is_retrieval_correct(text: str, golden_answers: List[str]) -> bool:
-    seqs = _extract_information_blocks(text)
-    for seq in seqs:
-        for ga in golden_answers:
-            if _normalize_answer(ga) in _normalize_answer(seq):
-                return True
-    return False
-
-
-def _messages_to_sequence(completion: List[Dict[str, Any]]) -> str:
-    """Build a linear text sequence from chat messages preserving order.
-
-    Concatenate only assistant and tool message contents in order, to reflect
-    ToolEnv's structure while remaining chat-template agnostic.
-    """
-    parts: List[str] = []
-    for msg in completion:
-        role = msg.get("role")
-        if role in ("assistant", "tool"):
-            parts.append(str(msg.get("content", "")))
-    return "".join(parts)
-
-
-def _compute_score_em(
-    solution_str: str,
+def _compute_score_em_messages(
+    completion: List[Dict[str, Any]],
     ground_truth: Dict[str, Any],
     structure_format_score: float = 0.0,
     final_format_score: float = 0.0,
     retrieval_score: float = 0.0,
     score: float = 1.0,
 ) -> float:
-    is_valid_format, _ = _is_valid_sequence(solution_str)
+    is_valid_format, _ = _is_valid_sequence_messages(completion)
     retrieval_correct = False
     if is_valid_format:
-        retrieval_correct = _is_retrieval_correct(solution_str, ground_truth["target"])
-    answer = _extract_solution(solution_str)
+        retrieval_correct = _is_retrieval_correct_messages(completion, ground_truth["target"])
+    answer = _extract_answer_from_messages(completion)
 
     if answer is None:
         if is_valid_format:
@@ -352,10 +355,9 @@ def load_environment(
     )
 
     def reward_fn(parser: vf.Parser, completion: List[Dict[str, str]], info: Dict[str, Any], **kwargs) -> float:
-        # Preserve message order across assistant/tool messages for scoring
-        sequences_str = _messages_to_sequence(completion)
-        return _compute_score_em(
-            solution_str=sequences_str,
+        # Score directly over the ordered chat messages; no string consolidation
+        return _compute_score_em_messages(
+            completion=completion,  # type: ignore[arg-type]
             ground_truth=info["ground_truth"],
             structure_format_score=structure_format_score,
             final_format_score=final_format_score,
