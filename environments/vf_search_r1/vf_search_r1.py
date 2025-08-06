@@ -84,8 +84,8 @@ def _ensure_wiki18_index(
         have_lock = False
 
     if not have_lock:
-        # Wait for another process to finish building the index
-        for _ in range(200):  # ~60s
+        # Wait for another process to finish building the index (~600s)
+        for _ in range(2000):  # ~600s
             if Path(index_path).exists():
                 return index_path
             time.sleep(0.3)
@@ -213,7 +213,7 @@ def _maybe_launch_retriever(
     *,
     retriever_url: str,
     retriever_launch_cmd: Optional[List[str]] = None,
-    retriever_ready_timeout: int = 30,
+    retriever_ready_timeout: int = 600,
     env: Optional[Dict[str, str]] = None,
     auto_fetch_dir: Optional[str] = None,
     default_topk: int = 3,
@@ -524,7 +524,7 @@ def load_environment(
     data_limit: Optional[int] = None,
     # background retriever management
     retriever_launch_cmd: Optional[List[str]] = None,
-    retriever_ready_timeout: int = 30,
+    retriever_ready_timeout: int = 600,
     retriever_env: Optional[Dict[str, str]] = None,
     auto_data_dir: Optional[str] = None,
     index_repo_id: str = "PeterJinGo/wiki-18-e5-index",
