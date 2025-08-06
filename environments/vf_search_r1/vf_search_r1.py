@@ -60,28 +60,78 @@ def _wait_for_port(host: str, port: int, timeout: int = 30) -> None:
 
 # -------------------- Data fetching (wiki-18 index via HF Hub) --------------------
 def _ensure_wiki18_index(cache_dir: str) -> str:
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download, list_repo_files
 
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    index_parts = ["part_aa", "part_ab"]
-    part_paths: List[str] = []
-    for part in index_parts:
-        path = hf_hub_download(
-            repo_id="PeterJinGo/wiki-18-e5-index",
-            filename=part,
-            repo_type="dataset",
-            local_dir=cache_dir,
-        )
-        part_paths.append(path)
-
     index_path = str(Path(cache_dir) / "e5_Flat.index")
-    if not Path(index_path).exists():
-        with open(index_path, "wb") as out_f:
-            for p in sorted(part_paths):
+
+    # If already present, return immediately
+    if Path(index_path).exists():
+        return index_path
+
+    lock_path = index_path + ".lock"
+    # Attempt to acquire a simple lock to avoid concurrent concatenation
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        have_lock = True
+    except FileExistsError:
+        have_lock = False
+
+    if not have_lock:
+        # Wait for another process to finish building the index
+        for _ in range(200):  # ~60s
+            if Path(index_path).exists():
+                return index_path
+            time.sleep(0.3)
+        # If still not present, proceed to build (last resort)
+        try:
+            os.remove(lock_path)
+        except Exception:
+            pass
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+
+    try:
+        # List all parts in the repo
+        files = list_repo_files("PeterJinGo/wiki-18-e5-index", repo_type="dataset")
+        part_files = sorted([f for f in files if f.startswith("part_")])
+        if not part_files:
+            raise RuntimeError("No part_* files found in wiki-18-e5-index repo")
+
+        part_paths: List[str] = []
+        for part in part_files:
+            path = hf_hub_download(
+                repo_id="PeterJinGo/wiki-18-e5-index",
+                filename=part,
+                repo_type="dataset",
+                local_dir=cache_dir,
+            )
+            part_paths.append(path)
+
+        tmp_path = index_path + ".tmp"
+        with open(tmp_path, "wb") as out_f:
+            for p in part_paths:
                 with open(p, "rb") as in_f:
                     out_f.write(in_f.read())
+        # Verify by attempting to read with faiss
+        try:
+            import faiss  # type: ignore
 
-    return index_path
+            _ = faiss.read_index(tmp_path)
+        except Exception as e:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+            raise RuntimeError(f"Concatenated FAISS index verification failed: {e}")
+        os.replace(tmp_path, index_path)
+        return index_path
+    finally:
+        try:
+            os.remove(lock_path)
+        except Exception:
+            pass
 
 
 # -------------------- Retriever server (dense, e5) --------------------
