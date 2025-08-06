@@ -112,7 +112,7 @@ def _ensure_wiki18_index(
             repo_id=index_repo_id,
             repo_type="dataset",
             local_dir=cache_dir,
-            local_dir_use_symlinks=False,
+            allow_patterns=("part_*",),
         )
 
         # Concatenate all part_* files from the snapshot directory
@@ -123,10 +123,11 @@ def _ensure_wiki18_index(
             raise RuntimeError(f"No part_* files found in snapshot of {index_repo_id}")
 
         tmp_path = index_path + ".tmp"
+        import shutil
         with open(tmp_path, "wb") as out_f:
             for p in part_paths:
                 with open(p, "rb") as in_f:
-                    out_f.write(in_f.read())
+                    shutil.copyfileobj(in_f, out_f, length=16 * 1024 * 1024)  # 16MB chunks
         # Verify by attempting to read with faiss
         try:
             import faiss  # type: ignore
