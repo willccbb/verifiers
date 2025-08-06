@@ -10,6 +10,7 @@ from datasets import Dataset, load_dataset
 
 import verifiers as vf
 from verifiers.parsers.parser import Parser
+from verifiers.types import Messages
 
 
 # Track launched background processes to ensure teardown
@@ -150,14 +151,22 @@ class SearchR1Parser(Parser):
                 blocks.append(m.group(1).strip())
         return blocks
 
-    def get_last_answer(self, completion: List[Dict[str, Any]]) -> Optional[str]:
+    def parse_answer(self, completion: Messages) -> str | None:
+        """Override to return the last <answer>...</answer> content.
+
+        Supports either raw string or a list of chat messages.
+        """
         matches: List[str] = []
-        for msg in completion:
-            if msg.get("role") != "assistant":
-                continue
-            content = str(msg.get("content", ""))
-            for m in re.finditer(r"<answer>(.*?)</answer>", content, re.DOTALL):
+        if isinstance(completion, str):
+            for m in re.finditer(r"<answer>(.*?)</answer>", completion, re.DOTALL):
                 matches.append(m.group(1).strip())
+        else:
+            for msg in completion:  # type: ignore[assignment]
+                if msg.get("role") != "assistant":
+                    continue
+                content = str(msg.get("content", ""))
+                for m in re.finditer(r"<answer>(.*?)</answer>", content, re.DOTALL):
+                    matches.append(m.group(1).strip())
         if not matches:
             return None
         return matches[-1]
@@ -264,7 +273,7 @@ def _compute_score_em_parsed(
     retrieval_correct = False
     if is_valid_format:
         retrieval_correct = _is_retrieval_correct_via_parser(parser, completion, ground_truth["target"])
-    answer = parser.get_last_answer(completion)
+    answer = parser.parse_answer(completion)  # type: ignore[arg-type]
 
     if answer is None:
         if is_valid_format:
