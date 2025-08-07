@@ -318,9 +318,20 @@ def _extract_body_inner_html(html: str) -> str:
             inner = body_match.group(1)
         else:
             inner = html
-        # Dedent to avoid Markdown treating lines as code blocks due to 4-space indents
-        inner = textwrap.dedent(inner)
-        return inner.strip()
+        # Normalize indentation so lines do not start with 4+ spaces
+        lines = inner.splitlines()
+        normalized: list[str] = []
+        for line in lines:
+            # If line starts with whitespace then a tag, strip leading whitespace
+            stripped = line.lstrip()
+            if stripped.startswith("<"):
+                normalized.append(stripped)
+            else:
+                normalized.append(line)
+        inner = "\n".join(normalized)
+        # Final dedent and trim
+        inner = textwrap.dedent(inner).strip()
+        return inner
     except Exception:
         return html
 
