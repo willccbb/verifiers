@@ -6,6 +6,7 @@ env/
 .env.local
 uv.lock
 CLAUDE.md
+AGENTS.md
 .claude/
 .cursorrules
 .cursor/
@@ -44,6 +45,6 @@ wip/
 old/
 
 # Incomplete environments
-environments/aime2024/
-environments/aime2025/
-environments/reverse_text_mini/
+environments/vf_aime2024/
+environments/vf_aime2025/
+environments/vf_reverse_text_mini/
