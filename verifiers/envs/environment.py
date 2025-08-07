@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, List, Literal, Tuple
+from typing import TYPE_CHECKING, Literal
 
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
@@ -45,21 +45,23 @@ class Environment(ABC):
         dataset: Dataset | None = None,
         eval_dataset: Dataset | None = None,
         system_prompt: str | None = None,
-        few_shot: List[ChatMessage] = [],
-        parser: Parser = Parser(),
-        rubric: Rubric = Rubric(),
-        sampling_args: SamplingArgs = {},
+        few_shot: list[ChatMessage] | None = None,
+        parser: Parser | None = None,
+        rubric: Rubric | None = None,
+        sampling_args: SamplingArgs | None = None,
         message_type: MessageType = "chat",
-        oai_tools: List[ChatCompletionToolParam] | None = None,
+        oai_tools: list[ChatCompletionToolParam] | None = None,
         max_workers: int = 512,
         **kwargs,
     ):
         self.client = client
         self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
-        self.oai_tools: List[ChatCompletionToolParam] | None = oai_tools
+        self.oai_tools: list[ChatCompletionToolParam] | None = oai_tools
         self.system_prompt = system_prompt
         self.few_shot = few_shot
+        self.parser = parser or Parser()
+        self.rubric = rubric or Rubric()
 
         if self.message_type == "chat":
             if dataset is not None:
@@ -83,14 +85,16 @@ class Environment(ABC):
                 )
             self.dataset = dataset
             self.eval_dataset = eval_dataset
-        self.parser = parser
-        self.rubric = rubric
+
         self.sampling_args = {"n": 1, "extra_body": {}}
-        if sampling_args is not None and "extra_body" in sampling_args:
-            self.sampling_args["extra_body"].update(sampling_args["extra_body"])
-        for k, v in sampling_args.items():
-            if k != "extra_body":
-                self.sampling_args[k] = v
+        if sampling_args is not None:
+            # merge extra_body if provided
+            self.sampling_args["extra_body"].update(sampling_args.get("extra_body", {}))
+            # copy other keys
+            for key, value in sampling_args.items():
+                if key != "extra_body":
+                    self.sampling_args[key] = value
+
         self.max_workers = max_workers
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
         for key, value in kwargs.items():
@@ -103,8 +107,8 @@ class Environment(ABC):
         self,
         prompt_str: str,
         system_prompt: str | None = None,
-        few_shot: List[ChatMessage] | None = None,
-    ) -> List[ChatMessage]:
+        few_shot: list[ChatMessage] | None = None,
+    ) -> list[ChatMessage]:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -117,7 +121,7 @@ class Environment(ABC):
         self,
         dataset: Dataset,
         system_prompt: str | None = None,
-        few_shot: List[ChatMessage] | None = None,
+        few_shot: list[ChatMessage] | None = None,
         question_key: str = "question",
         answer_key: str = "answer",
     ) -> Dataset:
@@ -126,7 +130,7 @@ class Environment(ABC):
             return dataset
 
         # extract format_prompt as a standalone function to avoid capturing self
-        def format_prompt_fn(prompt_str: str) -> List[ChatMessage]:
+        def format_prompt_fn(prompt_str: str) -> list[ChatMessage]:
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
@@ -170,10 +174,10 @@ class Environment(ABC):
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
-    def get_reward_funcs(self) -> List[RewardFunc]:
+    def get_reward_funcs(self) -> list[RewardFunc]:
         return self.rubric.get_reward_funcs()
 
-    def get_reward_weights(self) -> List[float]:
+    def get_reward_weights(self) -> list[float]:
         return self.rubric.get_reward_weights()
 
     async def get_model_response(
@@ -181,8 +185,8 @@ class Environment(ABC):
         client: AsyncOpenAI,
         model: str,
         prompt: Messages,
-        oai_tools: List[ChatCompletionToolParam] | None = None,
-        sampling_args: SamplingArgs = {},
+        oai_tools: list[ChatCompletionToolParam] | None = None,
+        sampling_args: SamplingArgs | None = None,
         message_type: MessageType | None = None,
         **kwargs,
     ) -> ModelResponse:
@@ -192,6 +196,8 @@ class Environment(ABC):
         Convenience function for wrapping (chat, completion) API calls.
         Returns special error messages for context length issues.
         """
+        sampling_args = sampling_args or {}
+
         try:
             if message_type is None:
                 message_type = self.message_type
@@ -234,10 +240,10 @@ class Environment(ABC):
         prompt: Messages,
         answer: str = "",
         task: str = "default",
-        info: Info = {},
-        sampling_args: SamplingArgs = {},
+        info: Info | None = None,
+        sampling_args: SamplingArgs | None = None,
         **kwargs,
-    ) -> Tuple[Messages, State]:
+    ) -> tuple[Messages, State]:
         """
         Run a rollout for a given prompt.
         Returns a tuple of (completion, state).
@@ -252,10 +258,10 @@ class Environment(ABC):
         prompt: Messages,
         answer: str = "",
         task: str = "default",
-        info: Info = {},
-        sampling_args: SamplingArgs = {},
+        info: Info | None = None,
+        sampling_args: SamplingArgs | None = None,
         **kwargs,
-    ) -> Tuple[Messages, State]:
+    ) -> tuple[Messages, State]:
         """
         Run a rollout with a semaphore.
         """
@@ -268,14 +274,14 @@ class Environment(ABC):
         self,
         client: AsyncOpenAI,
         model: str,
-        prompts: List[Messages],
-        answers: List[str],
-        tasks: List[str] = [],
-        infos: List[Info] = [],
-        sampling_args: SamplingArgs = {},
+        prompts: list[Messages],
+        answers: list[str],
+        tasks: list[str],
+        infos: list[Info],
+        sampling_args: SamplingArgs | None = None,
         max_concurrent: int = -1,
         **kwargs,
-    ) -> List[Tuple[Messages, State]]:
+    ) -> list[tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
         """
@@ -313,7 +319,7 @@ class Environment(ABC):
         inputs: GenerateInputs | Dataset | dict,
         client: AsyncOpenAI | None = None,
         model: str | None = None,
-        sampling_args: SamplingArgs = {},
+        sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
         **kwargs,
@@ -331,7 +337,8 @@ class Environment(ABC):
             assert self.model is not None
             model = self.model
         gen_sampling_args = deepcopy(self.sampling_args)
-        gen_sampling_args.update(sampling_args)
+        if sampling_args is not None:
+            gen_sampling_args.update(sampling_args)
 
         # preprocess dataset or GenerateInputs to GenerateOutputs
         results_dict = {}
@@ -405,7 +412,7 @@ class Environment(ABC):
         inputs: GenerateInputs | Dataset,
         client: AsyncOpenAI | OpenAI,
         model: str | None = None,
-        sampling_args: SamplingArgs = {},
+        sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
         **kwargs,
@@ -447,11 +454,11 @@ class Environment(ABC):
 
     def process_chat_format(
         self,
-        prompt: List[ChatMessage],
-        completion: List[ChatMessage],
+        prompt: list[ChatMessage],
+        completion: list[ChatMessage],
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False,
-    ) -> Tuple[List[int], List[int], List[int], List[int]]:
+    ) -> tuple[list[int], list[int], list[int], list[int]]:
         """
         Process chat format conversations using incremental prefixes.
 
@@ -530,7 +537,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_completion_format(
         self, prompt: str, completion: str, processing_class: "PreTrainedTokenizerBase"
-    ) -> Tuple[List[int], List[int], List[int], List[int]]:
+    ) -> tuple[list[int], list[int], list[int], list[int]]:
         """
         Process completion format text.
 
@@ -554,10 +561,10 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_env_results(
         self,
-        prompts: List[Messages],
-        completions: List[Messages],
-        states: List[State],
-        rewards: List[float],
+        prompts: list[Messages],
+        completions: list[Messages],
+        states: list[State],
+        rewards: list[float],
         processing_class: "PreTrainedTokenizerBase",
         max_seq_len: int = -1,
         mask_env_responses: bool = False,
@@ -633,7 +640,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def parse_chat_completion_logprobs(
         self, chat_completion: ChatCompletion
-    ) -> List[float]:
+    ) -> list[float]:
         """Parses the completion logprobs from a vLLM chat completion"""
         assert len(chat_completion.choices) == 1, (
             "Response should always have one choice"
@@ -651,7 +658,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def parse_chat_completion_tokens(
         self, chat_completion: ChatCompletion
-    ) -> List[int]:
+    ) -> list[int]:
         """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
         assert len(chat_completion.choices) == 1, (
             "Response should always have one choice"
@@ -670,12 +677,12 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_chat_format_vllm(
         self,
-        prompt: List[ChatMessage],
-        completion: List[ChatMessage],
+        prompt: list[ChatMessage],
+        completion: list[ChatMessage],
         state: State,
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False,
-    ) -> Tuple[List[int], List[int], List[int], List[int], List[float]]:
+    ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
         Process chat format conversations using incremental prefixes.
         """
@@ -754,10 +761,10 @@ Model copies with swapped templates are available here: https://huggingface.co/c
 
     def process_env_results_vllm(
         self,
-        prompts: List[Messages],
-        completions: List[Messages],
-        states: List[State],
-        rewards: List[float],
+        prompts: list[Messages],
+        completions: list[Messages],
+        states: list[State],
+        rewards: list[float],
         processing_class: "PreTrainedTokenizerBase",
         max_seq_len: int = -1,
         mask_env_responses: bool = False,
@@ -846,7 +853,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         self,
         client: AsyncOpenAI | OpenAI,
         model: str,
-        sampling_args: SamplingArgs = {},
+        sampling_args: SamplingArgs | None = None,
         num_examples: int = -1,
         rollouts_per_example: int = 1,
         score_rollouts: bool = True,
@@ -903,12 +910,14 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         results: GenerateOutputs,
         push_to_hub: bool = False,
         hub_name: str | None = None,
-        state_columns: List[str] = [],
+        state_columns: list[str] | None = None,
         **kwargs,
     ) -> Dataset:
         """
         Make a dataset from the evaluation results.
         """
+        state_columns = state_columns or []
+
         if push_to_hub and hub_name is None:
             raise ValueError("hub_name must be provided if push_to_hub is True")
 
