@@ -36,7 +36,7 @@ Configure model and sampling:
 uv run vf-eval {env_id_dash} \
   -m gpt-4.1-mini \
   -n 20 -r 3 -t 1024 -T 0.7 \
-  -a "{{\"key\": \"value\"}}"  # env-specific args as JSON
+  -a '{"key": "value"}'  # env-specific args as JSON
 ```
 
 Notes:
@@ -63,7 +63,7 @@ Summarize key metrics your rubric emits and how they’re interpreted.
 
 <!-- Do not edit below this line. Content is auto-generated. -->
 <!-- vf:begin:reports -->
-<p>No reports found. Run `uv run vf-eval {env_id_dash}` to generate one.</p>
+<p>No reports found. Run <code>uv run vf-eval {env_id_dash} -a '{{"key": "value"}}'</code> to generate one.</p>
 <!-- vf:end:reports -->
 """
 

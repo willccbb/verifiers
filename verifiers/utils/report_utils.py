@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
 from hashlib import sha1
 from importlib import metadata as importlib_metadata
@@ -314,8 +315,12 @@ def _extract_body_inner_html(html: str) -> str:
             r"<body[^>]*>([\s\S]*?)</body>", html, flags=re.IGNORECASE
         )
         if body_match:
-            return body_match.group(1).strip()
-        return html.strip()
+            inner = body_match.group(1)
+        else:
+            inner = html
+        # Dedent to avoid Markdown treating lines as code blocks due to 4-space indents
+        inner = textwrap.dedent(inner)
+        return inner.strip()
     except Exception:
         return html
 
