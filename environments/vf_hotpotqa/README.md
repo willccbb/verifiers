@@ -1,1 +1,0 @@
-# vf-hotpotqa
