@@ -10,6 +10,12 @@ import numpy as np
 from openai import OpenAI
 
 import verifiers as vf
+from verifiers.utils.report_utils import (
+    ReportMeta,
+    get_env_version,
+    update_readme_reports_section,
+    write_report,
+)
 
 current_dir = Path.cwd()
 if str(current_dir) not in sys.path:
@@ -110,6 +116,39 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         else:
             dataset_name = hf_hub_dataset_name
         vf_env.make_dataset(results, push_to_hub=True, hub_name=dataset_name)
+
+    # Always write an HTML report under environments/<env>/reports/
+    try:
+        # Determine environment directory under ./environments if present; otherwise fall back to module file path
+        module_name = env.replace("-", "_")
+        local_env_dir = Path("./environments") / module_name
+        if local_env_dir.exists():
+            env_module_file = local_env_dir / f"{module_name}.py"
+        else:
+            mod = importlib.import_module(module_name)
+            module_file_str = getattr(mod, "__file__", None)
+            if not module_file_str:
+                raise RuntimeError("Cannot determine environment module file path")
+            env_module_file = Path(module_file_str)
+
+        meta = ReportMeta(
+            env_id=env,
+            env_version=get_env_version(module_name),
+            model=model,
+            num_examples=num_examples,
+            rollouts_per_example=rollouts_per_example,
+            api_base_url=api_base_url,
+            sampling_args=sampling_args,
+            env_args=env_args,
+        )
+        out_path = write_report(
+            env_module_file=env_module_file, meta=meta, results=results
+        )
+        print(f"Saved HTML report to {out_path}")
+        # Update README reports block with sanitized content
+        update_readme_reports_section(env_module_file=env_module_file)
+    except Exception as e:
+        print(f"Failed to write HTML report: {e}")
 
 
 def main():
