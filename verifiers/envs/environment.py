@@ -927,6 +927,7 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 self._sanitize_tool_calls(results.completion[i])
             )
         results_dict.update(results.metrics)
+        cols.extend(results.metrics.keys())
         if results.state[0] is not None:
             for col in state_columns:
                 if col in results.state[0]:
