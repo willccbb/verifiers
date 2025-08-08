@@ -93,6 +93,8 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     )
     n = num_examples
     r = rollouts_per_example
+    if n < 0:
+        n = len(results.reward) // r
     for i in range(r):
         # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]

@@ -1,9 +1,15 @@
 # NOTE: Helper functions for example datasets. Not intended for core functionality.
 
 import random
-from typing import Dict, Callable, Any
+from typing import Any, Callable, Dict
 
-from datasets import Dataset, load_dataset, concatenate_datasets  # type: ignore
+from datasets import Dataset, concatenate_datasets, load_dataset  # type: ignore
+
+### PROMPTS ###
+
+BOXED_SYSTEM_PROMPT = "Think step-by-step inside <think>...</think> tags. \
+    Then, give your final numerical answer inside \\boxed{{...}}."
+###############
 
 
 def extract_boxed_answer(text: str) -> str:
