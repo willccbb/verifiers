@@ -1,21 +1,19 @@
 # vf-xlam-function-calling
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-xlam-function-calling`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Function-calling reproduction from XLAM-60k: model must emit a JSON array of tool calls.
+- **Tags**: tools, function-calling, single-turn, xml+json
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `Salesforce/xlam-function-calling-60k` (train split)
+- **Source links**: Hugging Face Datasets
+- **Split sizes**: Uses the `train` split for training/evaluation
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: `XMLParser(["think","tool"], answer_field="tool")`
+- **Rubric overview**: Exact set equality between parsed JSON array and target tool list
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,21 @@ uv run vf-eval vf-xlam-function-calling
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-xlam-function-calling   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-xlam-function-calling \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
 - Reports are written under `./environments/vf_xlam_function_calling/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
-| Arg | Type | Default | Description |
-| --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+This loader does not expose custom arguments.
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | 1.0 if parsed tool JSON exactly matches target, else 0.0 |
 
 ## Evaluation Reports
 

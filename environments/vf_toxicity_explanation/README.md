@@ -1,21 +1,19 @@
 # vf-toxicity-explanation
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-toxicity-explanation`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Judge-based evaluation for toxicity classification with explanations using Civil Comments.
+- **Tags**: toxicity, classification, explanation, judge, single-turn
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `google/civil_comments` mapped to toxicity targets and metadata
+- **Source links**: Hugging Face Datasets
+- **Split sizes**: Train split; size optionally limited via `max_examples`
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: default `Parser`
+- **Rubric overview**: `JudgeRubric` with a numeric (0–10) rubric normalized to 0–1; evaluates correctness and explanation quality
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,28 @@ uv run vf-eval vf-toxicity-explanation
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-toxicity-explanation   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-toxicity-explanation \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"judge_model": "gpt-4.1-mini", "judge_base_url": "https://api.openai.com/v1", "judge_api_key_var": "OPENAI_API_KEY", "max_examples": -1}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
+- Use `-a` / `--env-args` to configure the judge model/provider and dataset size.
 - Reports are written under `./environments/vf_toxicity_explanation/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `judge_model` | str | `"gpt-4.1-mini"` | Judge model name |
+| `judge_base_url` | str | `"https://api.openai.com/v1"` | Judge provider base URL |
+| `judge_api_key_var` | str | `"OPENAI_API_KEY"` | Env var containing judge API key |
+| `max_examples` | int | `-1` | If > 0, limit dataset to this many examples |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | Normalized judge score (0–1) |
 
 ## Evaluation Reports
 

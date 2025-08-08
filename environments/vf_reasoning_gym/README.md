@@ -1,21 +1,19 @@
 # vf-reasoning-gym
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-reasoning-gym`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Single-turn evaluation over `reasoning_gym` procedural tasks with XML formatting.
+- **Tags**: reasoning, procedural, single-turn, xml, synthetic
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: Generated via `reasoning_gym` (e.g., `arc_1d`, or composite configs)
+- **Source links**: `reasoning_gym` library
+- **Split sizes**: Configurable counts for train/eval via loader args
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: `XMLParser(["think","answer"])`
+- **Rubric overview**: Score computed via `reasoning_gym` task-specific scorer; optional format component
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,29 @@ uv run vf-eval vf-reasoning-gym
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-reasoning-gym   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-reasoning-gym \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"gym": "arc_1d", "num_train_examples": 2000, "num_eval_examples": 2000}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
+- Use `gym` to select a single dataset name, a list of names, or a composite specification.
 - Reports are written under `./environments/vf_reasoning_gym/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `gym` | str | `"arc_1d"` | Single task name, list of names, or composite config |
+| `num_train_examples` | int | `2000` | Number of training examples |
+| `num_eval_examples` | int | `2000` | Number of evaluation examples |
+| `seed` | int | `0` | Random seed for dataset generation |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | Task-specific score from `reasoning_gym` for parsed answer |
+| `format_reward` | Adherence to `<think>`/`<answer>` XML format |
 
 ## Evaluation Reports
 

@@ -1,54 +1,57 @@
 # vf-xml-tool-env
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-xml-tool-env`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Multi-turn XML-formatted tool-use environment with automatic tool schema inference from Python callables.
+- **Tags**: tools, multi-turn, xml, schema-inference
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: Loaded via `load_example_dataset(dataset_name, split)`
+- **Source links**: Uses example loader in `verifiers.utils.data_utils`
+- **Split sizes**: Based on provided split
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: multi-turn tool use
+- **Parser**: `XMLParser(["think", ("tool","answer")])` and env `XMLParser(["result"])`
+- **Rubric overview**: Correctness on final answer, tool execution success, and format adherence; per-tool metrics available
 
 ### Quickstart
-Run an evaluation with default settings:
+Run an evaluation with default settings (example):
 
 ```bash
-uv run vf-eval vf-xml-tool-env
+uv run vf-eval vf-xml-tool-env -a '{"dataset_name": "math", "split": "train"}'
 ```
 
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-xml-tool-env   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-xml-tool-env \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"dataset_name": "math", "split": "train"}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
+- Provide `tools` as Python callables; schemas are inferred from signatures/docstrings.
 - Reports are written under `./environments/vf_xml_tool_env/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `dataset_name` | str | — | Example dataset name |
+| `split` | str | — | Split to load |
+| `tools` | List[Callable] | `[]` | Tool functions to expose |
+| `system_prompt` | str | `""` | Prompt template (auto-formats with tool descriptions when `format_prompt=True`) |
+| `format_prompt` | bool | `true` | Whether to insert tool descriptions into the prompt |
+| `max_turns` | int | `10` | Maximum number of tool-use turns |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | Final answer correctness |
+| `tool_execution_reward_func` | Success rate of tool calls with non-error results |
+| `format_reward` | Adherence to `<think>` and `<tool>` XML format |
+| Tool-specific metrics | Per-tool success/count/attempt rates |
 
 ## Evaluation Reports
 

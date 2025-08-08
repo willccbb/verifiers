@@ -1,21 +1,19 @@
 # vf-doublecheck
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-doublecheck`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Two-turn math QA that asks the model to answer, then prompts “Are you sure?”; scored with a math rubric.
+- **Tags**: math, multi-turn, xml, think-answer, verification
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `math` (example dataset loaded via `load_example_dataset`)
+- **Source links**: Uses the example loader in `verifiers.utils.data_utils`
+- **Split sizes**: Configurable via args; defaults to `train` split and all examples
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: multi-turn
+- **Parser**: XMLParser with fields `think`, `answer` (from `MathRubric`)
+- **Rubric overview**: `MathRubric` combining exact/equivalence math grading and a small format component
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,7 +25,10 @@ uv run vf-eval vf-doublecheck
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-doublecheck   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-doublecheck \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"dataset_name": "math", "dataset_split": "train", "num_train_examples": -1}'
 ```
 
 Notes:
@@ -35,20 +36,17 @@ Notes:
 - Reports are written under `./environments/vf_doublecheck/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `dataset_name` | str | `"math"` | Example dataset name for math problems |
+| `dataset_split` | str | `"train"` | Dataset split to load |
+| `num_train_examples` | int | `-1` | Limit on dataset size (`-1` for all) |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | Math answer correctness (symbolic/numeric equivalence) |
+| `format_reward` | Adherence to `<think>`/`<answer>` XML format |
 
 ## Evaluation Reports
 

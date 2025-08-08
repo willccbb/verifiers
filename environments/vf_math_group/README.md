@@ -1,21 +1,19 @@
 # vf-math-group
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-math-group`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Groups GSM8K and MATH single-turn sub-environments into one evaluation with a shared math CoT parser.
+- **Tags**: math, group, single-turn, gsm8k, math, think
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `gsm8k` (subset of 1000 train examples) and `math` (subset of 1000 train examples)
+- **Source links**: Uses example loader in `verifiers.utils.data_utils`
+- **Split sizes**: 1000 per sub-environment (train-only in this group)
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn (EnvGroup of two SingleTurnEnv instances)
+- **Parser**: `ThinkParser` with boxed answer extraction
+- **Rubric overview**: Exact numeric/equivalent match per sub-environment plus optional format check
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,23 @@ uv run vf-eval vf-math-group
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-math-group   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-math-group \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
+- This environment bundles two math datasets; reporting aggregates across both.
 - Reports are written under `./environments/vf_math_group/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
-| Arg | Type | Default | Description |
-| --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+This loader does not expose custom arguments.
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | 1.0 if parsed boxed answer equals target (per sub-env), else 0.0 |
+| `format_reward` | Adherence to `<think>` + boxed `\boxed{...}` format |
 
 ## Evaluation Reports
 

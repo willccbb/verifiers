@@ -1,21 +1,19 @@
 # vf-wordle
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-wordle`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Multi-turn Wordle game environment with optional `<think>` reasoning; rewards correctness, partial credit, turns, and format.
+- **Tags**: games, multi-turn, wordle, xml, feedback
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: TextArena `Wordle-v0` (environment provides episodes)
+- **Source links**: TextArena
+- **Split sizes**: Number of episodes controlled via args
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: multi-turn (game interaction)
+- **Parser**: `XMLParser` with `think`/`guess` or just `guess` depending on `use_think`
+- **Rubric overview**: Exact guess match, partial credit from feedback, turns-based reward, and format check
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,29 @@ uv run vf-eval vf-wordle
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-wordle   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-wordle \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"num_train_examples": 2000, "num_eval_examples": 20, "use_think": true}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
 - Reports are written under `./environments/vf_wordle/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `num_train_examples` | int | `2000` | Number of training episodes |
+| `num_eval_examples` | int | `20` | Number of evaluation episodes |
+| `use_think` | bool | `true` | Use `<think>` with `guess`; if false, guess-only format |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `check_answer_reward_func` | 1.0 if final guess equals target, else 0.0 |
+| `partial_credit_reward_func` | Partial credit from greens/yellows in feedback |
+| `count_turns_reward_func` | Higher score for solving in fewer turns |
+| `format_reward` | Adherence to expected XML format |
 
 ## Evaluation Reports
 

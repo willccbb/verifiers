@@ -1,21 +1,19 @@
 # vf-reverse-text
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-reverse-text`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Reverse a given paragraph; evaluated by LCS similarity to the exact reversal.
+- **Tags**: text, transformation, single-turn, xml
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `agentlans/wikipedia-paragraphs` mapped to question/answer pairs
+- **Source links**: Hugging Face Datasets
+- **Split sizes**: Train/eval split controlled by `num_train_examples` and `num_eval_examples`
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: `XMLParser(["think","answer"])`
+- **Rubric overview**: LCS similarity between parsed answer and ground-truth reversed text; optional format check
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,7 +25,10 @@ uv run vf-eval vf-reverse-text
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-reverse-text   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-reverse-text \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"num_train_examples": 2000, "num_eval_examples": 200}'
 ```
 
 Notes:
@@ -35,20 +36,16 @@ Notes:
 - Reports are written under `./environments/vf_reverse_text/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `num_train_examples` | int | `2000` | Number of training examples |
+| `num_eval_examples` | int | `200` | Number of evaluation examples |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | LCS similarity between reversed text and parsed answer |
+| `format_reward` | Adherence to `<think>`/`<answer>` XML format |
 
 ## Evaluation Reports
 
