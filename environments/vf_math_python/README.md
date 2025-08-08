@@ -1,21 +1,19 @@
 # vf-math-python
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-math-python`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Tool-using math environment requiring Python tool calls to compute answers; graded by symbolic equivalence.
+- **Tags**: math, tools, python, single-turn, boxed-answer
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: Example `math` dataset via `load_example_dataset`
+- **Source links**: Uses example loader in `verifiers.utils.data_utils`
+- **Split sizes**: Configurable via args; defaults to `train` split and all examples
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: tool use (single-turn ToolEnv)
+- **Parser**: Basic `Parser` with boxed answer extraction
+- **Rubric overview**: Correctness by `math_verify.parse` + `verify`; logs auxiliary metrics (#turns, #tool calls, #errors)
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,7 +25,10 @@ uv run vf-eval vf-math-python
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-math-python   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-math-python \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"dataset_name": "math", "dataset_split": "train", "num_train_examples": -1}'
 ```
 
 Notes:
@@ -35,20 +36,19 @@ Notes:
 - Reports are written under `./environments/vf_math_python/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `dataset_name` | str | `"math"` | Example dataset to load |
+| `dataset_split` | str | `"train"` | Split to load |
+| `num_train_examples` | int | `-1` | Limit dataset size (`-1` for all) |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `correct_answer_reward_func` | 1.0 if symbolic verification passes, else 0.0 |
+| `num_turns` | Number of assistant messages in completion |
+| `num_tool_calls` | Number of tool messages in completion |
+| `num_errors` | Count of tool error messages |
 
 ## Evaluation Reports
 

@@ -1,21 +1,19 @@
 # vf-gsm8k
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-gsm8k`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Single-turn GSM8K math word problems with boxed numeric answers and CoT.
+- **Tags**: math, gsm8k, single-turn, think, boxed-answer
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `gsm8k` train (train) and test (eval) via `load_example_dataset`
+- **Source links**: Uses the example loader in `verifiers.utils.data_utils`
+- **Split sizes**: Configurable via args; defaults to full train/test
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: `ThinkParser` with boxed answer extraction
+- **Rubric overview**: Exact match on parsed boxed answer; optional format check
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,7 +25,10 @@ uv run vf-eval vf-gsm8k
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-gsm8k   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-gsm8k \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"num_train_examples": -1, "num_eval_examples": -1}'
 ```
 
 Notes:
@@ -35,20 +36,16 @@ Notes:
 - Reports are written under `./environments/vf_gsm8k/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `num_train_examples` | int | `-1` | Limit training set size (`-1` for all) |
+| `num_eval_examples` | int | `-1` | Limit eval set size (`-1` for all) |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | 1.0 if parsed boxed answer equals target, else 0.0 |
+| `format_reward` | Adherence to `<think>` + boxed `\boxed{...}` format |
 
 ## Evaluation Reports
 

@@ -1,21 +1,19 @@
 # vf-smolagents-math-tools
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-smolagents-math-tools`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Multi-turn math tool-use environment using SmolAgents PythonInterpreter and a custom Calculator tool.
+- **Tags**: math, tools, multi-turn, smolagents, xml
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: Train from example `math`; eval from concatenated `aime2024` + `aime2025` (30 each)
+- **Source links**: Uses example loader in `verifiers.utils.data_utils`
+- **Split sizes**: Train≈6000; Eval≈60 (AIME 2024/2025 subsets)
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: multi-turn tool use
+- **Parser**: Custom `SmolagentsParser` with fields `reasoning`, `tool`/`answer`
+- **Rubric overview**: Format adherence plus tool execution success metrics; per-tool reward hooks available
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,27 @@ uv run vf-eval vf-smolagents-math-tools
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-smolagents-math-tools   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-smolagents-math-tools \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"use_few_shot": false}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
+- Use `-a` / `--env-args` to toggle few-shot examples in the system.
 - Reports are written under `./environments/vf_smolagents_math_tools/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `use_few_shot` | bool | `false` | Include SmolAgents few-shot examples in prompt |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `format_reward` | Adherence to `SmolagentsParser` message schema |
+| `calculator_reward_func` | Tool execution success rate for calculator (if present) |
+| `python_interpreter_reward_func` | Tool execution success rate for PythonInterpreter (if present) |
 
 ## Evaluation Reports
 

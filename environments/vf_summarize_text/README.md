@@ -1,21 +1,19 @@
 # vf-summarize-text
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-summarize-text`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Summarize a paragraph into three sentences using a specified XML response format.
+- **Tags**: summarization, single-turn, xml, lcs
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: `agentlans/wikipedia-paragraphs` mapped to `question`=`text`, `answer`=`text`
+- **Source links**: Hugging Face Datasets
+- **Split sizes**: Uses the `train` split for evaluation
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: single-turn
+- **Parser**: `XMLParser(["think","answer"])`
+- **Rubric overview**: (1) Exactly 3 sentences; (2) LCS similarity to source; (3) format check
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,23 @@ uv run vf-eval vf-summarize-text
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-summarize-text   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-summarize-text \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
 - Reports are written under `./environments/vf_summarize_text/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
-| Arg | Type | Default | Description |
-| --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+This loader does not expose custom arguments.
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `sentence_reward_func` | 1.0 if exactly three sentences, else 0.0 |
+| `lcs_reward_func` | LCS similarity between source and parsed summary |
+| `format_reward` | Adherence to `<think>`/`<answer>` XML format |
 
 ## Evaluation Reports
 

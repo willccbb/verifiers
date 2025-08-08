@@ -1,21 +1,19 @@
 # vf-tool-test
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
-
 ### Overview
 - **Environment ID**: `vf-tool-test`
-- **Short description**: <one-sentence description>
-- **Tags**: <comma-separated tags>
+- **Short description**: Sanity-check tool-calling environment that asks models to invoke a random subset of dummy tools.
+- **Tags**: tools, single-turn, function-calling, sanity
 
 ### Datasets
-- **Primary dataset(s)**: <name(s) and brief description>
-- **Source links**: <links>
-- **Split sizes**: <train/eval counts>
+- **Primary dataset(s)**: Synthetic HF dataset generated in-memory with prompts specifying required tools
+- **Source links**: N/A (programmatically generated)
+- **Split sizes**: Controlled by `num_train_examples` and `num_eval_examples`
 
 ### Task
-- **Type**: <single-turn | multi-turn | tool use>
-- **Parser**: <e.g., ThinkParser, XMLParser, custom>
-- **Rubric overview**: <briefly list reward functions and key metrics>
+- **Type**: tool use (single-turn ToolEnv)
+- **Parser**: default `Parser`
+- **Rubric overview**: ToolRubric checks tool execution and adds exact match on the required tool set
 
 ### Quickstart
 Run an evaluation with default settings:
@@ -27,28 +25,26 @@ uv run vf-eval vf-tool-test
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-tool-test   -m gpt-4.1-mini   -n 20 -r 3 -t 1024 -T 0.7   -a '{"key": "value"}'  # env-specific args as JSON
+uv run vf-eval vf-tool-test \
+  -m gpt-4.1-mini \
+  -n 20 -r 3 -t 1024 -T 0.7 \
+  -a '{"num_train_examples": 1000, "num_eval_examples": 100}'
 ```
 
 Notes:
-- Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
 - Reports are written under `./environments/vf_tool_test/reports/` and auto-embedded below.
 
 ### Environment Arguments
-Document any supported environment arguments and their meaning. Example:
-
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `foo` | str | `"bar"` | What this controls |
-| `max_examples` | int | `-1` | Limit on dataset size (use -1 for all) |
+| `num_train_examples` | int | `1000` | Number of training examples |
+| `num_eval_examples` | int | `100` | Number of evaluation examples |
 
 ### Metrics
-Summarize key metrics your rubric emits and how they’re interpreted.
-
 | Metric | Meaning |
 | ------ | ------- |
-| `reward` | Main scalar reward (weighted sum of criteria) |
-| `accuracy` | Exact match on target answer |
+| `reward` | 1.0 if called tool set equals required set, else 0.0 |
+| ToolRubric metrics | Tool execution success and format adherence |
 
 ## Evaluation Reports
 
