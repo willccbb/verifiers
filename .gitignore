@@ -46,8 +46,6 @@ old/
 
 # Incomplete environments
 environments/vf_acebench/
-environments/vf_aime2024/
-environments/vf_aime2025/
 environments/vf_bfcl_v3/
 environments/vf_hotpotqa/
 environments/vf_truthful_qa/

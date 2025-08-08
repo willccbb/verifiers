@@ -4,6 +4,8 @@ import verifiers as vf
 from verifiers.utils.data_utils import extract_boxed_answer, load_example_dataset
 from verifiers.utils.tools import python
 
+DEFAULT_SYSTEM_PROMPT = "Think step-by-step inside <think>...</think> tags. Then, give your final numerical answer inside \\boxed{{...}}."
+
 
 def load_environment(
     dataset_name: str = "math",
