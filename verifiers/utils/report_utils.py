@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha1
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -173,12 +174,14 @@ _TEMPLATE = """<!DOCTYPE html>
     </style>
   </head>
   <body>
-    <h1>Verifiers Eval Report</h1>
+    <h3>{{ env_id }}: {{ model }} (n={{ num_examples }}, r={{ rollouts_per_example }})</h3>
     <div class="meta">
       <div><b>Environment</b>: {{ env_id }} (v{{ env_version }})</div>
       <div><b>Model</b>: <span class="code">{{ model }}</span></div>
       <div><b>Provider</b>: {{ api_base_url }}</div>
       <div><b>Samples</b>: n={{ num_examples }}, r={{ rollouts_per_example }}</div>
+      <div><b>Date</b>: {{ date }}</div>
+      <div><b>Time</b>: {{ time }}</div>
       <div><b>Sampling</b>: max_tokens={{ sampling_args.max_tokens }}, temperature={{ sampling_args.temperature }}</div>
     </div>
 
@@ -259,6 +262,8 @@ def render_html(
         api_base_url=meta.api_base_url,
         num_examples=meta.num_examples,
         rollouts_per_example=meta.rollouts_per_example,
+        date=datetime.now().strftime("%Y-%m-%d"),
+        time=datetime.now().strftime("%H:%M:%S"),
         sampling_args={
             "max_tokens": meta.sampling_args.get("max_tokens"),
             "temperature": meta.sampling_args.get("temperature"),
