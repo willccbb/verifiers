@@ -69,6 +69,7 @@ class MultiTurnEnv(Environment):
         else:
             assert isinstance(prompt, str)
             completion = ""
+            state["responses_start_idx"] = []
         rollout = deepcopy(prompt)
         while not is_completed:
             if self.is_completed(rollout, state, **kwargs):
@@ -102,6 +103,7 @@ class MultiTurnEnv(Environment):
                 assert isinstance(rollout, str)
                 assert isinstance(completion, str)
                 assert isinstance(response, Completion)
+                state["responses_start_idx"].append(len(completion))
                 response_text: str = response.choices[0].text or ""  # type: ignore
                 rollout += response_text
                 completion += response_text
