@@ -18,12 +18,9 @@ from verifiers.types import (
 
 
 class MultiTurnEnv(Environment):
-    def __init__(
-        self, message_type: MessageType = "chat", max_turns: int = 10, **kwargs
-    ):
+    def __init__(self, max_turns: int = 10, **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
-        self.message_type = message_type
 
     def setup_state(self, state: State, **kwargs) -> State:
         return state
