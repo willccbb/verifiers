@@ -46,7 +46,7 @@ class XMLParser(Parser):
             seen.add(canonical)
             self._fields.append((canonical, alternatives))
 
-    def parse(self, text: str, strip: bool = True) -> Any:
+    def parse(self, text: str, strip: bool = True, last: bool = False) -> Any:
         """
         Parse the given XML string and return an object with attributes corresponding
         to all allowed tags in the schema.
@@ -66,7 +66,12 @@ class XMLParser(Parser):
             for alt in alternatives:
                 # Regex pattern to capture the content between the tags.
                 pattern = rf"<{alt}>\s*(.*?)\s*</{alt}>"
-                match = re.search(pattern, text, re.DOTALL)
+                if last:
+                    match = None
+                    for match in re.finditer(pattern, text, re.DOTALL):
+                        pass # iterate over matches to bind last match
+                else:
+                    match = re.search(pattern, text, re.DOTALL)
                 if match:
                     results[alt] = match.group(1).strip() if strip else match.group(1)
                 else:
@@ -76,7 +81,13 @@ class XMLParser(Parser):
     def parse_answer(self, completion: Messages) -> str | None:
         """Extract the last answer from a completion."""
         if isinstance(completion, str):
-            return self.parse(completion)
+            parsed = self.parse(completion, last=True)
+            if (
+                parsed
+                and hasattr(parsed, self.answer_field)
+                and getattr(parsed, self.answer_field) is not None
+            ):
+                return getattr(parsed, self.answer_field)
         else:
             for msg in reversed(self.get_assistant_messages(completion)):
                 parsed = self.parse(msg["content"])
