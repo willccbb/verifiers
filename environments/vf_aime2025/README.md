@@ -1,4 +1,4 @@
-# vf-aime2025
+# AIME-25
 
 ### Overview
 - **Environment ID**: `vf-aime2025`

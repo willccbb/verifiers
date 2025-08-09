@@ -1,4 +1,4 @@
-# vf-aime2024
+# AIME-24
 
 ### Overview
 - **Environment ID**: `vf-aime2024`

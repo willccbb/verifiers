@@ -70,7 +70,9 @@ Summarize key metrics your rubric emits and how they’re interpreted.
 PYPROJECT_TEMPLATE = f"""\
 [project]
 name = "{{env_id}}"
+description = "Your environment description here"
 version = "0.1.0"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "verifiers>={vf.__version__}",
 ]
