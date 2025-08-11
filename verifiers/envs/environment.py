@@ -12,10 +12,10 @@ from openai import AsyncOpenAI, OpenAI
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
-    Completion,
     ChatCompletion,
     ChatCompletionToolParam,
     ChatMessage,
+    Completion,
     GenerateInputs,
     GenerateOutputs,
     Info,
@@ -657,13 +657,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         ]
         return logprobs
 
-    def parse_completion_logprobs(
-        self, completion: Completion
-    ) -> List[float]:
+    def parse_completion_logprobs(self, completion: Completion) -> list[float]:
         """Parses the completion logprobs from a vLLM chat completion"""
-        assert len(completion.choices) == 1, (
-            "Response should always have one choice"
-        )
+        assert len(completion.choices) == 1, "Response should always have one choice"
         assert completion.choices[0].logprobs is not None, (
             "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
         )
@@ -692,13 +688,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         ]
         return tokens
 
-    def parse_completion_tokens(
-        self, completion: Completion
-    ) -> List[int]:
+    def parse_completion_tokens(self, completion: Completion) -> list[int]:
         """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
-        assert len(completion.choices) == 1, (
-            "Response should always have one choice"
-        )
+        assert len(completion.choices) == 1, "Response should always have one choice"
         assert completion.choices[0].logprobs is not None, (
             "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
         )
@@ -803,13 +795,15 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         state: State,
         processing_class: "PreTrainedTokenizerBase",
         mask_env_responses: bool = False,
-    ) -> Tuple[List[int], List[int], List[int], List[int], List[float]]:
+    ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
         Process completion format conversations using incremental prefixes.
         """
         responses: list[Completion] = state["responses"]
         responses_start_idx: list[int] = state["responses_start_idx"]
-        assert len(responses) == len(responses_start_idx), "Should have an index for each completion response"
+        assert len(responses) == len(responses_start_idx), (
+            "Should have an index for each completion response"
+        )
 
         idx = 0
         zipped: list[tuple[str, Completion | None]] = []
@@ -844,7 +838,9 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             # non-model-generated (user/tool case) -- use text
             else:
                 token_prefix: list[int] = processing_class.encode(rollout_consumed)
-                token_prefix_with_turn: list[int] = processing_class.encode(rollout_consumed + text)
+                token_prefix_with_turn: list[int] = processing_class.encode(
+                    rollout_consumed + text
+                )
                 assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
                     f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
                 )
