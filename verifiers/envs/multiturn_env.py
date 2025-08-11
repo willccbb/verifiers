@@ -11,7 +11,6 @@ from verifiers.types import (
     Completion,
     Info,
     Messages,
-    MessageType,
     SamplingArgs,
     State,
 )
