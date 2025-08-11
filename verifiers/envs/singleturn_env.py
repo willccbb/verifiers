@@ -1,15 +1,11 @@
 from verifiers.envs.multiturn_env import MultiTurnEnv
-from verifiers.types import Messages, MessageType, State
+from verifiers.types import Messages, State
 
 
 class SingleTurnEnv(MultiTurnEnv):
     """
     Environment for single-turn tasks (chat or completion).
     """
-
-    def __init__(self, message_type: MessageType = "chat", **kwargs):
-        super().__init__(message_type=message_type, **kwargs)
-        self.message_type = message_type
 
     def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
         return len(state["responses"]) > 0

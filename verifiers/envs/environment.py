@@ -12,6 +12,7 @@ from openai import AsyncOpenAI, OpenAI
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
+    Completion,
     ChatCompletion,
     ChatCompletionToolParam,
     ChatMessage,
@@ -656,6 +657,21 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         ]
         return logprobs
 
+    def parse_completion_logprobs(
+        self, completion: Completion
+    ) -> List[float]:
+        """Parses the completion logprobs from a vLLM chat completion"""
+        assert len(completion.choices) == 1, (
+            "Response should always have one choice"
+        )
+        assert completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        assert completion.choices[0].logprobs.token_logprobs is not None, (
+            "Logprob token_logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        return completion.choices[0].logprobs.token_logprobs
+
     def parse_chat_completion_tokens(
         self, chat_completion: ChatCompletion
     ) -> list[int]:
@@ -670,8 +686,29 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
         )
         tokens = [
+            # tokens are token_id:<int> because we request `return_tokens_as_token_ids` from vllm in GRPOTrainer
             int(token.token.split(":")[-1])
             for token in chat_completion.choices[0].logprobs.content
+        ]
+        return tokens
+
+    def parse_completion_tokens(
+        self, completion: Completion
+    ) -> List[int]:
+        """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
+        assert len(completion.choices) == 1, (
+            "Response should always have one choice"
+        )
+        assert completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        assert completion.choices[0].logprobs.tokens is not None, (
+            "Logprob tokens should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        tokens = [
+            # tokens are token_id:<int> because we request `return_tokens_as_token_ids` from vllm in GRPOTrainer
+            int(token.split(":")[-1])
+            for token in completion.choices[0].logprobs.tokens
         ]
         return tokens
 
@@ -759,6 +796,77 @@ Model copies with swapped templates are available here: https://huggingface.co/c
             completion_logprobs,
         )
 
+    def process_completion_format_vllm(
+        self,
+        prompt: str,
+        completion: str,
+        state: State,
+        processing_class: "PreTrainedTokenizerBase",
+        mask_env_responses: bool = False,
+    ) -> Tuple[List[int], List[int], List[int], List[int], List[float]]:
+        """
+        Process completion format conversations using incremental prefixes.
+        """
+        responses: list[Completion] = state["responses"]
+        responses_start_idx: list[int] = state["responses_start_idx"]
+        assert len(responses) == len(responses_start_idx), "Should have an index for each completion response"
+
+        idx = 0
+        zipped: list[tuple[str, Completion | None]] = []
+        for response, response_start_idx in zip(responses, responses_start_idx):
+            if response_start_idx > idx:
+                # non-model-generated section
+                zipped.append((completion[idx:response_start_idx], None))
+            response_text = response.choices[0].text or ""
+            zipped.append((response_text, response))
+            idx = response_start_idx + len(response_text)
+        assert idx == len(completion), "Completion not fully consumed"
+
+        prompt_ids: list[int] = processing_class.encode(prompt)
+        rollout_consumed = prompt
+        prompt_mask: list[int] = [0] * len(prompt_ids)
+        completion_ids: list[int] = []
+        completion_mask: list[int] = []
+        completion_logprobs: list[float] = []
+        i = 0
+        while i < len(zipped):
+            text, response = zipped[i]
+            # model-generated case -- use response
+            if response is not None:
+                completion_turn_ids = self.parse_completion_tokens(response)
+                completion_turn_mask = [1] * len(completion_turn_ids)
+                completion_turn_logprobs = self.parse_completion_logprobs(response)
+                completion_ids.extend(completion_turn_ids)
+                completion_mask.extend(completion_turn_mask)
+                completion_logprobs.extend(completion_turn_logprobs)
+                rollout_consumed += text
+                i += 1
+            # non-model-generated (user/tool case) -- use text
+            else:
+                token_prefix: list[int] = processing_class.encode(rollout_consumed)
+                token_prefix_with_turn: list[int] = processing_class.encode(rollout_consumed + text)
+                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
+                    f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                )
+                completion_turn_ids = token_prefix_with_turn[len(token_prefix) :]
+                if mask_env_responses:
+                    completion_turn_mask = [0] * len(completion_turn_ids)
+                else:
+                    completion_turn_mask = [1] * len(completion_turn_ids)
+                completion_turn_logprobs = [0.0] * len(completion_turn_ids)
+                completion_ids.extend(completion_turn_ids)
+                completion_mask.extend(completion_turn_mask)
+                completion_logprobs.extend(completion_turn_logprobs)
+                rollout_consumed += text
+                i += 1
+        return (
+            prompt_ids,
+            prompt_mask,
+            completion_ids,
+            completion_mask,
+            completion_logprobs,
+        )
+
     def process_env_results_vllm(
         self,
         prompts: list[Messages],
@@ -775,10 +883,8 @@ Model copies with swapped templates are available here: https://huggingface.co/c
         Process results with vLLM tokens/logprobs.
         """
         # Determine format from first prompt
+        # TODO: why not from self.message_type?
         is_chat_format = isinstance(prompts[0], list)
-        assert is_chat_format, (
-            "vLLM output parsing is not yet supported for completion format"
-        )
 
         all_prompt_ids = []
         all_prompt_masks = []
@@ -803,10 +909,15 @@ Model copies with swapped templates are available here: https://huggingface.co/c
                 )
             else:
                 assert isinstance(prompt, str) and isinstance(completion, str)
-                prompt_ids, prompt_mask, completion_ids, completion_mask = (
-                    self.process_completion_format(prompt, completion, processing_class)
+                (
+                    prompt_ids,
+                    prompt_mask,
+                    completion_ids,
+                    completion_mask,
+                    completion_logprobs,
+                ) = self.process_completion_format_vllm(
+                    prompt, completion, state, processing_class, mask_env_responses
                 )
-                completion_logprobs = [0] * len(completion_ids)
             is_truncated = False
             if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
                 if len(prompt_ids) > max_seq_len:
