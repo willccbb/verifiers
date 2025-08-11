@@ -1,17 +1,18 @@
 import logging
 import sys
-from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from verifiers.types import Messages
+
 
 def setup_logging(
     level: str = "INFO",
-    log_format: Optional[str] = None,
-    date_format: Optional[str] = None,
+    log_format: str | None = None,
+    date_format: str | None = None,
 ) -> None:
     """
     Setup basic logging configuration for the verifiers package.
@@ -40,9 +41,9 @@ def setup_logging(
 
 
 def print_prompt_completions_sample(
-    prompts: list[str],
-    completions: list[dict],
-    rewards: dict[str, list[float]],
+    prompts: list[Messages],
+    completions: list[Messages],
+    rewards: list[float],
     step: int,
     num_samples: int = 1,  # Number of samples to display
 ) -> None:
@@ -55,7 +56,7 @@ def print_prompt_completions_sample(
     table.add_column("Reward", style="bold cyan", justify="right")
 
     # Get the reward values from the dictionary
-    reward_values = rewards.get("reward", [])
+    reward_values = rewards
 
     # Ensure we have rewards for all prompts/completions
     if len(reward_values) < len(prompts):
@@ -78,7 +79,7 @@ def print_prompt_completions_sample(
             # For chat format, only show the last message content (typically the user's question)
             if prompt:
                 last_message = prompt[-1]
-                content = last_message.get("content", "")
+                content = str(last_message.get("content", ""))
                 formatted_prompt = Text(content, style="bright_yellow")
             else:
                 formatted_prompt = Text("")
@@ -102,7 +103,7 @@ def print_prompt_completions_sample(
                     formatted_completion.append("\n\n")
 
                 role = message.get("role", "")
-                content = message.get("content", "")
+                content = str(message.get("content", ""))
                 tool_calls = message.get("tool_calls", [])
 
                 # Set style based on role
@@ -113,10 +114,12 @@ def print_prompt_completions_sample(
                 for tool_call in tool_calls:
                     formatted_completion.append("\n\n[tool call]", style=style)
                     formatted_completion.append(
-                        f"\nname: {tool_call.function.name}", style=style
+                        f"\nname: {tool_call.function.name}",  # type: ignore
+                        style=style,
                     )
                     formatted_completion.append(
-                        f"\nargs: {tool_call.function.arguments}", style=style
+                        f"\nargs: {tool_call.function.arguments}",  # type: ignore
+                        style=style,
                     )
         else:
             # Fallback for string completions

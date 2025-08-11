@@ -10,10 +10,147 @@ import numpy as np
 from openai import OpenAI
 
 import verifiers as vf
+from verifiers.utils.report_utils import (
+    ReportMeta,
+    get_env_version,
+    update_readme_reports_section,
+    write_report,
+)
 
 current_dir = Path.cwd()
 if str(current_dir) not in sys.path:
     sys.path.insert(0, str(current_dir))
+
+
+def eval_environment(
+    env: str,
+    env_args: dict,
+    endpoints_path: str,
+    model: str,
+    api_key_var: str,
+    api_base_url: str,
+    num_examples: int,
+    rollouts_per_example: int,
+    max_concurrent_requests: int,
+    max_tokens: int,
+    temperature: float,
+    save_dataset: bool,
+    save_path: str,
+    save_to_hf_hub: bool,
+    hf_hub_dataset_name: str,
+):
+    try:
+        endpoints = Path(endpoints_path)
+        if endpoints.exists():
+            spec = importlib.util.spec_from_file_location("endpoints", endpoints)
+            assert spec and spec.loader
+            endpoints_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(endpoints_module)
+            ENDPOINTS = endpoints_module.ENDPOINTS
+        else:
+            raise ImportError(f"endpoints.py not found in {current_dir}")
+    except (ImportError, AttributeError):
+        print(
+            f"No local endpoint registry found at {endpoints_path}. \
+Please specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
+        )
+        ENDPOINTS = {}
+
+    if model in ENDPOINTS:
+        api_key_var = ENDPOINTS[model]["key"]
+        api_base_url = ENDPOINTS[model]["url"]
+        model = ENDPOINTS[model]["model"]
+
+    client = OpenAI(api_key=os.getenv(api_key_var, "EMPTY"), base_url=api_base_url)
+    vf_env = vf.load_environment(env_id=env, **env_args)
+    sampling_args = {
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    results = vf_env.evaluate(
+        client=client,
+        model=model,
+        sampling_args=sampling_args,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
+        max_concurrent_requests=max_concurrent_requests,
+    )
+    print("--- Evaluation ---")
+    print(f"Environment: {env}")
+    print(f"Model: {model}")
+    print(f"Provider: {api_base_url}")
+    print(f"Examples: {num_examples}")
+    print(f"Rollouts per example: {rollouts_per_example}")
+
+    print("--- Example ---")
+    vf.print_prompt_completions_sample(
+        results.prompt, results.completion, results.reward, step=0
+    )
+    print("--- All ---")
+    print("Rewards:")
+    print(
+        f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
+    )
+    n = num_examples
+    r = rollouts_per_example
+    if n < 0:
+        n = len(results.reward) // r
+    for i in range(r):
+        # rounded to 3 decimal places
+        trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]
+        out = f"r{i + 1}: {trials}"
+        print(out)
+    for k in results.metrics:
+        v = results.metrics[k]
+        print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        for i in range(r):
+            # rounded to 3 decimal places
+            trials = [round(v[(i * n) + j], 3) for j in range(n)]
+            out = f"r{i + 1}: {trials}"
+            print(out)
+    if save_dataset:
+        dataset = vf_env.make_dataset(results)
+        dataset.save_to_disk(save_path)
+        print(f"Saved dataset to {save_path}")
+    if save_to_hf_hub:
+        if hf_hub_dataset_name == "":
+            dataset_name = f"{env}--{model}--results"
+        else:
+            dataset_name = hf_hub_dataset_name
+        vf_env.make_dataset(results, push_to_hub=True, hub_name=dataset_name)
+
+    # Always write an HTML report under environments/<env>/reports/
+    try:
+        # Determine environment directory under ./environments if present; otherwise fall back to module file path
+        module_name = env.replace("-", "_")
+        local_env_dir = Path("./environments") / module_name
+        if local_env_dir.exists():
+            env_module_file = local_env_dir / f"{module_name}.py"
+        else:
+            mod = importlib.import_module(module_name)
+            module_file_str = getattr(mod, "__file__", None)
+            if not module_file_str:
+                raise RuntimeError("Cannot determine environment module file path")
+            env_module_file = Path(module_file_str)
+
+        meta = ReportMeta(
+            env_id=env,
+            env_version=get_env_version(module_name),
+            model=model,
+            num_examples=num_examples,
+            rollouts_per_example=rollouts_per_example,
+            api_base_url=api_base_url,
+            sampling_args=sampling_args,
+            env_args=env_args,
+        )
+        out_path = write_report(
+            env_module_file=env_module_file, meta=meta, results=results
+        )
+        print(f"Saved HTML report to {out_path}")
+        # Update README reports block with sanitized content
+        update_readme_reports_section(env_module_file=env_module_file)
+    except Exception as e:
+        print(f"Failed to write HTML report: {e}")
 
 
 def main():
@@ -32,7 +169,7 @@ def main():
         "--endpoints-path",
         "-e",
         type=str,
-        default="./endpoints.py",
+        default="./configs/endpoints.py",
         help="Path to API endpoints registry",
     )
     parser.add_argument(
@@ -98,7 +235,7 @@ def main():
         "--save-path",
         "-p",
         type=str,
-        default="results.jsonl",
+        default="results",
         help="Path to save dataset",
     )
     parser.add_argument(
@@ -117,81 +254,23 @@ def main():
     )
     args = parser.parse_args()
 
-    try:
-        endpoints_path = Path(args.endpoints_path)
-        if endpoints_path.exists():
-            spec = importlib.util.spec_from_file_location("endpoints", endpoints_path)
-            assert spec and spec.loader
-            endpoints_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(endpoints_module)
-            ENDPOINTS = endpoints_module.ENDPOINTS
-        else:
-            raise ImportError(f"endpoints.py not found in {current_dir}")
-    except (ImportError, AttributeError):
-        print(
-            f"No local endpoint registry found at {current_dir}/endpoints.py. \
-Please run `uv run vf-local` to create a local workspace, \
-or specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
-        )
-        ENDPOINTS = {}
-
-    if args.model in ENDPOINTS:
-        args.api_key_var = ENDPOINTS[args.model]["key"]
-        args.api_base_url = ENDPOINTS[args.model]["url"]
-        args.model = ENDPOINTS[args.model]["model"]
-
-    client = OpenAI(
-        api_key=os.getenv(args.api_key_var, "EMPTY"), base_url=args.api_base_url
-    )
-    vf_env = vf.load_environment(env_id=args.env, **args.env_args)
-    sampling_args = {
-        "max_tokens": args.max_tokens,
-        "temperature": args.temperature,
-    }
-    results = vf_env.evaluate(
-        client=client,
+    eval_environment(
+        env=args.env,
+        env_args=args.env_args,
+        endpoints_path=args.endpoints_path,
         model=args.model,
-        sampling_args=sampling_args,
+        api_key_var=args.api_key_var,
+        api_base_url=args.api_base_url,
         num_examples=args.num_examples,
         rollouts_per_example=args.rollouts_per_example,
         max_concurrent_requests=args.max_concurrent_requests,
+        max_tokens=args.max_tokens,
+        temperature=args.temperature,
+        save_dataset=args.save_dataset,
+        save_path=args.save_path,
+        save_to_hf_hub=args.save_to_hf_hub,
+        hf_hub_dataset_name=args.hf_hub_dataset_name,
     )
-    scoring_func_names = vf_env.rubric.get_reward_func_names() + ["reward"]
-    rewards = {k: v for k, v in results.items() if k in scoring_func_names}
-    print("--- Evaluation ---")
-    print(f"Environment: {args.env}")
-    print(f"Model: {args.model}")
-    print(f"Provider: {args.api_base_url}")
-    print(f"Examples: {args.num_examples}")
-    print(f"Rollouts per example: {args.rollouts_per_example}")
-
-    print("--- Example ---")
-    vf.print_prompt_completions_sample(
-        results["prompt"], results["completion"], rewards, step=0
-    )
-    print("--- All ---")
-    print("Rewards:")
-    for k in scoring_func_names:
-        if k in results:
-            v = results[k]
-            print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
-            n = args.num_examples
-            r = args.rollouts_per_example
-            for i in range(r):
-                # rounded to 3 decimal places
-                trials = [round(v[(i * r) + j], 3) for j in range(n)]
-                out = f"r{i + 1}: {trials}"
-                print(out)
-    if args.save_dataset:
-        dataset = vf_env.make_dataset(results)
-        dataset.save_to_disk(args.save_path)
-        print(f"Saved dataset to {args.save_path}")
-    if args.save_to_hf_hub:
-        if args.hf_hub_dataset_name == "":
-            dataset_name = f"{args.env}--{args.model}--results"
-        else:
-            dataset_name = args.hf_hub_dataset_name
-        vf_env.make_dataset(results, push_to_hub=True, hub_name=dataset_name)
 
 
 if __name__ == "__main__":

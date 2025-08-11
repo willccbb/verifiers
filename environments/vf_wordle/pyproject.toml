@@ -1,0 +1,15 @@
+[project]
+name = "vf-wordle"
+version = "0.1.0"
+dependencies = [
+    "verifiers>=0.1.2",
+    "nltk",
+    "textarena",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["vf_wordle.py"]
