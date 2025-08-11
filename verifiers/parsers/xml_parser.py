@@ -1,6 +1,6 @@
 import re
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable
 
 from verifiers.parsers.parser import Parser
 from verifiers.types import ChatMessage, Messages
@@ -9,7 +9,7 @@ from verifiers.types import ChatMessage, Messages
 class XMLParser(Parser):
     def __init__(
         self,
-        fields: List[Union[str, Tuple[str, ...]]],
+        fields: list[str | tuple[str, ...]],
         answer_field: str = "answer",
     ):
         """
@@ -23,9 +23,9 @@ class XMLParser(Parser):
 
         The schema is assumed to have no duplicate names.
         """
-        self._fields: List[
-            Tuple[str, List[str]]
-        ] = []  # List of (canonical, [alternatives])
+        # list of (canonical, [alternatives])
+        self._fields: list[tuple[str, list[str]]] = []
+
         self.answer_field = answer_field
         seen = set()
         for field in fields:
@@ -60,7 +60,7 @@ class XMLParser(Parser):
             `result.code` and `result.answer` are always accessible. If a tag is not
             found in the XML, its corresponding attribute is set to None.
         """
-        results: Dict[str, Optional[str]] = {}
+        results: dict[str, str | None] = {}
         for canonical, alternatives in self._fields:
             # For each allowed alternative tag, search independently.
             for alt in alternatives:
@@ -122,7 +122,7 @@ class XMLParser(Parser):
         - Fields have proper content and spacing
         """
 
-        def format_reward_func(completion: List[ChatMessage]):
+        def format_reward_func(completion: list[ChatMessage]):
             """Reward function that checks if each step follows the expected format."""
             model_messages = self.get_assistant_messages(completion)
             if not model_messages:
@@ -225,7 +225,7 @@ class XMLParser(Parser):
 
         return format_reward_func
 
-    def get_fields(self) -> List[str]:
+    def get_fields(self) -> list[str]:
         """Return a list of the canonical field names (in order)."""
         return [canonical for canonical, _ in self._fields]
 

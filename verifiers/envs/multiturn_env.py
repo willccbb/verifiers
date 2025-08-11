@@ -1,6 +1,5 @@
 from abc import abstractmethod
 from copy import deepcopy
-from typing import Tuple
 
 from openai import AsyncOpenAI
 
@@ -35,7 +34,7 @@ class MultiTurnEnv(Environment):
     @abstractmethod
     def env_response(
         self, messages: Messages, state: State, **kwargs
-    ) -> Tuple[Messages, State]:
+    ) -> tuple[Messages, State]:
         """
         Generate a response from the environment (messages, state).
         """
@@ -48,13 +47,14 @@ class MultiTurnEnv(Environment):
         prompt: Messages,
         answer: str = "",
         task: str = "default",
-        info: Info = {},
-        sampling_args: SamplingArgs = {},
+        info: Info | None = None,
+        sampling_args: SamplingArgs | None = None,
         **kwargs,
-    ) -> Tuple[Messages, State]:
+    ) -> tuple[Messages, State]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
+        info = info or {}
         is_completed = False
         state = {
             "prompt": prompt,
