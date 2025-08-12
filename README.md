@@ -52,6 +52,30 @@ uv run pre-commit install
 
 In general, we recommend that you build and train Environments *with* `verifiers`, not *in* `verifiers`. If you find yourself needing to clone and modify the core library in order to implement key functionality for your project, we'd love for you to open an issue so that we can try and streamline the development experience. Our aim is for `verifiers` to be a reliable toolkit to build on top of, and to minimize the "fork proliferation" which often pervades the RL infrastructure ecosystem.
 
+## Prime-RL Usage
+
+You can train `verifiers` Environments using the external `prime-rl` project, which provides an FSDP-first trainer, a coordinating orchestrator, and an inference server, all configurable via TOML/CLI.
+
+- Install `prime-rl` following its README.
+- Ensure your Environment is available to `prime-rl` (e.g., `uv run vf-install vf-math-python --from-repo`).
+- In your `prime-rl` orchestrator config, set:
+
+```toml
+[environment]
+id = "vf-math-python"  # or your custom environment ID
+```
+
+- Launch a run with:
+
+```bash
+uv run rl \
+  --trainer @ configs/your_exp/train.toml \
+  --orchestrator @ configs/your_exp/orch.toml \
+  --inference @ configs/your_exp/infer.toml
+```
+
+See the `prime-rl` repository for full configuration and operational details.
+
 ## Environments
 
 Environments in Verifiers are installable Python modules which can specify dependencies in a `pyproject.toml`, and which expose a `load_environment` function for instantiation by downstream applications (e.g. trainers). See `environments/` for examples. 
@@ -60,7 +84,7 @@ To initialize a blank Environment module template, do:
 ```bash
 vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
 ```
-We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies, and we prepend it by fault if it is not present, though you can pass `--skip-vf-prefix` to override. Names are auto-standardized to use `"-"` in IDs and `"_"` in paths.
+We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies, and we prepend it by fault if it is not present, though you can pass `--skip-vf-prefix` to override. Names are auto-standardized to use "-" in IDs and "_" in paths.
 
 To an install an Environment module into your project, do:
 ```bash
@@ -106,9 +130,11 @@ dataset = load_dataset("my-account/my-dataset", split="train")
 def reward_A(prompt, completion, info) -> float:
 	# reward fn, e.g. correctness
 	...
+
 def reward_B(parser, completion) -> float:
 	# auxiliary reward fn, e.g. format
 	...
+
 def metric(completion) -> float:
 	# non-reward metric, e.g. proper noun count
 	...

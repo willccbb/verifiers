@@ -15,6 +15,67 @@ The included `GRPOTrainer` supports GRPO-style training via Accelerate/DeepSpeed
 - Full-parameter finetuning
 - Experimentation and prototyping
 
+## Training with PRIME-RL
+
+Below is a minimal workflow for running RL on a `verifiers` Environment using `prime-rl`.
+
+- Install `prime-rl` (see its README for CUDA requirements):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/PrimeIntellect-ai/prime-rl/main/scripts/install.sh | bash
+```
+
+- Create or install a Verifiers Environment module (inside your `prime-rl` checkout if developing there):
+
+```bash
+# create a new Environment template
+uv run vf-init vf-custom-environment
+
+# OR install an existing Environment from this repo
+uv run vf-install vf-math-python --from-repo
+```
+
+- Configure the orchestrator to use your Environment. In your orchestrator TOML (e.g. `configs/my_exp/orch.toml`):
+
+```toml
+[environment]
+id = "vf-math-python"  # or your custom environment ID
+
+[environment.args]
+# Example args forwarded to the Environment
+split = "train"
+rollouts_per_example = 8
+max_concurrent = 512
+```
+
+- Launch a single-node run (adjust GPU split to your hardware):
+
+```bash
+uv run rl \
+  --trainer @ configs/my_exp/train.toml \
+  --orchestrator @ configs/my_exp/orch.toml \
+  --inference @ configs/my_exp/infer.toml \
+  --trainer-gpus 2 --inference-gpus 6
+```
+
+Tips:
+- Use `bash scripts/tmux.sh` in `prime-rl` to open a panes layout for trainer/orchestrator/inference logs.
+- Log to W&B by adding `--wandb.project <proj> --wandb.name <run>` on `uv run rl` (shared to trainer + orchestrator).
+- For checkpointing/resume, see the `prime-rl` README (supports step-tagged checkpoints across trainer/orchestrator).
+
+### Trainer comparison: PRIME-RL vs GRPOTrainer
+
+- Similarities
+  - Both consume `verifiers` Environments via OpenAI-compatible inference (vLLM) and support async rollouts.
+  - One-step off-policy overlap by default (generate at step n-1 while training at step n).
+  - W&B logging, dataset/eval integration through Environments.
+
+- Differences
+  - PRIME-RL: FSDP-first trainer with a separate orchestrator and an inference server; uses an `rl` entrypoint to coordinate modules; strong asynchrony and checkpoint orchestration; extensive CLI/TOML configuration; optimized for multi-GPU throughput.
+  - GRPOTrainer: Accelerate/DeepSpeed-based trainer in-process; optional LoRA/PEFT support; simpler to script for small-to-mid setups; async via buffered batch generation within the trainer; good for rapid prototyping.
+
+Use PRIME-RL when you want scalable FSDP training, stronger orchestration, and higher throughput; use `GRPOTrainer` when you need LoRA or a lightweight training loop inside your existing Python scripts.
+
 ## Quick Start
 
 ```python
@@ -237,7 +298,6 @@ RL is notoriously sensitive to implementation details. Here's practical guidance
 - Ensure your rubric differentiates quality levels
 
 ### Infrastructure
-
 - Set `OPENAI_API_KEY` (can be dummy for vLLM)
 - Increase ulimit for high concurrency: `ulimit -n 4096`
 - For NCCL issues: try `NCCL_P2P_DISABLE=1`
