@@ -330,18 +330,6 @@ Tips:
 - Log to W&B by adding `--wandb.project <proj> --wandb.name <run>` on `uv run rl` (shared to trainer + orchestrator).
 - For checkpointing/resume, see the `prime-rl` README (supports step-tagged checkpoints across trainer/orchestrator).
 
-### Trainer comparison: PRIME-RL vs GRPOTrainer
-
-- Similarities
-  - Both consume `verifiers` Environments via OpenAI-compatible inference (vLLM) and support async rollouts.
-  - One-step off-policy overlap by default (generate at step n-1 while training at step n).
-  - W&B logging, dataset/eval integration through Environments.
-
-- Differences
-  - PRIME-RL: FSDP-first trainer with a separate orchestrator and an inference server; uses an `rl` entrypoint to coordinate modules; strong asynchrony and checkpoint orchestration; extensive CLI/TOML configuration; optimized for multi-GPU throughput.
-  - GRPOTrainer: Accelerate/DeepSpeed-based trainer in-process; optional LoRA/PEFT support; simpler to script for small-to-mid setups; async via buffered batch generation within the trainer; good for rapid prototyping.
-
-Use PRIME-RL when you want scalable FSDP training, stronger orchestration, and higher throughput; use `GRPOTrainer` when you need LoRA or a lightweight training loop inside your existing Python scripts.
 
 ## Next Steps
 
