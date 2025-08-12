@@ -12,7 +12,7 @@ Environments for LLM Reinforcement Learning
 
 ## Overview
 
-Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer and can be integrated into any RL framework that exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
+Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
 
 Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
 
@@ -52,7 +52,6 @@ uv run pre-commit install
 
 In general, we recommend that you build and train Environments *with* `verifiers`, not *in* `verifiers`. If you find yourself needing to clone and modify the core library in order to implement key functionality for your project, we'd love for you to open an issue so that we can try and streamline the development experience. Our aim is for `verifiers` to be a reliable toolkit to build on top of, and to minimize the "fork proliferation" which often pervades the RL infrastructure ecosystem.
 
-
 ## Environments
 
 Environments in Verifiers are installable Python modules which can specify dependencies in a `pyproject.toml`, and which expose a `load_environment` function for instantiation by downstream applications (e.g. trainers). See `environments/` for examples. 
@@ -61,7 +60,6 @@ To initialize a blank Environment module template, do:
 ```bash
 vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
 ```
-We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies. The prefix is optional and not added automatically. Names are auto-standardized to use "-" in IDs and "_" in paths.
 
 To an install an Environment module into your project, do:
 ```bash
@@ -227,6 +225,7 @@ uv run rl \
   --orchestrator @ configs/your_exp/orch.toml \
   --inference @ configs/your_exp/infer.toml
 ```
+
 ### Troubleshooting 
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - If using high max concurrency, increase the number of allowed open sockets (e.g. `ulimit -n 4096`)
