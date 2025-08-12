@@ -769,6 +769,9 @@ class Environment(ABC):
             rewards=all_rewards,
         )
 
+    # alias for process_env_results_vllm
+    process_env_results = process_env_results_vllm
+
     # Evaluation and dataset generation
     def evaluate(
         self,
