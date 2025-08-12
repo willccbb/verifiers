@@ -99,7 +99,7 @@ def init_environment(
     Initialize a new verifiers environment.
 
     Args:
-        env: The environment id to init ('vf-' prefix is optional but recommended)
+        env: The environment id to init
         path: Path to environments directory (default: ./environments)
 
     Returns:
@@ -151,7 +151,7 @@ def main():
         "env",
         type=str,
         help=(
-            "The environment id to init ('vf-' prefix is optional but recommended)"
+            "The environment id to init"
         ),
     )
     parser.add_argument(
