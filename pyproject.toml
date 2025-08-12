@@ -71,7 +71,7 @@ dev = [
 docs = [
     "sphinx",
     "myst-parser",
-    "sphinx-rtd-theme"
+    "furo"
 ]
 
 train = [

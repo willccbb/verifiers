@@ -61,11 +61,11 @@ group = vf.RubricGroup([
     efficiency_rubric    # Weight: 1.0
 ])
 
-# With custom weights
-group = vf.RubricGroup(
-    rubrics=[correctness_rubric, style_rubric],
-    weights=[2.0, 1.0]  # Correctness counts twice as much
-)
+# With custom weights: set weights inside each Rubric, then group them
+correctness = vf.Rubric(funcs=[check_answer], weights=[2.0])
+style = vf.Rubric(funcs=[style_score], weights=[1.0])
+
+group = vf.RubricGroup([correctness, style])
 ```
 
 **Example: Multi-Criteria Code Evaluation**
@@ -147,7 +147,7 @@ def load_environment(**kwargs):
     )
 ```
 
-**Important**: ToolEnv uses the model's native tool calling format via the tokenizer's chat template. It does NOT impose any specific XML structure or require hardcoded patterns.
+**Important**: ToolEnv uses the model's native tool calling format via the tokenizer's chat template. It automatically injects tool schemas into request payloads and treats `role: tool` messages as tool outputs. It does NOT impose any XML structure or require hardcoded patterns.
 
 ### Tool Design Best Practices
 
@@ -219,14 +219,16 @@ Parsers extract structured information from model outputs. While many tasks work
 Extract XML-tagged content:
 
 ```python
+# Define which tags are expected in the output
+# Strings define fixed tags; tuples define canonical name + allowed aliases
 parser = vf.XMLParser(
-    extract_tag="answer",  # Extracts <answer>...</answer>
-    #prefix_tag="thinking"  # Can also extract prefix content
+    fields=["think", ("answer", "final", "result")],
+    answer_field="answer",
 )
 
 # In practice
-response = "<thinking>Let me calculate...</thinking>\n<answer>42</answer>"
-answer = parser.parse_answer(response)  # Returns: "42"
+response = "<think>Let me calculate...</think>\n<answer>42</answer>"
+answer = parser.parse_answer(response)  # => "42"
 ```
 
 #### ThinkParser
@@ -234,16 +236,12 @@ answer = parser.parse_answer(response)  # Returns: "42"
 Separate reasoning from final answers:
 
 ```python
-parser = vf.ThinkParser(
-    answer_prefix="Therefore:",  # Default prefix
-    extract_fn=None  # Optional custom extraction
-)
+# Strip any content before </think>, then apply extract_fn
 
-# Custom extraction
-def extract_number(text):
+def extract_number(text: str) -> str:
     import re
-    match = re.search(r'[-+]?\d*\.?\d+', text)
-    return match.group() if match else ""
+    m = re.search(r"[-+]?\d*\.?\d+", text)
+    return m.group() if m else ""
 
 parser = vf.ThinkParser(extract_fn=extract_number)
 ```

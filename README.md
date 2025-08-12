@@ -137,9 +137,11 @@ The following named attributes available for use by reward functions in your Rub
 - `state`: can be modified during rollout to accumulate any metadata (`state['responses']` includes full OpenAI response objects by default)
 - `info`: auxiliary info needed for reward computation (e.g. test cases), optional if `answer` is used
 - `task`: tag for task type (used by `EnvGroup` and `RubricGroup`)
-- `parser`: the parser object declared, defaults to `vf.Parser()`
+- `parser`: the parser object declared. Note: `vf.Parser().get_format_reward_func()` is a no-op (always 1.0); use `vf.ThinkParser` or a custom parser if you want a real format adherence reward.
 
 For tasks involving LLM judges, you may wish to use `vf.JudgeRubric()` for managing requests to auxiliary models.
+
+Note on concurrency: environment APIs accept `max_concurrent` to control parallel rollouts. The `vf-eval` CLI currently exposes `--max-concurrent-requests`; ensure this maps to your environment’s concurrency as expected.
 
 ### ToolEnv
 
