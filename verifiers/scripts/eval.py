@@ -13,7 +13,7 @@ import verifiers as vf
 from verifiers.utils.report_utils import (
     ReportMeta,
     get_env_version,
-    write_report,
+    write_html_report,
 )
 
 current_dir = Path.cwd()
@@ -33,6 +33,7 @@ def eval_environment(
     max_concurrent_requests: int,
     max_tokens: int,
     temperature: float,
+    write_report: bool,
     save_dataset: bool,
     save_path: str,
     save_to_hf_hub: bool,
@@ -118,36 +119,33 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             dataset_name = hf_hub_dataset_name
         vf_env.make_dataset(results, push_to_hub=True, hub_name=dataset_name)
 
-    # Always write an HTML report under environments/<env>/reports/
-    try:
-        # Determine environment directory under ./environments if present; otherwise fall back to module file path
-        module_name = env.replace("-", "_")
-        local_env_dir = Path("./environments") / module_name
-        if local_env_dir.exists():
-            env_module_file = local_env_dir / f"{module_name}.py"
-        else:
-            mod = importlib.import_module(module_name)
-            module_file_str = getattr(mod, "__file__", None)
-            if not module_file_str:
-                raise RuntimeError("Cannot determine environment module file path")
-            env_module_file = Path(module_file_str)
+    if write_report:
+        try:
+            # Determine environment directory under ./environments if present; otherwise fall back to cwd
+            # module file path
+            module_name = env.replace("-", "_")
+            local_env_dir = Path("./environments") / module_name
+            if local_env_dir.exists():
+                report_dir = local_env_dir / "reports"
+            else:
+                report_dir = Path("./reports")
 
-        meta = ReportMeta(
-            env_id=env,
-            env_version=get_env_version(module_name),
-            model=model,
-            num_examples=num_examples,
-            rollouts_per_example=rollouts_per_example,
-            api_base_url=api_base_url,
-            sampling_args=sampling_args,
-            env_args=env_args,
-        )
-        out_path = write_report(
-            env_module_file=env_module_file, meta=meta, results=results
-        )
-        print(f"Saved HTML report to {out_path}")
-    except Exception as e:
-        print(f"Failed to write HTML report: {e}")
+            meta = ReportMeta(
+                env_id=env,
+                env_version=get_env_version(module_name),
+                model=model,
+                num_examples=num_examples,
+                rollouts_per_example=rollouts_per_example,
+                api_base_url=api_base_url,
+                sampling_args=sampling_args,
+                env_args=env_args,
+            )
+            out_path = write_html_report(
+                report_dir=report_dir, meta=meta, results=results
+            )
+            print(f"Saved HTML report to {out_path}")
+        except Exception as e:
+            print(f"Failed to write HTML report: {e}")
 
 
 def main():
@@ -222,6 +220,13 @@ def main():
         "--temperature", "-T", type=float, default=0.7, help="Temperature for sampling"
     )
     parser.add_argument(
+        "--write-report",
+        "-w",
+        default=False,
+        action="store_true",
+        help="Write HTML report",
+    )
+    parser.add_argument(
         "--save-dataset",
         "-s",
         default=False,
@@ -263,6 +268,7 @@ def main():
         max_concurrent_requests=args.max_concurrent_requests,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
+        write_report=args.write_report,
         save_dataset=args.save_dataset,
         save_path=args.save_path,
         save_to_hf_hub=args.save_to_hf_hub,
