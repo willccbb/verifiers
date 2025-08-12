@@ -494,6 +494,8 @@ class GRPOTrainer(Trainer):
         self._metrics = {"train": defaultdict(list), "eval": defaultdict(list)}
         self._total_train_tokens = 0
         self.log_completions = args.log_completions
+        self.log_completion_turns = args.log_completion_turns
+        self.max_completion_turns_to_log = args.max_completion_turns_to_log
         self.wandb_log_unique_prompts = args.wandb_log_unique_prompts
         self.num_completions_to_print = args.num_completions_to_print
 
@@ -512,6 +514,7 @@ class GRPOTrainer(Trainer):
             "prompt": deque(maxlen=maxlen),
             "completion": deque(maxlen=maxlen),
             "rewards": defaultdict(lambda: deque(maxlen=maxlen)),
+            "completion_turns": deque(maxlen=maxlen) if self.log_completion_turns else None,
         }
 
         # OpenAI client for Environment generation (using vLLM server)
@@ -1306,6 +1309,61 @@ class GRPOTrainer(Trainer):
                 msg.pop("tool_call_id")
         return completion
 
+    def _extract_completion_turns(
+        self,
+        completion: list[dict[str, Any]] | str,
+        prompt: list[dict[str, Any]] | str,
+    ) -> list[dict[str, Any]]:
+        """
+        Extract individual turns from a multi-turn completion for detailed logging.
+        
+        Args:
+            completion: The completion (chat messages or string)
+            prompt: The original prompt
+            
+        Returns:
+            List of turn dictionaries with turn_number, content, role, etc.
+        """
+        turns = []
+        
+        if isinstance(completion, str):
+            # For single-turn string completions
+            turns.append({
+                "turn_number": 1,
+                "role": "assistant", 
+                "content": completion,
+                "length": len(completion.split()),
+                "is_final": True
+            })
+        elif isinstance(completion, list):
+            # For multi-turn chat completions
+            assistant_turns = [msg for msg in completion if msg.get("role") == "assistant"]
+            
+            for i, turn in enumerate(assistant_turns):
+                turn_data = {
+                    "turn_number": i + 1,
+                    "role": turn.get("role", "assistant"),
+                    "content": turn.get("content", ""),
+                    "length": len(str(turn.get("content", "")).split()),
+                    "is_final": i == len(assistant_turns) - 1
+                }
+                
+                # Add tool call information if present
+                if "tool_calls" in turn:
+                    turn_data["has_tool_calls"] = True
+                    turn_data["num_tool_calls"] = len(turn["tool_calls"])
+                else:
+                    turn_data["has_tool_calls"] = False
+                    turn_data["num_tool_calls"] = 0
+                    
+                turns.append(turn_data)
+                
+        # Limit the number of turns if specified
+        if self.max_completion_turns_to_log is not None:
+            turns = turns[:self.max_completion_turns_to_log]
+            
+        return turns
+
     def evaluate(
         self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval", **kwargs
     ):
@@ -1487,9 +1545,44 @@ class GRPOTrainer(Trainer):
                         df = df.drop_duplicates(subset=["prompt"])
                     wandb.log({"completions": wandb.Table(dataframe=df)})
 
+            # Log completion turns if enabled
+            if (
+                self.log_completion_turns 
+                and self._textual_logs["completion_turns"] is not None
+                and len(self._textual_logs["completion_turns"]) > 0
+                and self.args.report_to
+                and "wandb" in self.args.report_to
+                and wandb.run is not None
+            ):
+                import pandas as pd
+                
+                # Flatten completion turns data for W&B table
+                turns_data = []
+                for conversation in self._textual_logs["completion_turns"]:
+                    conversation_id = conversation["prompt_id"]
+                    for turn in conversation["turns"]:
+                        turns_data.append({
+                            "step": self.state.global_step,
+                            "conversation_id": conversation_id,
+                            "turn_number": turn["turn_number"],
+                            "role": turn["role"],
+                            "content": turn["content"],
+                            "length": turn["length"],
+                            "is_final": turn["is_final"],
+                            "has_tool_calls": turn.get("has_tool_calls", False),
+                            "num_tool_calls": turn.get("num_tool_calls", 0),
+                            "total_turns": conversation["total_turns"]
+                        })
+                
+                if turns_data:
+                    turns_df = pd.DataFrame(turns_data)
+                    wandb.log({"completion_turns": wandb.Table(dataframe=turns_df)})
+
             # Clear the textual logs after logging
             self._textual_logs["prompt"].clear()
             self._textual_logs["completion"].clear()
+            if self._textual_logs["completion_turns"] is not None:
+                self._textual_logs["completion_turns"].clear()
             for key in self._textual_logs["rewards"]:
                 self._textual_logs["rewards"][key].clear()
 
@@ -1535,6 +1628,18 @@ class GRPOTrainer(Trainer):
         """
         self._textual_logs["prompt"].extend(all_prompts)
         self._textual_logs["completion"].extend(all_completions)
+
+        # Extract and log completion turns if enabled
+        if self.log_completion_turns and self._textual_logs["completion_turns"] is not None:
+            completion_turns_batch = []
+            for prompt, completion in zip(all_prompts, all_completions):
+                turns = self._extract_completion_turns(completion, prompt)
+                completion_turns_batch.append({
+                    "prompt_id": len(completion_turns_batch),
+                    "total_turns": len(turns),
+                    "turns": turns
+                })
+            self._textual_logs["completion_turns"].extend(completion_turns_batch)
 
         # Log all reward scores - both individual functions and consolidated
         for reward_key in all_reward_dict:

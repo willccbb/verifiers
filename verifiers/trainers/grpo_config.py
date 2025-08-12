@@ -328,6 +328,19 @@ class GRPOConfig(TrainingArguments):
             "help": "Number of completions to print with `rich`. If `None`, all completions are logged."
         },
     )
+    log_completion_turns: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to log individual completion turns for multi-turn environments to W&B. "
+            "This provides turn-by-turn visibility into multi-turn conversations and their progression."
+        },
+    )
+    max_completion_turns_to_log: Optional[int] = field(
+        default=10,
+        metadata={
+            "help": "Maximum number of completion turns to log per conversation. If `None`, all turns are logged."
+        },
+    )
     wandb_log_unique_prompts: Optional[bool] = field(
         default=False,
         metadata={
