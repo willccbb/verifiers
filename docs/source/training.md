@@ -2,9 +2,9 @@
 
 This guide covers training models with Verifiers using GRPO (Group Relative Policy Optimization).
 
-## Choosing a trainer
+## Training options
 
-There are two paths: the built-in `GRPOTrainer` (in-process) and the external `prime-rl` runner (orchestrated).
+You can train with the built-in `GRPOTrainer` (in-process) or with the external `prime-rl` runner (orchestrated).
 
 - Use `GRPOTrainer` when you want a lightweight Python training loop, LoRA/PEFT support, or small-to-mid scale runs (2–16 GPUs) using Accelerate/DeepSpeed.
 - Use `prime-rl` when you want an FSDP-first, higher-throughput setup with separate trainer/orchestrator/inference processes and richer orchestration.
