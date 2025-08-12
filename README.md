@@ -12,7 +12,7 @@ Environments for LLM Reinforcement Learning
 
 ## Overview
 
-Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
+Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer and can be integrated into any RL framework that exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
 
 Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
 
@@ -212,7 +212,7 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wordle.py --size 1.7B
 ```
 
-Alternative: You can also train `verifiers` Environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. Minimal flow:
+Alternative: You can also train environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. For example:
 
 ```toml
 # orchestrator config (prime-rl)
