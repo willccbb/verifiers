@@ -50,7 +50,9 @@ class DummyEnvironment(Environment):
         return completion, state
 
 
-def _make_env(mock_openai_client, dataset: Dataset | None = None, **kwargs) -> DummyEnvironment:
+def _make_env(
+    mock_openai_client, dataset: Dataset | None = None, **kwargs
+) -> DummyEnvironment:
     ds = dataset or Dataset.from_dict({"question": ["q1"], "answer": ["a1"]})
     return DummyEnvironment(
         client=mock_openai_client,
@@ -116,13 +118,15 @@ def test_run_rollouts_with_semaphore(mock_openai_client):
     assert len(results) == 3
 
 
-def test_process_env_results_zero_truncated_reward(mock_openai_client):
+def test_process_env_results_zero_truncated_reward_vllm(mock_openai_client):
     print("begin_zero_truncated")
     # Use pre-formatted dataset to avoid map/progress side effects in test
-    ds = Dataset.from_dict({
-        "prompt": [[{"role": "user", "content": "q"}]],
-        "answer": ["a"],
-    })
+    ds = Dataset.from_dict(
+        {
+            "prompt": [[{"role": "user", "content": "q"}]],
+            "answer": ["a"],
+        }
+    )
     env = _make_env(mock_openai_client, dataset=ds)
 
     # Mock tokenizer: encode maps length to token list
@@ -132,10 +136,18 @@ def test_process_env_results_zero_truncated_reward(mock_openai_client):
 
     prompts = ["Hello!"]  # 6 tokens
     completions = ["World!!!"]  # 8 tokens
-    states = [{}]
+    # Minimal vLLM-style completion response covering entire completion text
+    mock_choice = type("C", (), {})()
+    mock_choice.text = completions[0]
+    mock_choice.logprobs = type("LP", (), {})()
+    mock_choice.logprobs.tokens = ["token_id:1"] * len(completions[0])
+    mock_choice.logprobs.token_logprobs = [-0.1] * len(completions[0])
+    mock_completion = type("R", (), {})()
+    mock_completion.choices = [mock_choice]
+    states = [{"responses": [mock_completion], "responses_start_idx": [0]}]
     rewards = [1.0]
 
-    out = env.process_env_results(
+    out = env.process_env_results_vllm(
         prompts,
         completions,
         states,
@@ -173,22 +185,32 @@ def test_evaluate_fallback_and_repeat(mock_openai_client):
 async def test_generate_inside_running_loop(mock_openai_client):
     env = _make_env(mock_openai_client)
     inputs = {"prompt": [[{"role": "user", "content": "Hi"}]], "answer": [""]}
-    # Call sync wrapper from within an async test; branch uses nest_asyncio
-    out = env.generate(inputs, client=env.client)
+    # Call the async API directly inside a running event loop to avoid nested sync wrapper issues
+    out = await env.a_generate(inputs, client=env.client)
     assert hasattr(out, "completion") and len(out.completion) == 1
 
 
 def test_sanitize_tool_calls_outputs_strings(mock_openai_client):
     env = _make_env(mock_openai_client)
+
     # Use a lightweight object with model_dump to mimic OAI tool call
     class ToolCall:
         def __init__(self, name: str, args: str):
             self.function = type("F", (), {"name": name, "arguments": args})()
 
         def model_dump(self):
-            return {"id": "x", "type": "function", "function": {"name": self.function.name, "arguments": self.function.arguments}}
+            return {
+                "id": "x",
+                "type": "function",
+                "function": {
+                    "name": self.function.name,
+                    "arguments": self.function.arguments,
+                },
+            }
 
-    msgs = [[{"role": "assistant", "content": "", "tool_calls": [ToolCall("echo", "{}")]}]]
+    msgs = [
+        [{"role": "assistant", "content": "", "tool_calls": [ToolCall("echo", "{}")]}]
+    ]
     sanitized = env._sanitize_tool_calls(msgs[0])
     assert isinstance(sanitized[0]["tool_calls"][0], str)
 
@@ -209,12 +231,14 @@ def test_make_dataset_basic_without_tools(mock_openai_client):
     assert len(ds) == 1 and "foo" in ds.column_names
 
 
-def test_truncation_masks_completion_format(mock_openai_client):
+def test_truncation_masks_completion_format_vllm(mock_openai_client):
     # Duplicate of zero_truncated test under a different name to avoid any runner quirk
-    ds = Dataset.from_dict({
-        "prompt": [[{"role": "user", "content": "q"}]],
-        "answer": ["a"],
-    })
+    ds = Dataset.from_dict(
+        {
+            "prompt": [[{"role": "user", "content": "q"}]],
+            "answer": ["a"],
+        }
+    )
     env = _make_env(mock_openai_client, dataset=ds)
 
     class Tok:
@@ -223,10 +247,18 @@ def test_truncation_masks_completion_format(mock_openai_client):
 
     prompts = ["Hello!"]
     completions = ["World!!!"]
-    out = env.process_env_results(
+    # Minimal vLLM-style completion response covering entire completion text
+    mock_choice2 = type("C2", (), {})()
+    mock_choice2.text = completions[0]
+    mock_choice2.logprobs = type("LP2", (), {})()
+    mock_choice2.logprobs.tokens = ["token_id:1"] * len(completions[0])
+    mock_choice2.logprobs.token_logprobs = [-0.1] * len(completions[0])
+    mock_completion2 = type("R2", (), {})()
+    mock_completion2.choices = [mock_choice2]
+    out = env.process_env_results_vllm(
         prompts,
         completions,
-        [{}],
+        [{"responses": [mock_completion2], "responses_start_idx": [0]}],
         [1.0],
         Tok(),
         max_seq_len=10,

@@ -93,14 +93,25 @@ class CodeEvalEnv(vf.MultiTurnEnv):
 
 ### ToolRubric: Tracking Tool Usage
 
-Monitor and reward appropriate tool usage:
+Count total and per-tool calls during a rollout. Pass your tool functions to enable per-tool counters. By default, counts are added as metrics with zero weight; adjust `reward_weights` if you want the counts to affect reward.
 
 ```python
-tool_rubric = vf.ToolRubric(
-    completion_reward=1.0,      # Reward for task completion
-    efficiency_reward=0.2,      # Penalty for excessive tool calls
-    tool_failure_penalty=-0.1   # Penalty for failed tool calls
-)
+# Define tools (type hints + docstrings omitted for brevity)
+def calculate(expr: str) -> float: ...
+def search_web(query: str, max_results: int = 5) -> list[dict]: ...
+
+# Initialize with tools to track
+tool_rubric = vf.ToolRubric(tools=[calculate, search_web])
+
+# Metrics exposed (names):
+# - total_tool_calls
+# - calculate_calls
+# - search_web_calls
+
+# Optional: turn counts into rewards by setting weights
+# Index 0 corresponds to total_tool_calls; subsequent indices follow the tools order
+tool_rubric.reward_weights[0] = -0.1   # penalize excessive tool calls
+tool_rubric.reward_weights[2] = 0.2    # reward using search_web specifically
 ```
 
 ## Tools
