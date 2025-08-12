@@ -13,7 +13,6 @@ import verifiers as vf
 from verifiers.utils.report_utils import (
     ReportMeta,
     get_env_version,
-    update_readme_reports_section,
     write_report,
 )
 
@@ -147,8 +146,6 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             env_module_file=env_module_file, meta=meta, results=results
         )
         print(f"Saved HTML report to {out_path}")
-        # Update README reports block with sanitized content
-        update_readme_reports_section(env_module_file=env_module_file)
     except Exception as e:
         print(f"Failed to write HTML report: {e}")
 
