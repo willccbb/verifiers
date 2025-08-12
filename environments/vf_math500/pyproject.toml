@@ -1,7 +1,8 @@
 [project]
 name = "vf-math500"
 description = "MATH-500 evaluation environment"
-version = "0.1.3"
+tags = ["math", "eval", "single-turn", "math-verify"]
+version = "0.1.4"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "verifiers>=0.1.2.post0",
