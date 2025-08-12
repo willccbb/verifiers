@@ -212,6 +212,21 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wordle.py --size 1.7B
 ```
 
+Alternative: You can also train `verifiers` Environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. Minimal flow:
+
+```toml
+# orchestrator config (prime-rl)
+[environment]
+id = "vf-math-python"  # or your environment ID
+```
+
+```bash
+# run (prime-rl)
+uv run rl \
+  --trainer @ configs/your_exp/train.toml \
+  --orchestrator @ configs/your_exp/orch.toml \
+  --inference @ configs/your_exp/infer.toml
+```
 ### Troubleshooting 
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - If using high max concurrency, increase the number of allowed open sockets (e.g. `ulimit -n 4096`)
