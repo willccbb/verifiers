@@ -85,9 +85,9 @@ import verifiers as vf
 
 
 def load_environment(**kwargs) -> vf.Environment:
-    \"\"\"
+    """
     Loads a custom environment.
-    \"\"\"
+    """
     raise NotImplementedError("Implement your custom environment here.")
 """
 
@@ -99,8 +99,8 @@ def init_environment(
     Initialize a new verifiers environment.
 
     Args:
-        env: The environment id to init ('vf-' prefix is optional but recommended,
-             included by default unless skip_vf_prefix is True)
+        env: The environment id to init ('vf-' prefix is optional but recommended;
+             it is added by default if missing)
         path: Path to environments directory (default: ./environments)
 
     Returns:
@@ -151,7 +151,10 @@ def main():
     parser.add_argument(
         "env",
         type=str,
-        help="The environment id to init ('vf-' prefix is optional but recommended, included by default unless --skip-vf-prefix is used)",
+        help=(
+            "The environment id to init ('vf-' prefix is optional but recommended; "
+            "it is added by default if missing)"
+        ),
     )
     parser.add_argument(
         "--path",
