@@ -26,7 +26,31 @@ The included `GRPOTrainer` supports GRPO-style training via Accelerate/DeepSpeed
 - Full-parameter finetuning
 - Experimentation and prototyping
 
-See the Quick Start below, then the remaining sections for infra, hyperparameters, and best practices.
+### Quick start
+
+```python
+import verifiers as vf
+
+# 1. Create environment
+env = vf.load_environment("math-python")
+
+# 2. Load model
+model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
+
+# 3. Configure training  
+args = vf.grpo_defaults(run_name="my-experiment")
+
+# 4. Train
+trainer = vf.GRPOTrainer(
+    model=model,
+    processing_class=tokenizer,
+    env=env,
+    args=args,
+)
+trainer.train()
+```
+
+Continue below for infrastructure setup, hyperparameters, and best practices.
 
 ## Train with PRIME-RL
 
@@ -89,7 +113,7 @@ Tips:
 
 Use PRIME-RL when you want scalable FSDP training, stronger orchestration, and higher throughput; use `GRPOTrainer` when you need LoRA or a lightweight training loop inside your existing Python scripts.
 
-## Quick Start
+
 
 ```python
 import verifiers as vf
