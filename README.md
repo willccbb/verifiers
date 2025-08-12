@@ -210,7 +210,7 @@ CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wordle.py --size 1.7B
 ```
 
-Alternative: You can also train environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. For example:
+Alternatively, you can train environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. For example:
 
 ```toml
 # orchestrator config (prime-rl)
