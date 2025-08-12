@@ -41,7 +41,7 @@ uv run vf-eval {env_id_dash} \
 
 Notes:
 - Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
-- Reports are written under `./environments/{env_id_underscore}/reports/` and auto-embedded below.
+- Reports are written under `./environments/{env_id_underscore}/reports/`.
 
 ### Environment Arguments
 Document any supported environment arguments and their meaning. Example:
@@ -59,12 +59,7 @@ Summarize key metrics your rubric emits and how they’re interpreted.
 | `reward` | Main scalar reward (weighted sum of criteria) |
 | `accuracy` | Exact match on target answer |
 
-## Evaluation Reports
 
-<!-- Do not edit below this line. Content is auto-generated. -->
-<!-- vf:begin:reports -->
-<p>No reports found. Run <code>uv run vf-eval {env_id_dash} -a '{{"key": "value"}}'</code> to generate one.</p>
-<!-- vf:end:reports -->
 """
 
 PYPROJECT_TEMPLATE = f"""\
