@@ -28,7 +28,7 @@ The included `GRPOTrainer` supports GRPO-style training via Accelerate/DeepSpeed
 
 See the Quick Start below, then the remaining sections for infra, hyperparameters, and best practices.
 
-## Train with PRIME-RL (alternative)
+## Train with PRIME-RL
 
 If you prefer an orchestrated, FSDP-first setup, you can train the same `verifiers` Environments using `prime-rl`.
 
