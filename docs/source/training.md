@@ -4,10 +4,10 @@ This guide covers training models with Verifiers using GRPO (Group Relative Poli
 
 ## Training options
 
-You can train with the built-in `GRPOTrainer` (in-process) or with the external `prime-rl` runner (orchestrated).
+You can train with the built-in `GRPOTrainer` or with the external `prime-rl` project.
 
 - Use `GRPOTrainer` when you want a lightweight Python training loop, LoRA/PEFT support, or small-to-mid scale runs (2–16 GPUs) using Accelerate/DeepSpeed.
-- Use `prime-rl` when you want an FSDP-first, higher-throughput setup with separate trainer/orchestrator/inference processes and richer orchestration.
+- Use `prime-rl` when you want an FSDP-first, higher-throughput setup with more configuration surface area and performance-oriented defaults.
 
 ### Summary of similarities and differences
 
@@ -16,8 +16,8 @@ You can train with the built-in `GRPOTrainer` (in-process) or with the external 
   - One-step off-policy overlap by default (generate at step n-1 while training at step n)
 
 - Differences
-  - GRPOTrainer: in-process; Accelerate/DeepSpeed; optional LoRA/PEFT; easy to script
-  - PRIME-RL: FSDP-first; separate orchestrator and inference server; `rl` entrypoint; strong checkpointing/orchestration
+  - GRPOTrainer: Accelerate/DeepSpeed-based; optional LoRA/PEFT; easy to script and extend in Python
+  - PRIME-RL: FSDP-first; `rl` entrypoint; strong checkpointing; extensive CLI/TOML configuration
 
 ## Train with GRPOTrainer
 
@@ -30,7 +30,7 @@ See the Quick Start below, then the remaining sections for infra, hyperparameter
 
 ## Train with PRIME-RL
 
-If you prefer an orchestrated, FSDP-first setup, you can train the same `verifiers` Environments using `prime-rl`.
+If you prefer an FSDP-first setup with higher throughput, you can train the same `verifiers` Environments using `prime-rl`.
 
 - Install `prime-rl` (see its README for CUDA requirements):
 
