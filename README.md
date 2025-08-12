@@ -52,29 +52,6 @@ uv run pre-commit install
 
 In general, we recommend that you build and train Environments *with* `verifiers`, not *in* `verifiers`. If you find yourself needing to clone and modify the core library in order to implement key functionality for your project, we'd love for you to open an issue so that we can try and streamline the development experience. Our aim is for `verifiers` to be a reliable toolkit to build on top of, and to minimize the "fork proliferation" which often pervades the RL infrastructure ecosystem.
 
-## Prime-RL Usage
-
-You can train `verifiers` Environments using the external `prime-rl` project, which provides an FSDP-first trainer, a coordinating orchestrator, and an inference server, all configurable via TOML/CLI.
-
-- Install `prime-rl` following its README.
-- Ensure your Environment is available to `prime-rl` (e.g., `uv run vf-install vf-math-python --from-repo`).
-- In your `prime-rl` orchestrator config, set:
-
-```toml
-[environment]
-id = "vf-math-python"  # or your custom environment ID
-```
-
-- Launch a run with:
-
-```bash
-uv run rl \
-  --trainer @ configs/your_exp/train.toml \
-  --orchestrator @ configs/your_exp/orch.toml \
-  --inference @ configs/your_exp/infer.toml
-```
-
-See the `prime-rl` repository for full configuration and operational details.
 
 ## Environments
 
