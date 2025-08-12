@@ -29,6 +29,7 @@ docs/build/
 # outputs
 wandb/
 outputs/
+reports/
 logs/
 
 # development

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import textwrap
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
@@ -275,8 +274,8 @@ def render_html(
     )
 
 
-def write_report(
-    env_module_file: Path,
+def write_html_report(
+    report_dir: Path,
     meta: ReportMeta,
     results: GenerateOutputs,
 ) -> Path:
@@ -284,9 +283,7 @@ def write_report(
 
     Returns the path to the written HTML file.
     """
-    env_dir = env_module_file.parent
-    reports_dir = env_dir / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
 
     summary = compute_summary(results)
     examples = build_examples(results, cap=DETAILED_EXAMPLES_CAP)
@@ -297,121 +294,6 @@ def write_report(
         total_examples=len(results.reward),
     )
     filename = build_report_filename(meta)
-    out_path = reports_dir / filename
+    out_path = report_dir / filename
     out_path.write_text(html, encoding="utf-8")
     return out_path
-
-
-# --- README embedding helpers ---
-
-
-def _extract_body_inner_html(html: str) -> str:
-    """Return inner HTML within <body>...</body>. If not present, return the original string.
-
-    Also strips any <script> and <style> blocks as a safety measure for README embedding.
-    """
-    try:
-        import re
-
-        # remove script/style blocks entirely
-        html = re.sub(r"<script[\s\S]*?</script>", "", html, flags=re.IGNORECASE)
-        html = re.sub(r"<style[\s\S]*?</style>", "", html, flags=re.IGNORECASE)
-        body_match = re.search(
-            r"<body[^>]*>([\s\S]*?)</body>", html, flags=re.IGNORECASE
-        )
-        if body_match:
-            inner = body_match.group(1)
-        else:
-            inner = html
-        # Normalize indentation so lines do not start with 4+ spaces
-        lines = inner.splitlines()
-        normalized: list[str] = []
-        for line in lines:
-            # If line starts with whitespace then a tag, strip leading whitespace
-            stripped = line.lstrip()
-            if stripped.startswith("<"):
-                normalized.append(stripped)
-            else:
-                normalized.append(line)
-        inner = "\n".join(normalized)
-        # Final dedent and trim
-        inner = textwrap.dedent(inner).strip()
-        return inner
-    except Exception:
-        return html
-
-
-def _build_report_summary_from_filename(path: Path) -> str:
-    """Use the deterministic filename to produce a summary string for <details>.
-
-    Example filename: {env}--v{version}--model={model}--n={n}--r={r}--args={hash}.html
-    """
-    stem = path.stem  # without .html
-    return stem
-
-
-def generate_readme_reports_block(reports_dir: Path) -> str:
-    """Generate a GitHub-safe HTML block listing all reports with collapsible content.
-
-    For each report HTML file, we inline the sanitized inner body HTML inside a nested <details>.
-    """
-    if not reports_dir.exists():
-        return "<p>No reports found.</p>"
-
-    report_files = sorted(
-        [p for p in reports_dir.glob("*.html") if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    parts: List[str] = []
-    parts.append("<details><summary>Reports</summary>")
-    for rp in report_files:
-        try:
-            raw = rp.read_text(encoding="utf-8")
-            inner = _extract_body_inner_html(raw)
-            summary = _build_report_summary_from_filename(rp)
-            parts.append(f"<details><summary>{summary}</summary>")
-            parts.append(
-                f'<p><a href="reports/{rp.name}" target="_blank">Open full report</a></p>'
-            )
-            parts.append(inner)
-            parts.append("</details>")
-        except Exception:
-            continue
-    parts.append("</details>")
-    return "\n".join(parts)
-
-
-def update_readme_reports_section(env_module_file: Path) -> None:
-    """Rewrite the README reports block bounded by markers.
-
-    Markers:
-      <!-- vf:begin:reports -->
-      ...
-      <!-- vf:end:reports -->
-    """
-    env_dir = env_module_file.parent
-    readme = env_dir / "README.md"
-    reports_dir = env_dir / "reports"
-    if not readme.exists():
-        return
-
-    start_marker = "<!-- vf:begin:reports -->"
-    end_marker = "<!-- vf:end:reports -->"
-    content = readme.read_text(encoding="utf-8")
-
-    block = generate_readme_reports_block(reports_dir)
-
-    if start_marker in content and end_marker in content:
-        pre, _, tail = content.partition(start_marker)
-        _, _, post = tail.partition(end_marker)
-        new_content = pre + start_marker + "\n" + block + "\n" + end_marker + post
-        readme.write_text(new_content, encoding="utf-8")
-    else:
-        # Append a new section if markers are missing
-        section = (
-            "\n\n## Evaluation Reports\n\n"
-            "<!-- Do not edit below this line. Content is auto-generated. -->\n"
-            f"{start_marker}\n{block}\n{end_marker}\n"
-        )
-        readme.write_text(content + section, encoding="utf-8")
