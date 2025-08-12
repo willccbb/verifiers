@@ -61,7 +61,7 @@ To initialize a blank Environment module template, do:
 ```bash
 vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
 ```
-We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies, and we prepend it by default if it is not present. Names are auto-standardized to use "-" in IDs and "_" in paths.
+We recommend using the `vf-` prefix for clarity and avoiding conflicts with other dependencies. The prefix is optional and not added automatically. Names are auto-standardized to use "-" in IDs and "_" in paths.
 
 To an install an Environment module into your project, do:
 ```bash
