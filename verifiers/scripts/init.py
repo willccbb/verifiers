@@ -41,7 +41,7 @@ uv run vf-eval {env_id_dash} \
 
 Notes:
 - Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
-- Reports are written under `./environments/{env_id_underscore}/reports/`. The README is not modified automatically.
+- Reports are written under `./environments/{env_id_underscore}/reports/`.
 
 ### Environment Arguments
 Document any supported environment arguments and their meaning. Example:
