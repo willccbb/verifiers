@@ -3,7 +3,6 @@ import importlib
 import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,10 +14,6 @@ from verifiers.utils.report_utils import (
     get_env_version,
     write_html_report,
 )
-
-current_dir = Path.cwd()
-if str(current_dir) not in sys.path:
-    sys.path.insert(0, str(current_dir))
 
 
 def eval_environment(
@@ -40,15 +35,20 @@ def eval_environment(
     hf_hub_dataset_name: str,
 ):
     try:
-        endpoints = Path(endpoints_path)
-        if endpoints.exists():
-            spec = importlib.util.spec_from_file_location("endpoints", endpoints)
+        endpoints_path_obj = Path(endpoints_path)
+        if endpoints_path_obj.is_dir():
+            endpoints_file = endpoints_path_obj / "endpoints.py"
+        else:
+            endpoints_file = endpoints_path_obj
+
+        if endpoints_file.exists():
+            spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
             assert spec and spec.loader
             endpoints_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(endpoints_module)
             ENDPOINTS = endpoints_module.ENDPOINTS
         else:
-            raise ImportError(f"endpoints.py not found in {current_dir}")
+            raise ImportError(f"endpoints.py not found at {endpoints_file}")
     except (ImportError, AttributeError):
         print(
             f"No local endpoint registry found at {endpoints_path}. \

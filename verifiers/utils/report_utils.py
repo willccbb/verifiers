@@ -149,7 +149,7 @@ def build_report_filename(meta: ReportMeta) -> str:
     Pattern: {env_id}--v{env_version}--model={model}--n={n}--r={r}--args={hash}.html
     """
     args_hash = _hash_env_args(meta.env_args)
-    safe_model = meta.model.replace("/", "-")
+    safe_model = meta.model.replace("/", "--")
     return (
         f"{meta.env_id}--v{meta.env_version}--model={safe_model}"
         f"--n={meta.num_examples}--r={meta.rollouts_per_example}--args={args_hash}.html"
