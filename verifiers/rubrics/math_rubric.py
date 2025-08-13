@@ -24,9 +24,6 @@ class MathRubric(Rubric):
         """Reward function that checks if the final answer matches the expected answer."""
         try:
             response = parser.parse_answer(completion) or ""
-            print(
-                f"Response: {response[:100] + '...' + response[-100:]} | Answer: {answer}"
-            )
             if response == "":
                 return 0.0
             if verify(
