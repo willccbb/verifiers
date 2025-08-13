@@ -14,7 +14,7 @@ class MathRubric(Rubric):
         parser = parser or XMLParser(fields=["think", "answer"])
         super().__init__(funcs=funcs, weights=weights, parser=parser)
         self.add_reward_func(self.correct_answer_reward_func)
-        self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
+        self.add_reward_func(self.parser.get_format_reward_func(), weight=0.0)
 
     def correct_answer_reward_func(
         self, completion: Messages, answer: str, **kwargs
@@ -34,5 +34,7 @@ class MathRubric(Rubric):
                 else 0.0
             )
         except Exception as e:
-            self.logger.error("Please install math_verify to use this reward function.")
+            self.logger.error(
+                "Please install pylatexenc and sympy to use this reward function."
+            )
             raise e

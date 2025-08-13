@@ -34,6 +34,11 @@ ENDPOINTS = {
         "url": "https://api.deepinfra.com/v1/openai",
         "key": "DEEPINFRA_API_KEY",
     },
+    "glm-4.5": {
+        "model": "zai-org/GLM-4.5",
+        "url": "https://api.deepinfra.com/v1/openai",
+        "key": "DEEPINFRA_API_KEY",
+    },
     "kimi-k2": {
         "model": "moonshotai/Kimi-K2-Instruct",
         "url": "https://api.deepinfra.com/v1/openai",

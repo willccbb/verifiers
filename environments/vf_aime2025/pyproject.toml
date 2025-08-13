@@ -1,12 +1,13 @@
 [project]
 name = "vf-aime2025"
 description = "AIME-25 evaluation environment"
-tags = ["math", "eval", "single-turn", "math-verify"]
-version = "0.1.3"
+tags = ["math", "eval", "single-turn"]
+version = "0.1.5"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "verifiers>=0.1.2.post0",
-    "math-verify>=0.8.0"
+    "pylatexenc",
+    "sympy",
 ]
 
 [build-system]
