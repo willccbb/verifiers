@@ -8,7 +8,7 @@ from datasets import Dataset, concatenate_datasets, load_dataset  # type: ignore
 ### PROMPTS ###
 
 THINK_BOXED_SYSTEM_PROMPT = "Think step-by-step inside <think>...</think> tags. \
-    Then, give your final numerical answer inside \\boxed{{...}}."
+    Then, give your final answer inside \\boxed{}."
 
 ### https://github.com/huggingface/lighteval/blob/ecef2c662b9418866b6447d33b5e7d5dedd74af8/src/lighteval/tasks/default_prompts.py#L1474
 BOXED_SYSTEM_PROMPT = (

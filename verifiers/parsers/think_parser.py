@@ -35,6 +35,6 @@ class ThinkParser(Parser):
 
         def format_reward_func(completion: list[ChatMessage], **kwargs) -> float:
             messages = self.get_assistant_messages(completion)
-            return sum(follows_format(m["content"]) for m in messages) / len(messages)
+            return sum(follows_format(m["content"]) for m in messages) / len(messages)  # type: ignore
 
         return format_reward_func

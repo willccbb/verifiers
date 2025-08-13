@@ -2,7 +2,7 @@
 name = "vf-math500"
 description = "MATH-500 evaluation environment"
 tags = ["math", "eval", "single-turn"]
-version = "0.1.6"
+version = "0.1.7"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "verifiers>=0.1.2.post0",

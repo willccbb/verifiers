@@ -29,7 +29,22 @@ ENDPOINTS = {
         "url": "https://api.deepinfra.com/v1/openai",
         "key": "DEEPINFRA_API_KEY",
     },
+    "qwen3-235b-i": {
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "url": "https://api.cerebras.ai/v1",
+        "key": "CEREBRAS_API_KEY",
+    },
+    "qwen3-235b-t": {
+        "model": "qwen-3-235b-a22b-thinking-2507",
+        "url": "https://api.cerebras.ai/v1",
+        "key": "CEREBRAS_API_KEY",
+    },
     "qwen3-coder": {
+        "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "url": "https://api.deepinfra.com/v1/openai",
+        "key": "DEEPINFRA_API_KEY",
+    },
+    "qwen3-32b": {
         "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
         "url": "https://api.deepinfra.com/v1/openai",
         "key": "DEEPINFRA_API_KEY",

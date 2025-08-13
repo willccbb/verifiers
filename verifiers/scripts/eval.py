@@ -28,6 +28,7 @@ def eval_environment(
     max_concurrent_requests: int,
     max_tokens: int,
     temperature: float,
+    verbose: bool,
     write_report: bool,
     save_dataset: bool,
     save_path: str,
@@ -93,6 +94,14 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     )
     n = num_examples
     r = rollouts_per_example
+    if verbose:
+        for i in range(len(results.prompt)):
+            print(f"Prompt: {results.prompt[i]}")
+            print(f"Completion: {results.completion[i]}")
+            print(f"Reward: {results.reward[i]}")
+            print(f"Answer: {results.answer[i]}")
+            print(f"Info: {results.info[i]}")
+            print(f"Task: {results.task[i]}")
     if n < 0:
         n = len(results.reward) // r
     for i in range(r):
@@ -220,6 +229,9 @@ def main():
         "--temperature", "-T", type=float, default=0.7, help="Temperature for sampling"
     )
     parser.add_argument(
+        "--verbose", "-v", default=False, action="store_true", help="Verbose output"
+    )
+    parser.add_argument(
         "--write-report",
         "-w",
         default=False,
@@ -268,6 +280,7 @@ def main():
         max_concurrent_requests=args.max_concurrent_requests,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
+        verbose=args.verbose,
         write_report=args.write_report,
         save_dataset=args.save_dataset,
         save_path=args.save_path,
