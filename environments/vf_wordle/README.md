@@ -49,9 +49,3 @@ Notes:
 | `count_turns_reward_func` | Higher score for solving in fewer turns |
 | `format_reward` | Adherence to expected XML format |
 
-## Evaluation Reports
-
-<!-- Do not edit below this line. Content is auto-generated. -->
-<!-- vf:begin:reports -->
-<p>No reports found. Run <code>uv run vf-eval vf-wordle -a '{"key": "value"}'</code> to generate one.</p>
-<!-- vf:end:reports -->

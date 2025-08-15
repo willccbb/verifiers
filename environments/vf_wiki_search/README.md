@@ -53,9 +53,3 @@ Notes:
 | ToolRubric metrics | Tool execution success and format adherence |
 | JudgeRubric metrics | Judge-scored answer quality |
 
-## Evaluation Reports
-
-<!-- Do not edit below this line. Content is auto-generated. -->
-<!-- vf:begin:reports -->
-<p>No reports found. Run <code>uv run vf-eval vf-wiki-search -a '{"key": "value"}'</code> to generate one.</p>
-<!-- vf:end:reports -->
