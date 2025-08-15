@@ -19,6 +19,11 @@ ENDPOINTS = {
         "url": "https://api.openai.com/v1",
         "key": "OPENAI_API_KEY",
     },
+    "r1-1.5b": {
+        "model": "willcb/DeepSeek-R1-Distill-Qwen-1.5B",
+        "url": "http://0.0.0.0:8000/v1",
+        "key": "EMPTY",
+    },
     "deepseek-v3": {
         "model": "deepseek-chat",
         "url": "https://api.deepseek.com/v1",
