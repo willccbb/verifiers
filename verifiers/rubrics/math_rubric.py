@@ -28,7 +28,7 @@ class MathRubric(Rubric):
                 return 0.0
             if verify(
                 parse(f"\\boxed{{{answer}}}", parsing_timeout=5),
-                response,
+                parse(f"\\boxed{{{response}}}", parsing_timeout=5),
                 timeout_seconds=5,
             ):
                 return 1.0

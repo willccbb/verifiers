@@ -12,6 +12,8 @@ class ThinkParser(Parser):
     def parse(self, text: str) -> str:
         if "</think>" in text:
             text = text.split("</think>")[-1].strip()
+        else:  # do not allow any further extraction/ parsing if no </think> is found
+            text = ""
         return self.extract_fn(text.strip())
 
     def get_format_reward_func(self) -> Callable:
