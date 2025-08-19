@@ -54,21 +54,29 @@ class JudgeRubric(Rubric):
         state: State,
         **kwargs,
     ) -> str:
-        if "judge_response" in state:
-            return state["judge_response"]
         if isinstance(prompt, list):
-            question = prompt[-1]["content"]
+            last_msg = prompt[-1]
+            if isinstance(last_msg, dict) and "content" in last_msg:
+                question = str(last_msg["content"])
+            else:
+                question = ""
         else:
-            question = prompt
+            question = str(prompt)
         response = self.parser.parse_answer(completion)
         judge_prompt = self.judge_prompt.format(
             question=question, answer=answer, response=response
         )
+        cached = state.get("judge_response")
+        if isinstance(cached, dict) and judge_prompt in cached:
+            return cached[judge_prompt]
         judge_response = self.judge_client.chat.completions.create(
             model=self.judge_model,
             messages=[{"role": "user", "content": judge_prompt}],
             **self.judge_sampling_args,
         )
         judge_response = str(judge_response.choices[0].message.content)
-        state["judge_response"] = judge_response
+        if not isinstance(cached, dict):
+            cached = {}
+        cached[judge_prompt] = judge_response
+        state["judge_response"] = cached
         return judge_response
