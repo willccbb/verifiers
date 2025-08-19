@@ -109,16 +109,14 @@ async def test_multiturn_conversation(mock_multiturn_env):
 
 ## vLLM Client/Server Testing
 
-The current test suite does **not** directly test the vLLM client/server integration or the new logic for max_model_len handling. To ensure these features are covered:
+The test suite includes unit tests for the `VLLMClient` in `tests/test_vllm_client_server.py`. These tests ensure that the client's custom logic for handling `max_tokens` and interacting with a vLLM server is correct.
 
-- Add a dedicated test file (e.g., `test_vllm_client_server.py`) that:
-  - Mocks vLLM server endpoints such as `/get_model_config`.
-  - Instantiates `VLLMClient` with a mock tokenizer.
-  - Verifies correct fetching and usage of `max_model_len` in completions.
-  - Tests error handling for prompt length exceeding max_model_len.
+The tests cover:
+- **`max_tokens` Handling**: Verifies that `max_tokens=None` correctly omits the parameter from the OpenAI API call, while explicit values are passed through.
+- **Server Interaction**: Mocks the vLLM server's `/get_model_config` endpoint to simulate fetching `max_model_len`.
+- **Error Handling**: Although not explicitly shown in the examples, the setup allows for testing error conditions, such as when the server is unavailable or misconfigured.
 
-**Recommendation:**  
-Run all tests after changes to ensure no regressions, but add targeted tests for new vLLM features to guarantee coverage.
+These tests use `unittest.mock.patch` to isolate the `VLLMClient` from actual network requests, making them fast and reliable unit tests. No live vLLM server is required to run them.
 
 ## Adding New Tests
 

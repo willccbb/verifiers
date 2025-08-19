@@ -17,7 +17,7 @@ except ImportError:
     exit(1)
 
 try:
-    from fastapi import Request  # type: ignore
+    from fastapi import Request, HTTPException  # type: ignore
 except ImportError:
     print("fastapi is not installed. Please install it with `uv pip install fastapi`.")
     exit(1)
@@ -236,6 +236,11 @@ async def run_server(args: Namespace):
         """
         # engine.llm_engine.config.max_model_len is the typical location
         max_model_len = getattr(engine.llm_engine.config, "max_model_len", None)
+        if max_model_len is None:
+            raise HTTPException(
+                status_code=404,
+                detail="max_model_len is not set in the model configuration."
+            )
         return {"max_model_len": max_model_len}
 
     vllm_config = await engine.get_vllm_config()

@@ -4,7 +4,7 @@ import time
 
 import requests
 import torch
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, NOT_GIVEN
 from requests import ConnectionError
 from requests.adapters import HTTPAdapter
 from trl.import_utils import is_requests_available, is_vllm_available
@@ -95,6 +95,17 @@ class VLLMClient(AsyncOpenAI):
         self._fetch_max_model_len()
         self.check_server(connection_timeout)  # check server and fail after timeout
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Close the underlying clients.
+        The synchronous session is closed, and the parent's async context is exited.
+        """
+        self.session.close()
+        await super().__aexit__(exc_type, exc_val, exc_tb)
+
     def _fetch_max_model_len(self):
         """
         Fetch max_model_len from the server and store it.
@@ -132,21 +143,12 @@ class VLLMClient(AsyncOpenAI):
 
     async def completions_create(self, *args, **kwargs):
         """
-        Override completions.create to set max_tokens if None.
+        Override completions.create to omit max_tokens when None.
         """
-        # Extract prompt and max_tokens from kwargs
-        prompt = kwargs.get("prompt")
-        max_tokens = kwargs.get("max_tokens")
+        max_tokens = kwargs.get("max_tokens", None)
         if max_tokens is None:
-            if self.max_model_len is None:
-                raise ValueError("max_model_len not set; cannot infer max_tokens.")
-            prompt_tokens = self._get_prompt_tokens(prompt)
-            available_tokens = self.max_model_len - prompt_tokens
-            if available_tokens <= 0:
-                raise ValueError("Prompt exceeds model's max_model_len.")
-            kwargs["max_tokens"] = available_tokens
-        # Call the original method
-        return await super().completions.create(*args, **kwargs)
+            kwargs["max_tokens"] = NOT_GIVEN
+        return await self.completions.create(*args, **kwargs)
 
     def check_server(self, total_timeout: float = 0.0, retry_interval: float = 2.0):
         """
@@ -199,7 +201,7 @@ class VLLMClient(AsyncOpenAI):
 
         if response.status_code == 200:
             vllm_world_size = response.json()["world_size"]
-            logger.info(f"vllm world size: {vllm_world_size}")
+            logger.info(f"vLLM world size: {vllm_world_size}")
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 
