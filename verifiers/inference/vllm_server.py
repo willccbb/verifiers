@@ -229,6 +229,15 @@ async def run_server(args: Namespace):
         await engine.collective_rpc("close_communicator")
         return {"status": "ok"}
 
+    @app.get("/get_model_config")
+    async def get_model_config():
+        """
+        Returns the model configuration, specifically max_model_len.
+        """
+        # engine.llm_engine.config.max_model_len is the typical location
+        max_model_len = getattr(engine.llm_engine.config, "max_model_len", None)
+        return {"max_model_len": max_model_len}
+
     vllm_config = await engine.get_vllm_config()
     await init_app_state(engine, vllm_config, app.state, args)
     shutdown_task = await serve_http(

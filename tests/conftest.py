@@ -322,3 +322,35 @@ def mock_multiturn_env_max_turns(mock_openai_client, sample_chat_dataset):
         parser=Parser(),
         rubric=Rubric(),
     )
+
+
+@pytest.fixture
+def mock_vllm_tokenizer():
+    """Return a mock tokenizer for vLLM integration tests."""
+    class MockTokenizer:
+        def encode(self, text):
+            return list(range(len(text)))
+
+        def apply_chat_template(self, messages, tokenize=False):
+            return " ".join([m.get("content", "") for m in messages])
+
+    return MockTokenizer()
+
+
+@pytest.fixture
+def mock_vllm_client(monkeypatch, mock_vllm_tokenizer):
+    """Return a VLLMClient with mocked server responses for integration tests."""
+    from verifiers.inference.vllm_client import VLLMClient
+
+    # Patch requests.Session.get to always return a fixed max_model_len
+    class MockResponse:
+        status_code = 200
+
+        def json(self):
+            return {"max_model_len": 128}
+
+    monkeypatch.setattr("requests.Session.get", lambda self, url: MockResponse())
+
+    client = VLLMClient(tokenizer=mock_vllm_tokenizer)
+    return client
+

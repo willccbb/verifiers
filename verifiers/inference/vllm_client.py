@@ -65,6 +65,7 @@ class VLLMClient(AsyncOpenAI):
         port: int = 8000,
         group_port: int = 51216,
         connection_timeout: float = 0.0,
+        tokenizer=None,  # new argument
     ):
         if not is_requests_available():
             raise ImportError(
@@ -89,7 +90,63 @@ class VLLMClient(AsyncOpenAI):
         self.server_url = f"http://{self.host}:{self.server_port}"
 
         self.group_port = group_port
+        self.tokenizer = tokenizer
+        self.max_model_len = None
+        self._fetch_max_model_len()
         self.check_server(connection_timeout)  # check server and fail after timeout
+
+    def _fetch_max_model_len(self):
+        """
+        Fetch max_model_len from the server and store it.
+        """
+        url = f"{self.server_url}/get_model_config"
+        try:
+            response = self.session.get(url)
+            if response.status_code == 200:
+                self.max_model_len = response.json().get("max_model_len")
+            else:
+                logger.warning(f"Failed to fetch max_model_len: {response.text}")
+        except Exception as e:
+            logger.warning(f"Error fetching max_model_len: {e}")
+
+    def _get_prompt_tokens(self, prompt):
+        """
+        Calculate the number of tokens in the prompt using the tokenizer.
+        """
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer must be provided to calculate prompt length.")
+        # Accepts either str or list of dicts (chat format)
+        if isinstance(prompt, str):
+            return len(self.tokenizer.encode(prompt))
+        elif isinstance(prompt, list):
+            # For chat format, use tokenizer's chat template if available
+            if hasattr(self.tokenizer, "apply_chat_template"):
+                text = self.tokenizer.apply_chat_template(prompt, tokenize=False)
+                return len(self.tokenizer.encode(text))
+            else:
+                # Fallback: join all contents
+                text = " ".join([m.get("content", "") for m in prompt])
+                return len(self.tokenizer.encode(text))
+        else:
+            raise TypeError("Prompt must be str or list of dicts.")
+
+    async def completions_create(self, *args, **kwargs):
+        """
+        Override completions.create to set max_tokens if None.
+        """
+        # Extract prompt and max_tokens from kwargs
+        prompt = kwargs.get("prompt")
+        max_tokens = kwargs.get("max_tokens")
+        if max_tokens is None:
+            if self.max_model_len is None:
+                raise ValueError("max_model_len not set; cannot infer max_tokens.")
+            prompt_tokens = self._get_prompt_tokens(prompt)
+            available_tokens = self.max_model_len - prompt_tokens
+            if available_tokens <= 0:
+                raise ValueError("Prompt exceeds model's max_model_len.")
+            kwargs["max_tokens"] = available_tokens
+        # Call the original method
+        return await super().completions.create(*args, **kwargs)
 
     def check_server(self, total_timeout: float = 0.0, retry_interval: float = 2.0):
         """
@@ -142,7 +199,7 @@ class VLLMClient(AsyncOpenAI):
 
         if response.status_code == 200:
             vllm_world_size = response.json()["world_size"]
-            logger.info(f"vLLM world size: {vllm_world_size}")
+            logger.info(f"vllm world size: {vllm_world_size}")
         else:
             raise Exception(f"Request failed: {response.status_code}, {response.text}")
 

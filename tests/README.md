@@ -107,6 +107,19 @@ async def test_multiturn_conversation(mock_multiturn_env):
 - Error handling and edge cases are tested
 - No real LLM requests are made
 
+## vLLM Client/Server Testing
+
+The current test suite does **not** directly test the vLLM client/server integration or the new logic for max_model_len handling. To ensure these features are covered:
+
+- Add a dedicated test file (e.g., `test_vllm_client_server.py`) that:
+  - Mocks vLLM server endpoints such as `/get_model_config`.
+  - Instantiates `VLLMClient` with a mock tokenizer.
+  - Verifies correct fetching and usage of `max_model_len` in completions.
+  - Tests error handling for prompt length exceeding max_model_len.
+
+**Recommendation:**  
+Run all tests after changes to ensure no regressions, but add targeted tests for new vLLM features to guarantee coverage.
+
 ## Adding New Tests
 
 1. Create test files following the `test_*.py` naming convention
