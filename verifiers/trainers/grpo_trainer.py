@@ -393,7 +393,7 @@ class GRPOTrainer(Trainer):
             )
             max_length = self.max_prompt_length  # Capture for closure
 
-            def filter_by_prompt_length(example):
+            def filter_by_prompt_length(example, processing_class):
                 prompt = example["prompt"]
                 # Tokenize prompt to check length
                 if isinstance(prompt, list):
@@ -409,7 +409,9 @@ class GRPOTrainer(Trainer):
 
             original_size = len(train_dataset)
             train_dataset = train_dataset.filter(
-                filter_by_prompt_length, num_proc=self.max_data_workers
+                filter_by_prompt_length,
+                num_proc=self.max_data_workers,
+                fn_kwargs={"processing_class": processing_class}
             )
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
