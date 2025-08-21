@@ -1,5 +1,5 @@
 [project]
-name = "verifiers-terminalbench"
+name = "terminal-bench"
 version = "0.1.0"
 dependencies = [
     "verifiers>=0.1.0",
