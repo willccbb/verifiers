@@ -12,6 +12,7 @@ import signal
 import sys
 import tarfile
 import tempfile
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -98,8 +99,17 @@ class TerminalContainer:
             return False, "Container not available"
 
         try:
+            # Use `timeout` if available in the container; otherwise fall back to a plain run.
+            # We wrap everything in a single bash -lc to avoid extra execs and to handle quoting safely.
+            quoted = shlex.quote(commands)
+            composite = (
+                f"if command -v timeout >/dev/null 2>&1; then "
+                f"timeout {timeout}s bash -lc {quoted}; "
+                f"else bash -lc {quoted}; fi"
+            )
+
             result = self.container.exec_run(
-                cmd=["bash", "-c", commands],
+                cmd=["bash", "-lc", composite],
                 stdout=True,
                 stderr=True,
                 tty=False,
@@ -108,6 +118,14 @@ class TerminalContainer:
 
             output = result.output.decode("utf-8", errors="replace")
             success = result.exit_code == 0
+
+            # GNU timeout uses 124 for timeouts. Mark as failure with a clear message.
+            if result.exit_code == 124:
+                success = False
+                output = (
+                    output
+                    + f"\n[terminalbench] Command timed out after {timeout} seconds (exit 124)."
+                )
 
             return success, output
 
@@ -175,9 +193,16 @@ class TerminalContainer:
                 print("🔧 Using default pytest command")
 
             print("\n🚀 EXECUTING TESTS...")
-            # Execute tests
+            # Execute tests with `timeout` if available; otherwise plain run.
+            quoted_test = shlex.quote(test_cmd)
+            test_composite = (
+                f"if command -v timeout >/dev/null 2>&1; then "
+                f"timeout {timeout}s bash -lc {quoted_test}; "
+                f"else bash -lc {quoted_test}; fi"
+            )
+
             result = self.container.exec_run(
-                cmd=["bash", "-c", test_cmd],
+                cmd=["bash", "-lc", test_composite],
                 stdout=True,
                 stderr=True,
                 tty=False,
@@ -186,6 +211,13 @@ class TerminalContainer:
 
             output = result.output.decode("utf-8", errors="replace")
             success = result.exit_code == 0
+
+            if result.exit_code == 124:
+                success = False
+                output = (
+                    output
+                    + f"\n[terminalbench] Test execution timed out after {timeout} seconds (exit 124)."
+                )
 
             print("\n📊 TEST RESULTS:")
             print(f"Exit code: {result.exit_code}")
