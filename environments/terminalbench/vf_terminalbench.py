@@ -8,7 +8,6 @@ to run tasks in Docker via docker-compose and a tmux session, exposing a single
 
 import atexit
 import importlib
-import importlib.util
 import os
 import types
 import signal
@@ -666,8 +665,3 @@ def load_environment(
     atexit.register(lambda: executor.cleanup() if executor else None)
 
     return env
-
-
-def cleanup_all_docker_resources():
-    """No-op shim retained for compatibility; Terminal manages cleanup itself."""
-    pass

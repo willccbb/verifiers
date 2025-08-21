@@ -92,14 +92,7 @@ Tasks may require:
 - Specific base images (Ubuntu/Debian with apt)
 - Resource limits (2GB memory, 1 CPU by default)
 
-## Cleanup
 
-The environment automatically cleans up Docker resources. For manual cleanup:
-
-```python
-import environments.terminalbench as tb
-tb.cleanup_all_docker_resources()
-```
 
 ## Task Categories
 
