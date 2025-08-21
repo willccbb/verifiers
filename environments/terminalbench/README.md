@@ -1,6 +1,6 @@
 # Terminal-Bench Environment
 
-This environment implements the Terminal-Bench dataset from HuggingFace (`ia03/terminal-bench`) for the verifiers framework. Terminal-Bench evaluates AI agents on real-world, end-to-end terminal tasks ranging from compiling code and training models to setting up servers and debugging systems.
+This environment runs Terminal-Bench tasks directly from the checked-out Terminal-Bench repository using its native harness (Docker + tmux). It does not fetch tasks from Hugging Face; instead, it reads the local `terminal-bench/tasks` directory and wraps tasks into a minimal dataset for the verifiers framework. Terminal-Bench evaluates AI agents on real-world, end-to-end terminal tasks ranging from compiling code and training models to setting up servers and debugging systems.
 
 ## Features
 
@@ -13,11 +13,11 @@ This environment implements the Terminal-Bench dataset from HuggingFace (`ia03/t
 ## Requirements
 
 - Docker installed and running
-- Python packages: `datasets`, `docker`, `PyYAML`
+- Python packages: `docker`, `PyYAML`, `terminal-bench` (installed per `environments/terminalbench/pyproject.toml`)
 
-## Dataset
+## Tasks
 
-The Terminal-Bench dataset contains 112 tasks across various categories:
+Tasks are discovered from the local `terminal-bench/tasks` folder in this repository checkout. A subset can be selected via `num_examples` (default: all). The Terminal-Bench task suite contains tasks across various categories:
 
 - **algorithms**: Algorithm implementation and optimization
 - **data-science**: Data processing and analysis tasks  
@@ -37,23 +37,15 @@ Each task difficulty is rated as:
 ## Usage
 
 ```python
-import environments.terminalbench as tb
+from environments.terminalbench.vf_terminalbench import load_environment
 
-# Load the environment
-env = tb.load_environment(
-    dataset_name="ia03/terminal-bench",
-    split="test", 
-    num_examples=10,  # Load first 10 tasks, -1 for all
-    pool_size=5       # Docker container pool size
+# Load the environment (tasks read locally from terminal-bench/tasks)
+env = load_environment(
+    num_examples=10  # Load first 10 tasks; use -1 for all
 )
 
-# The environment expects shell commands as model output
-# Example model response should contain commands like:
-# ```bash
-# cd /path/to/directory
-# make build
-# python test.py
-# ```
+# The environment exposes a single tool to the agent: execute_commands(commands: List[str], reasoning: str = "")
+# Agent/tool calls should provide non-interactive shell commands to complete the task inside the container.
 ```
 
 ## Task Structure
@@ -77,7 +69,7 @@ task_id/
 2. **Container Setup**: Docker image built from task Dockerfile
 3. **Agent Execution**: Model-generated commands executed in container
 4. **Test Validation**: Test suite run to verify task completion
-5. **Cleanup**: Container and images automatically removed
+5. **Cleanup**: Harness handles container/image cleanup; the environment also registers safety cleanup on exit
 
 ## Scoring
 
