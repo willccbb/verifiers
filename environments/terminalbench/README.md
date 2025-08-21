@@ -36,6 +36,12 @@ Each task difficulty is rated as:
 
 ## Usage
 
+Please be sure to set a sufficiently high max-tokens.
+Example terminal usage:
+```bash
+uv run vf-eval --api-base-url https://openrouter.ai/api/v1 --api-key-var OPENROUTER_API_KEY --model openai/gpt-5-mini --num-examples 10 --rollouts-per-example 1 --max-tokens 16384 environments.terminalbench.vf_terminalbench
+```
+
 ```python
 from environments.terminalbench.vf_terminalbench import load_environment
 
