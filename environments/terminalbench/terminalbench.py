@@ -534,6 +534,26 @@ def load_environment(
             print(tail_text)
             print("----- End test output -----\n")
 
+            # Show the agent's executed commands (if any) for this task
+            try:
+                commands_log_path = ctx.trial_handler.trial_paths.commands_path
+                if commands_log_path.exists():
+                    try:
+                        log_text = commands_log_path.read_text(errors="replace")
+                        log_lines = log_text.splitlines()
+                        log_tail = "\n".join(log_lines[-80:])
+                        print("📜 Agent commands log (tail):")
+                        print(str(commands_log_path))
+                        print("----- Commands (tail) -----")
+                        print(log_tail)
+                        print("----- End commands -----\n")
+                    except Exception as le:
+                        print(f"Warning: failed to read commands log: {le}")
+                else:
+                    print("📜 Agent commands log: (no commands log file found)")
+            except Exception as le:
+                print(f"Warning: could not access commands log path: {le}")
+
             print("\n📋 FINAL EVALUATION RESULT:")
             print(f"Tests passed: {success}")
             print(f"Score: {1.0 if success else 0.0}")
