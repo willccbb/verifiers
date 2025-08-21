@@ -2,14 +2,6 @@
 
 This environment runs Terminal-Bench tasks from the local repository using the Terminal-Bench harness (Docker + tmux). Tasks are read from `terminal-bench/tasks` and provided to the verifiers framework. Terminal-Bench evaluates AI agents on end-to-end terminal tasks ranging from compiling code and training models to setting up servers and debugging systems.
 
-## Features
-
-- **Real Terminal Tasks**: Complete terminal environment tasks with Docker sandboxing
-- **Archive Extraction**: Automatic extraction and integrity verification of task archives
-- **Docker Integration**: Secure containerized execution of terminal commands
-- **Comprehensive Evaluation**: Binary pass/fail scoring based on test suite execution
-- **Resource Management**: Automatic cleanup of Docker containers and images
-
 ## Requirements
 
 - Docker installed and running
@@ -29,10 +21,6 @@ Tasks are discovered from the local `terminal-bench/tasks` folder in this reposi
 - **model-training**: ML model training pipelines
 - **personal-assistant**: Task automation scenarios
 
-Each task difficulty is rated as:
-- **easy**: Simple, straightforward tasks
-- **medium**: Moderate complexity requiring some expertise
-- **hard**: Complex tasks requiring advanced knowledge
 
 ## Usage
 
@@ -89,28 +77,3 @@ Tasks may require:
 - Elevated privileges for certain operations
 - Specific base images (Ubuntu/Debian with apt)
 - Resource limits (2GB memory, 1 CPU by default)
-
-
-
-## Task Categories
-
-The dataset includes diverse task types across multiple domains:
-
-- **Systems Programming**: C/C++ compilation, debugging, optimization
-- **Machine Learning**: Model training, data processing, evaluation  
-- **DevOps**: Server setup, containerization, monitoring
-- **Security**: Vulnerability analysis, cryptography, forensics
-- **Data Science**: ETL pipelines, statistical analysis, visualization
-- **Legacy Systems**: COBOL modernization, assembly programming
-
-## Examples
-
-Tasks range from simple file operations to complex multi-step workflows:
-
-- **hello-world**: Basic program compilation and execution
-- **pytorch-model-training**: Train neural network from scratch
-- **database-setup**: Set up and configure database server
-- **vulnerability-analysis**: Analyze and patch security issues
-- **data-pipeline**: Build ETL pipeline for data processing
-
-Each task is completely self-contained with all necessary files, dependencies, and test cases included in the archive. 
