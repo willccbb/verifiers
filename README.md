@@ -14,7 +14,16 @@ Environments for LLM Reinforcement Learning
 
 Verifiers is a library of modular components for creating RL environments and training LLM agents. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client. In addition to RL training, Verifiers can be used directly for building LLM evaluations, creating synthetic data pipelines, and implementing agent harnesses.
 
+Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
+
 ## Setup
+
+We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv init # create a fresh project
+source .venv/bin/activate
+```
 
 For local (CPU) development and evaluation with API models, do:
 ```bash
@@ -49,28 +58,28 @@ Environments in Verifiers are installable Python modules which can specify depen
 
 To initialize a blank Environment module template, do:
 ```bash
-vf-init my-new-environment # -p /path/to/environments (defaults to "./environments")
+vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
 ```
 
 To an install an Environment module into your project, do:
 ```bash
-vf-install my-new-environment # -p /path/to/environments (defaults to "./environments") 
+vf-install vf-environment-name # -p /path/to/environments (defaults to "./environments") 
 ```
 
 To install an Environment module from this repo's `environments` folder, do:
 ```bash
-vf-install math-python --from-repo # -b branch_or_commit (defaults to "main")
+vf-install vf-math-python --from-repo # -b branch_or_commit (defaults to "main")
 ```
 
 Once an Environment module is installed, you can create an instance of the Environment using `load_environment`, passing any necessary args:
 ```python
 import verifiers as vf
-vf_env = vf.load_environment("my-new-environment", **env_args)
+vf_env = vf.load_environment("vf-environment-name", **env_args)
 ```
 
 To run a quick evaluation of your Environment with an API-based model, do:
 ```bash
-vf-eval my-new-environment # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
+vf-eval vf-environment-name # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
 The core elements of Environments in are:
@@ -96,9 +105,11 @@ dataset = load_dataset("my-account/my-dataset", split="train")
 def reward_A(prompt, completion, info) -> float:
 	# reward fn, e.g. correctness
 	...
+
 def reward_B(parser, completion) -> float:
 	# auxiliary reward fn, e.g. format
 	...
+
 def metric(completion) -> float:
 	# non-reward metric, e.g. proper noun count
 	...
@@ -127,9 +138,11 @@ The following named attributes available for use by reward functions in your Rub
 - `state`: can be modified during rollout to accumulate any metadata (`state['responses']` includes full OpenAI response objects by default)
 - `info`: auxiliary info needed for reward computation (e.g. test cases), optional if `answer` is used
 - `task`: tag for task type (used by `EnvGroup` and `RubricGroup`)
-- `parser`: the parser object declared, defaults to `vf.Parser()`
+- `parser`: the parser object declared. Note: `vf.Parser().get_format_reward_func()` is a no-op (always 1.0); use `vf.ThinkParser` or a custom parser if you want a real format adherence reward.
 
 For tasks involving LLM judges, you may wish to use `vf.JudgeRubric()` for managing requests to auxiliary models.
+
+Note on concurrency: environment APIs accept `max_concurrent` to control parallel rollouts. The `vf-eval` CLI currently exposes `--max-concurrent-requests`; ensure this maps to your environment’s concurrency as expected.
 
 ### ToolEnv
 
@@ -183,24 +196,40 @@ The included trainer (`vf.GRPOTrainer`) supports running GRPO-style RL training 
 
 ```bash
 # install environment
-vf-install wordle (-p /path/to/environments | --from-repo)
+vf-install vf-wordle (-p /path/to/environments | --from-repo)
 
 # quick eval
-vf-eval wordle -m (model_name in endpoints.py)
+vf-eval vf-wordle -m (model_name in configs/endpoints.py) -n NUM_EXAMPLES -r ROLLOUTS_PER_EXAMPLE
 
-# inference
+# inference (shell 0)
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 vf-vllm --model willcb/Qwen3-1.7B-Wordle \
     --data-parallel-size 7 --enforce-eager --disable-log-requests
 
-# training
-CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 1 \
+# training (shell 1)
+CUDA_VISIBLE_DEVICES=6,7 accelerate launch --num-processes 2 \
     --config-file configs/zero3.yaml examples/grpo/train_wordle.py --size 1.7B
+```
+
+Alternatively, you can train environments with the external `prime-rl` project (FSDP-first orchestration). See the `prime-rl` README for installation and examples. For example:
+
+```toml
+# orchestrator config (prime-rl)
+[environment]
+id = "vf-math-python"  # or your environment ID
+```
+
+```bash
+# run (prime-rl)
+uv run rl \
+  --trainer @ configs/your_exp/train.toml \
+  --orchestrator @ configs/your_exp/orch.toml \
+  --inference @ configs/your_exp/infer.toml
 ```
 
 ### Troubleshooting 
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - If using high max concurrency, increase the number of allowed open sockets (e.g. `ulimit -n 4096`)
-- On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) or crash during vLLM weight syncing. This can usually be alleviated by setting (or unsetting) `NCCL_P2P_DISABLE=1` in your environment. Try this as your first step if you experience NCCL-related issues.
+- On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) or crash during vLLM weight syncing. This can usually be alleviated by setting (or unsetting) `NCCL_P2P_DISABLE=1` in your environment (or potentially `NCCL_CUMEM_ENABLE=1`). Try this as your first step if you experience NCCL-related issues.
 - If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
 
 ### Resource Requirements
@@ -238,10 +267,12 @@ Please note that the core `verifiers/` library is intended to be a relatively li
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{brown2025verifiers,
-  title={Verifiers: Reinforcement Learning with LLMs in Verifiable Environments},
-  author={Brown, William},
-  year={2025}
+@misc{brown_verifiers_2025,
+  author       = {William Brown},
+  title        = {{Verifiers}: Reinforcement Learning with LLMs in Verifiable Environments},
+  howpublished = {\url{https://github.com/willccbb/verifiers}},
+  note         = {Commit abcdefg • accessed DD Mon YYYY},
+  year         = {2025}
 }
 ```
 
