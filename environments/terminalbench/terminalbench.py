@@ -15,8 +15,10 @@ import signal
 import sys
 import tempfile
 import time
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import base64
 
 from datasets import Dataset
 
@@ -84,6 +86,9 @@ class _TerminalContext:
 
         # Initialize Terminal using Terminal-Bench's compose manager
         disable_recording = self.trial_handler.task.disable_asciinema
+        # Allow controlling rebuild/cleanup behavior via env to speed up local runs
+        env_no_rebuild = os.getenv("TB_NO_REBUILD", "0") == "1"
+        env_cleanup = os.getenv("TB_CLEANUP", "0") == "1"
         self.terminal = Terminal(
             client_container_name=self.trial_handler.client_container_name,
             client_image_name=self.trial_handler.client_image_name,
@@ -92,8 +97,8 @@ class _TerminalContext:
             sessions_logs_path=self.trial_handler.trial_paths.sessions_path,
             agent_logs_path=self.trial_handler.trial_paths.agent_logging_dir,
             commands_path=self.trial_handler.trial_paths.commands_path,
-            no_rebuild=False,
-            cleanup=False,
+            no_rebuild=env_no_rebuild,
+            cleanup=env_cleanup,
             livestream=False,
             disable_recording=disable_recording,
         )
@@ -106,6 +111,19 @@ class _TerminalContext:
         self.session = self.terminal.create_session(
             "agent", is_active_stream=False, as_configured_user=True
         )
+        # Best-effort: ensure shell prompt is responsive before first use
+        try:
+            if self.session:
+                self.session.send_keys(
+                    ["echo __TB_SESSION_READY__", "Enter"],
+                    block=True,
+                    max_timeout_sec=10,
+                )
+                # Drain any incremental output produced during startup
+                _ = self.session.get_incremental_output()
+        except Exception:
+            # Non-fatal; continue even if readiness probe fails
+            pass
 
     def stop(self) -> None:
         try:
@@ -118,7 +136,26 @@ class _TerminalContext:
             raise RuntimeError("Terminal session not started")
 
         # Execute command in a blocking manner and capture incremental output
-        self.session.send_keys([command, "Enter"], block=True, max_timeout_sec=timeout)
+        try:
+            self.session.send_keys(
+                [command, "Enter"], block=True, max_timeout_sec=timeout
+            )
+        except TimeoutError:
+            # Attempt to gracefully interrupt and capture whatever is available
+            try:
+                # Send Ctrl-C to stop the running foreground command
+                self.session.send_keys(["C-c"], block=False, max_timeout_sec=1)
+            except Exception:
+                pass
+            try:
+                output = self.session.get_incremental_output()
+            except Exception:
+                output = ""
+            return (
+                False,
+                output + f"\n[terminalbench] Command timed out after {timeout}s",
+            )
+
         output = self.session.get_incremental_output()
 
         # Heuristic: consider success if no clear error keywords appear in last pane
@@ -127,6 +164,36 @@ class _TerminalContext:
             k in pane_text for k in ["command not found", "Traceback", "ERROR"]
         )  # noqa: E501
         return (not failed), output
+
+    def run_block(self, commands_block: str, timeout: float) -> Tuple[bool, str]:
+        """Execute a multi-line block via a single base64-decoded script.
+
+        This avoids per-line splitting and preserves here-documents safely.
+        """
+        if not self.session:
+            raise RuntimeError("Terminal session not started")
+
+        encoded = base64.b64encode(commands_block.encode("utf-8")).decode("ascii")
+        # Do not exit the shell; print a status marker we can parse
+        status_marker = "__VF_STATUS__"
+        one_liner = (
+            "tmpfile=$(mktemp /tmp/vf_cmd.XXXXXX.sh) && "
+            f"echo '{encoded}' | base64 -d > \"$tmpfile\" && "
+            'chmod +x "$tmpfile" && bash "$tmpfile"; status=$?; '
+            'rm -f "$tmpfile"; echo ' + status_marker + ":$status"
+        )
+
+        ok, out = self.send_and_capture(one_liner, timeout)
+        # Determine success from explicit status marker if present
+        match = re.search(r"__VF_STATUS__:(\\d+)", out)
+        if match:
+            exit_code_str = match.group(1)
+            try:
+                exit_code = int(exit_code_str)
+                ok = ok and (exit_code == 0)
+            except ValueError:
+                pass
+        return ok, out
 
     def run_tests(self, timeout: float) -> Tuple[bool, str]:
         if not self.session:
@@ -245,9 +312,19 @@ def load_terminalbench_dataset(
         # Use Terminal-Bench's task instruction verbatim as the prompt
         prompt = task.instruction
 
+        guidance = (
+            "You are inside a Linux container for this task. A tool named "
+            "execute_commands is available; use it to run shell commands to "
+            "complete the task. Work in /app. Use non-interactive commands, "
+            "verify results, and keep outputs concise."
+        )
+
         entries.append(
             {
-                "prompt": [{"role": "user", "content": prompt}],
+                "prompt": [
+                    {"role": "system", "content": guidance},
+                    {"role": "user", "content": prompt},
+                ],
                 "answer": "",
                 "info": {
                     "task_id": task_id,
@@ -321,23 +398,41 @@ def load_environment(
             task_path = Path(task_path_str)
             ctx = executor.get_context(task_id, task_path)
 
-            # Execute commands one by one for better incremental output
-            success = True
-            combined_output_parts: List[str] = []
-            for line in commands_str.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                ok, out = ctx.send_and_capture(line, timeout=180)
-                success = success and ok
-                combined_output_parts.append(out)
+            # Determine timeout per command block
+            info = getattr(execute_commands, "_current_info", {}) or {}
+            # Priority: env var TB_CMD_TIMEOUT_SEC > info["max_agent_timeout_sec"] > default 180
+            env_timeout = os.getenv("TB_CMD_TIMEOUT_SEC")
+            try:
+                timeout_sec = float(env_timeout) if env_timeout else None
+            except Exception:
+                timeout_sec = None
+            if timeout_sec is None:
+                try:
+                    timeout_sec = float(info.get("max_agent_timeout_sec", 180))
+                except Exception:
+                    timeout_sec = 180.0
 
-            output = "\n\n".join(combined_output_parts)
+            # Execute as a single block to preserve heredocs and multi-line structure
+            success, output = ctx.run_block(commands_str, timeout=timeout_sec)
+
+            # Sanitize terminal output to avoid overly large or non-JSON-safe payloads
+            def _strip_ansi(s: str) -> str:
+                ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+                return ansi_escape.sub("", s)
+
+            def _sanitize_output(s: str) -> str:
+                s = _strip_ansi(s)
+                # Replace non-printable characters except tab/newline/carriage return
+                s = "".join(
+                    ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in s
+                )
+                return s
+
+            output = _sanitize_output(output)
 
             # Truncate output if it's too long to prevent overwhelming the LLM
-            max_output_length = (
-                8000  # Increased from 2000 to 8000 for better test result visibility
-            )
+            # Keep conservative to reduce model request size and lower API error risk
+            max_output_length = 8000
             if len(output) > max_output_length:
                 truncated_output = (
                     output[:max_output_length]
@@ -365,6 +460,7 @@ def load_environment(
     # Set up function attributes that will be set during conversation
     execute_commands._current_task_id = None
     execute_commands._current_task_path = None
+    execute_commands._current_info = None
 
     # Define rubric functions for evaluation
     def task_completion_score(completion, info, parser, state) -> float:
@@ -378,13 +474,15 @@ def load_environment(
             print(f"Task ID: {task_id}")
             print(f"Task path: {task_path}")
 
-            if task_id not in executor.contexts:
-                print(f"❌ No active terminal context found for task {task_id}")
-                print(f"Active contexts: {list(executor.contexts.keys())}")
+            # Always ensure a context exists/reused for this task
+            try:
+                os.environ.setdefault("TB_NO_REBUILD", "1")
+                os.environ.setdefault("TB_CLEANUP", "0")
+                ctx = executor.get_context(task_id, task_path)
+            except Exception as e:
+                print(f"Failed to create context for {task_id}: {e}")
                 return 0.0
-
-            ctx = executor.contexts[task_id]
-            print(f"✅ Found active context for task {task_id}")
+            print(f"✅ Ready context for task {task_id}")
 
             # Run the final tests inside the container
             print("🔬 Running Terminal-Bench test suite...")
@@ -404,6 +502,37 @@ def load_environment(
             except Exception as pe:
                 print(f"Parser error: {pe}")
                 success = False
+
+            # Provide detailed diagnostics
+            def _strip_ansi(s: str) -> str:
+                ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+                return ansi_escape.sub("", s)
+
+            def _sanitize(s: str) -> str:
+                s = _strip_ansi(s)
+                return "".join(
+                    ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in s
+                )
+
+            sanitized_pane = _sanitize(post_test_pane)
+            # Show the last 120 lines (or up to 6000 chars) for brevity
+            pane_lines = sanitized_pane.splitlines()
+            tail_lines = 120
+            tail_text = "\n".join(pane_lines[-tail_lines:])
+            if len(tail_text) > 6000:
+                tail_text = tail_text[-6000:]
+
+            print("\n🧪 Test run status:")
+            print(f" - Runner indicated ok: {ran_ok}")
+            print(f" - Parsed results available: {parsed is not None}")
+            if parsed is not None:
+                try:
+                    print(f" - Parsed results: {parsed}")
+                except Exception:
+                    pass
+            print("----- Test output (tail) -----")
+            print(tail_text)
+            print("----- End test output -----\n")
 
             print("\n📋 FINAL EVALUATION RESULT:")
             print(f"Tests passed: {success}")
@@ -466,6 +595,15 @@ def load_environment(
             if task_id:
                 execute_commands._current_task_id = task_id
                 execute_commands._current_task_path = task_path
+                execute_commands._current_info = info
+                # Proactively create/start a terminal context so tests can run
+                try:
+                    if task_path:
+                        self.executor.get_context(task_id, Path(task_path))
+                except Exception as e:
+                    print(
+                        f"[TERMINALBENCH_ENV]   Warning: failed to start context early: {e}"
+                    )
                 print("[TERMINALBENCH_ENV]   ✅ Task context initialized")
             else:
                 print("[TERMINALBENCH_ENV]   ❌ No task_id found in state")
@@ -486,6 +624,7 @@ def load_environment(
 
             execute_commands._current_task_id = task_id
             execute_commands._current_task_path = task_path
+            execute_commands._current_info = info
 
             print("[TERMINALBENCH_ENV]   Context set, delegating to parent ToolEnv")
             return super().env_response(messages, state, **kwargs)
