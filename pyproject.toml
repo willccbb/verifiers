@@ -29,10 +29,8 @@ dependencies = [
     "openai",
     "datasets",
     "pydantic>=2.11.7",
-    "ruamel.yaml>=0.17.0",
 ]
 
-[project.optional-dependencies]
 all = [
     "ruff",
     "pre-commit",
@@ -105,6 +103,8 @@ vf-vllm = "verifiers.inference.vllm_server:main"
 # Hatchling configuration
 [tool.hatch.version]
 path = "verifiers/__init__.py"
+
+ 
 
 [tool.hatch.build.targets.sdist]
 include = [

@@ -6,11 +6,17 @@ dependencies = [
     "docker>=6.0.0",
     "datasets>=2.14.0",
     "PyYAML>=6.0",
+    "ruamel.yaml>=0.17.0",
+    "terminal-bench>=0.2.17; python_version >= '3.12'",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build]
-include = ["terminalbench.py"] 
+[tool.hatch.build.targets.wheel]
+packages = []
+only-include = ["terminalbench.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["terminalbench.py"]
