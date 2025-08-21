@@ -1,6 +1,6 @@
 # Terminal-Bench Environment
 
-This environment runs Terminal-Bench tasks directly from the checked-out Terminal-Bench repository using its native harness (Docker + tmux). It does not fetch tasks from Hugging Face; instead, it reads the local `terminal-bench/tasks` directory and wraps tasks into a minimal dataset for the verifiers framework. Terminal-Bench evaluates AI agents on real-world, end-to-end terminal tasks ranging from compiling code and training models to setting up servers and debugging systems.
+This environment runs Terminal-Bench tasks from the local repository using the Terminal-Bench harness (Docker + tmux). Tasks are read from `terminal-bench/tasks` and provided to the verifiers framework. Terminal-Bench evaluates AI agents on end-to-end terminal tasks ranging from compiling code and training models to setting up servers and debugging systems.
 
 ## Features
 
@@ -69,7 +69,7 @@ task_id/
 2. **Container Setup**: Docker image built from task Dockerfile
 3. **Agent Execution**: Model-generated commands executed in container
 4. **Test Validation**: Test suite run to verify task completion
-5. **Cleanup**: Harness handles container/image cleanup; the environment also registers safety cleanup on exit
+5. **Cleanup**: Cleanup is handled automatically
 
 ## Scoring
 
