@@ -1,5 +1,6 @@
 [project]
 name = "terminal-bench"
+description = "Terminal-Bench but as an RL environment."
 version = "0.1.0"
 dependencies = [
     "verifiers>=0.1.0",

@@ -9,7 +9,7 @@ This environment runs Terminal-Bench tasks from the local repository using the T
 
 ## Tasks
 
-Tasks are discovered from the local `terminal-bench/tasks` folder in this repository checkout. A subset can be selected via `num_examples` (default: all). The Terminal-Bench task suite contains tasks across various categories:
+A subset of tasks can be selected via `num_examples` (default: all). The Terminal-Bench task suite contains tasks across various categories:
 
 - **algorithms**: Algorithm implementation and optimization
 - **data-science**: Data processing and analysis tasks  
