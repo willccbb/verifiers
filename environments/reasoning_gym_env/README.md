@@ -1,7 +1,7 @@
-# vf-reasoning-gym
+# reasoning-gym-env
 
 ### Overview
-- **Environment ID**: `vf-reasoning-gym`
+- **Environment ID**: `reasoning-gym-env`
 - **Short description**: Single-turn evaluation over `reasoning_gym` procedural tasks with XML formatting.
 - **Tags**: reasoning, procedural, single-turn, xml, synthetic
 
@@ -19,13 +19,13 @@
 Run an evaluation with default settings:
 
 ```bash
-uv run vf-eval vf-reasoning-gym
+uv run vf-eval reasoning-gym-env
 ```
 
 Configure model and sampling:
 
 ```bash
-uv run vf-eval vf-reasoning-gym \
+uv run vf-eval reasoning-gym-env \
   -m gpt-4.1-mini \
   -n 20 -r 3 -t 1024 -T 0.7 \
   -a '{"gym": "arc_1d", "num_train_examples": 2000, "num_eval_examples": 2000}'
@@ -33,7 +33,7 @@ uv run vf-eval vf-reasoning-gym \
 
 Notes:
 - Use `gym` to select a single dataset name, a list of names, or a composite specification.
-- Reports are written under `./environments/vf_reasoning_gym/reports/` and auto-embedded below.
+- Reports are written under `./environments/reasoning_gym_env/reports/` and auto-embedded below.
 
 ### Environment Arguments
 | Arg | Type | Default | Description |
@@ -48,10 +48,3 @@ Notes:
 | ------ | ------- |
 | `reward` | Task-specific score from `reasoning_gym` for parsed answer |
 | `format_reward` | Adherence to `<think>`/`<answer>` XML format |
-
-## Evaluation Reports
-
-<!-- Do not edit below this line. Content is auto-generated. -->
-<!-- vf:begin:reports -->
-<p>No reports found. Run <code>uv run vf-eval vf-reasoning-gym -a '{"key": "value"}'</code> to generate one.</p>
-<!-- vf:end:reports -->
