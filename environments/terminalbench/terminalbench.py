@@ -1,544 +1,265 @@
 """
-Terminal-Bench Dataset Implementation for Verifiers
+Terminal-Bench environment for Verifiers
 
-This implementation uses the Terminal-Bench dataset from HuggingFace (ia03/terminal-bench)
-with Docker-based execution for real terminal environment tasks.
+This simplified environment reuses Terminal-Bench's native harness components
+to run tasks in Docker via docker-compose and a tmux session, exposing a single
+`execute_commands` tool for the agent. It avoids duplicating container logic.
 """
 
 import atexit
-import hashlib
-import io
+import importlib
+import importlib.util
+import types
 import signal
 import sys
-import tarfile
 import tempfile
-import shlex
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import docker  # type: ignore
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 
 import verifiers as vf
 from verifiers.envs.tool_env import ToolEnv
 
+# Import only the specific terminal-bench modules we need, without importing the
+# package-level __init__ (which pulls heavy agent deps).
+try:
+    from terminal_bench.handlers.trial_handler import Task, TaskPaths, TrialHandler  # type: ignore
+    from terminal_bench.terminal.terminal import Terminal  # type: ignore
+    from terminal_bench.terminal.tmux_session import TmuxSession  # type: ignore
+    from terminal_bench.terminal.docker_compose_manager import DockerComposeManager  # type: ignore
+except Exception:
+    repo_root = Path(__file__).resolve().parents[2]
+    tb_root = repo_root / "terminal-bench"
 
-class TerminalContainer:
-    """Manages a single Docker container for terminal task execution"""
-
-    def __init__(self, docker_client, task_data: Dict[str, Any]):
-        self.docker_client = docker_client
-        self.task_data = task_data
-        self.container = None
-        self.task_dir = None
-        self._setup_container()
-
-    def _setup_container(self):
-        """Set up the Docker container for this task"""
-        # Extract task to temporary directory
-        self.temp_dir = tempfile.mkdtemp(prefix="terminalbench_")
-        self.task_dir = Path(self.temp_dir) / self.task_data["task_id"]
-        self.task_dir.mkdir(parents=True, exist_ok=True)
-
-        # Verify archive integrity
-        archive_bytes = self.task_data["archive"]
-        expected_hash = self.task_data["tar_sha256"]
-        actual_hash = hashlib.sha256(archive_bytes).hexdigest()
-
-        if actual_hash != expected_hash:
-            raise RuntimeError(
-                f"Archive integrity check failed for {self.task_data['task_id']}"
-            )
-
-        # Extract archive
-        try:
-            with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as tar:
-                tar.extractall(self.task_dir)
-        except Exception as e:
-            raise RuntimeError(f"Failed to extract archive: {e}")
-
-        # Build and start container
-        image_name = f"terminalbench_{self.task_data['task_id']}".lower().replace(
-            "-", "_"
+    # Create a lightweight package stub to avoid executing terminal_bench/__init__.py
+    pkg_dir = tb_root / "terminal_bench"
+    if not pkg_dir.exists():
+        raise ModuleNotFoundError(
+            f"terminal-bench source not found at {pkg_dir}. Please ensure the submodule/folder is present."
         )
 
+    if "terminal_bench" not in sys.modules:
+        stub = types.ModuleType("terminal_bench")
+        stub.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
+        sys.modules["terminal_bench"] = stub
+
+    # Import needed submodules normally; they'll use the stub's __path__
+    trial_handler_mod = importlib.import_module("terminal_bench.handlers.trial_handler")
+    terminal_mod = importlib.import_module("terminal_bench.terminal.terminal")
+    tmux_mod = importlib.import_module("terminal_bench.terminal.tmux_session")
+    dcm_mod = importlib.import_module("terminal_bench.terminal.docker_compose_manager")
+
+    Task = getattr(trial_handler_mod, "Task")
+    TaskPaths = getattr(trial_handler_mod, "TaskPaths")
+    TrialHandler = getattr(trial_handler_mod, "TrialHandler")
+    Terminal = getattr(terminal_mod, "Terminal")
+    TmuxSession = getattr(tmux_mod, "TmuxSession")
+    DockerComposeManager = getattr(dcm_mod, "DockerComposeManager")
+
+
+class _TerminalContext:
+    """Holds Terminal-Bench resources for a single task/session."""
+
+    def __init__(self, task_path: Path, output_root: Path):
+        # Create a TrialHandler to leverage naming, paths, and metadata
+        trial_name = f"verifiers.1-of-1.{int(time.time())}"
+        self.trial_handler = TrialHandler(
+            trial_name=trial_name,
+            input_path=task_path,
+            output_path=output_root,
+        )
+
+        # Initialize Terminal using Terminal-Bench's compose manager
+        disable_recording = self.trial_handler.task.disable_asciinema
+        self.terminal = Terminal(
+            client_container_name=self.trial_handler.client_container_name,
+            client_image_name=self.trial_handler.client_image_name,
+            docker_image_name_prefix=self.trial_handler.docker_image_name_prefix,
+            docker_compose_path=self.trial_handler.task_paths.docker_compose_path,
+            sessions_logs_path=self.trial_handler.trial_paths.sessions_path,
+            agent_logs_path=self.trial_handler.trial_paths.agent_logging_dir,
+            commands_path=self.trial_handler.trial_paths.commands_path,
+            no_rebuild=False,
+            cleanup=False,
+            livestream=False,
+            disable_recording=disable_recording,
+        )
+
+        self.session: Optional[TmuxSession] = None
+
+    def start(self) -> None:
+        self.terminal.start()
+        # Run as configured user for agent session
+        self.session = self.terminal.create_session(
+            "agent", is_active_stream=False, as_configured_user=True
+        )
+
+    def stop(self) -> None:
         try:
-            # Build image
-            self.docker_client.images.build(
-                path=str(self.task_dir),
-                tag=image_name,
-                rm=True,
-                labels={"terminalbench": "true"},
+            self.terminal.stop()
+        except Exception:
+            pass
+
+    def send_and_capture(self, command: str, timeout: float) -> Tuple[bool, str]:
+        if not self.session:
+            raise RuntimeError("Terminal session not started")
+
+        # Execute command in a blocking manner and capture incremental output
+        self.session.send_keys([command, "Enter"], block=True, max_timeout_sec=timeout)
+        output = self.session.get_incremental_output()
+
+        # Heuristic: consider success if no clear error keywords appear in last pane
+        pane_text = self.session.capture_pane(capture_entire=False)
+        failed = any(
+            k in pane_text for k in ["command not found", "Traceback", "ERROR"]
+        )  # noqa: E501
+        return (not failed), output
+
+    def run_tests(self, timeout: float) -> Tuple[bool, str]:
+        if not self.session:
+            raise RuntimeError("Terminal session not started")
+
+        # Copy tests and run-tests.sh similar to Harness
+        paths = [self.trial_handler.task_paths.run_tests_path]
+        if self.trial_handler.task_paths.test_dir.exists():
+            paths.append(self.trial_handler.task_paths.test_dir)
+
+        self.terminal.copy_to_container(
+            paths=paths,
+            container_dir=str(DockerComposeManager.CONTAINER_TEST_DIR),
+        )
+
+        # Follow Harness behavior: optionally use a separate shell for tests
+        test_session = self.session
+        if not self.trial_handler.task.run_tests_in_same_shell:
+            test_session = self.terminal.create_session(
+                "tests", is_active_stream=False, as_configured_user=False
             )
 
-            # Start container
-            self.container = self.docker_client.containers.run(
-                image=image_name,
-                command=["sleep", "infinity"],
-                detach=True,
-                remove=False,
-                labels={"terminalbench": "true"},
-                mem_limit="2g",
-                memswap_limit="2g",
-                cpu_quota=100000,  # 1 CPU
-                pids_limit=100,
-                environment={
-                    "TEST_DIR": "/tests",
-                    "T_BENCH_TEST_DIR": "/tests",
-                    "T_BENCH_CONTAINER_LOGS_PATH": "/var/log/tbench",
-                },
-            )
-
-        except Exception as e:
-            self.cleanup()
-            raise RuntimeError(f"Failed to setup container: {e}")
-
-    def execute_commands(self, commands: str, timeout: int = 180) -> Tuple[bool, str]:
-        """Execute commands in the container and return success, output"""
-        if not self.container:
-            return False, "Container not available"
-
+        # Execute tests
+        test_script_name = self.trial_handler.task_paths.run_tests_path.name
+        test_cmd = f"bash {DockerComposeManager.CONTAINER_TEST_DIR / test_script_name}"
         try:
-            # Use `timeout` if available in the container; otherwise fall back to a plain run.
-            # We wrap everything in a single bash -lc to avoid extra execs and to handle quoting safely.
-            quoted = shlex.quote(commands)
-            composite = (
-                f"if command -v timeout >/dev/null 2>&1; then "
-                f"timeout {timeout}s bash -lc {quoted}; "
-                f"else bash -lc {quoted}; fi"
-            )
+            test_session.send_keys(
+                [test_cmd, "Enter"], block=True, max_timeout_sec=timeout
+            )  # noqa: E501
+        except TimeoutError:
+            return False, f"[terminalbench] Test execution timed out after {timeout}s"
 
-            result = self.container.exec_run(
-                cmd=["bash", "-lc", composite],
-                stdout=True,
-                stderr=True,
-                tty=False,
-                user="root",
-            )
-
-            output = result.output.decode("utf-8", errors="replace")
-            success = result.exit_code == 0
-
-            # GNU timeout uses 124 for timeouts. Mark as failure with a clear message.
-            if result.exit_code == 124:
-                success = False
-                output = (
-                    output
-                    + f"\n[terminalbench] Command timed out after {timeout} seconds (exit 124)."
-                )
-
-            return success, output
-
-        except Exception as e:
-            return False, f"Command execution failed: {e}"
-
-    def run_tests(self, timeout: int = 30) -> Tuple[bool, str]:
-        """Run the final tests and return success, output"""
-        if not self.container:
-            return False, "Container not available"
-
-        print("\n🧪 RUNNING TERMINALBENCH TESTS FOR TASK 🧪")
-        print(f"Task ID: {self.task_data.get('task_id', 'unknown')}")
-        print(f"Test timeout: {timeout} seconds")
-
-        try:
-            # Copy tests to container if they exist
-            tests_dir = self.task_dir / "tests"
-            if tests_dir.exists():
-                print(f"📁 Found tests directory: {tests_dir}")
-                print("📁 Test files:")
-                for test_file in tests_dir.iterdir():
-                    print(f"   - {test_file.name}")
-
-                # Create tests directory in container
-                self.container.exec_run(["mkdir", "-p", "/tests"])
-
-                # Copy test files
-                tar_buffer = io.BytesIO()
-                with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
-                    tar.add(tests_dir, arcname="tests")
-                tar_buffer.seek(0)
-
-                self.container.put_archive("/", tar_buffer)
-                print("✅ Tests copied to container")
-            else:
-                print(f"❌ No tests directory found at {tests_dir}")
-
-            # Determine test command
-            test_script = self.task_dir / "run-tests.sh"
-            if test_script.exists():
-                print(f"🔧 Found custom test script: {test_script}")
-                # Copy custom test script
-                tar_buffer = io.BytesIO()
-                with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
-                    tar.add(test_script, arcname="run-tests.sh")
-                tar_buffer.seek(0)
-                self.container.put_archive("/", tar_buffer)
-                test_cmd = "bash /run-tests.sh"
-                print(f"🔧 Using custom test command: {test_cmd}")
-            else:
-                print("🔧 No custom test script found, using default pytest")
-                # Use default pytest runner
-                test_cmd = """
-                cd /tests
-                echo "=== PYTEST TEST EXECUTION ==="
-                echo "Working directory: $(pwd)"
-                echo "Files in test directory:"
-                ls -la
-                echo "=== INSTALLING PYTEST ==="
-                python -m pip install pytest > /dev/null 2>&1 || pip install pytest > /dev/null 2>&1
-                echo "=== RUNNING PYTEST ==="
-                python -m pytest test_outputs.py -v -s --tb=short
-                """
-                print("🔧 Using default pytest command")
-
-            print("\n🚀 EXECUTING TESTS...")
-            # Execute tests with `timeout` if available; otherwise plain run.
-            quoted_test = shlex.quote(test_cmd)
-            test_composite = (
-                f"if command -v timeout >/dev/null 2>&1; then "
-                f"timeout {timeout}s bash -lc {quoted_test}; "
-                f"else bash -lc {quoted_test}; fi"
-            )
-
-            result = self.container.exec_run(
-                cmd=["bash", "-lc", test_composite],
-                stdout=True,
-                stderr=True,
-                tty=False,
-                user="root",
-            )
-
-            output = result.output.decode("utf-8", errors="replace")
-            success = result.exit_code == 0
-
-            if result.exit_code == 124:
-                success = False
-                output = (
-                    output
-                    + f"\n[terminalbench] Test execution timed out after {timeout} seconds (exit 124)."
-                )
-
-            print("\n📊 TEST RESULTS:")
-            print(f"Exit code: {result.exit_code}")
-            print(f"Success: {success}")
-            print(f"Output length: {len(output)} characters")
-
-            # Parse and display test results in detail
-            if "FAILED" in output or "ERROR" in output:
-                print("\n❌ DETAILED FAILURE ANALYSIS:")
-                lines = output.split("\n")
-                for i, line in enumerate(lines):
-                    if "FAILED" in line or "ERROR" in line or "AssertionError" in line:
-                        print(f"   Line {i + 1}: {line}")
-                        # Print context around failures
-                        for j in range(max(0, i - 2), min(len(lines), i + 3)):
-                            if j != i:
-                                print(f"   Context {j + 1}: {lines[j]}")
-
-            if "PASSED" in output:
-                print("\n✅ PASSED TESTS:")
-                lines = output.split("\n")
-                for line in lines:
-                    if "PASSED" in line:
-                        print(f"   {line}")
-
-            # Show full output for debugging
-            print("\n📝 FULL TEST OUTPUT:")
-            print("=" * 50)
-            print(output)
-            print("=" * 50)
-
-            return success, output
-
-        except Exception as e:
-            error_msg = f"Test execution failed: {e}"
-            print(f"❌ {error_msg}")
-            return False, error_msg
-
-    def cleanup(self):
-        """Clean up container and temporary files"""
-        if self.container:
-            try:
-                self.container.stop(timeout=5)
-                self.container.remove(force=True)
-            except Exception:
-                pass
-            self.container = None
-
-        if hasattr(self, "temp_dir") and self.temp_dir:
-            try:
-                import shutil
-
-                shutil.rmtree(self.temp_dir)
-            except Exception:
-                pass
-
-    # Removed __del__ method to prevent premature cleanup by garbage collector
+        post_test = test_session.capture_pane(capture_entire=True)
+        return ("PASSED" in post_test and "FAILED" not in post_test), post_test
 
 
 class TerminalTaskExecutor:
-    """Manages Docker containers for terminal tasks"""
+    """Manages Terminal-Bench terminals for tasks, one per task."""
 
     def __init__(self):
-        """Initialize Docker-based terminal task executor"""
-        try:
-            self.docker_client = docker.from_env()
-            self.docker_client.ping()
+        self.contexts: Dict[str, _TerminalContext] = {}
+        self.output_root = Path(tempfile.mkdtemp(prefix="terminalbench_vf_"))
+        self._register_cleanup_handlers()
 
-            # Clean up any orphaned containers from previous runs
-            self._cleanup_orphaned_containers()
-
-            # Track active containers
-            self.active_containers = {}
-            self._register_cleanup_handlers()
-
-            print("Terminal task executor with Docker initialized successfully")
-
-        except Exception as e:
-            raise RuntimeError(
-                f"Docker is required but not available: {e}\n"
-                "Please ensure Docker is installed and running:\n"
-                "  - Install Docker: https://docs.docker.com/get-docker/\n"
-                "  - Start Docker daemon: sudo systemctl start docker\n"
-                "  - Add user to docker group: sudo usermod -aG docker $USER"
-            )
-
-    def _cleanup_orphaned_containers(self):
-        """Clean up any containers from previous runs"""
-        try:
-            containers = self.docker_client.containers.list(
-                all=True, filters={"label": "terminalbench=true"}
-            )
-
-            if containers:
-                print(
-                    f"Cleaning up {len(containers)} orphaned containers from previous runs..."
-                )
-                for container in containers:
-                    try:
-                        container.remove(force=True)
-                    except Exception:
-                        pass
-        except Exception as e:
-            print(f"Warning: Failed to clean up orphaned containers: {e}")
-
-    def _register_cleanup_handlers(self):
-        """Register cleanup handlers for various exit scenarios"""
+    def _register_cleanup_handlers(self) -> None:
         atexit.register(self.cleanup)
 
-        def signal_handler(signum, frame):
+        def _handler(signum, frame):
             print(f"\nReceived signal {signum}, cleaning up...")
             self.cleanup()
             sys.exit(0)
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, _handler)
+        signal.signal(signal.SIGTERM, _handler)
 
-    def get_container(
-        self, task_id: str, task_data: Dict[str, Any]
-    ) -> TerminalContainer:
-        """Get or create a container for the given task"""
-        if task_id not in self.active_containers:
-            self.active_containers[task_id] = TerminalContainer(
-                self.docker_client, task_data
-            )
-        return self.active_containers[task_id]
+    def get_context(self, task_id: str, task_path: Path) -> _TerminalContext:
+        if task_id not in self.contexts:
+            ctx = _TerminalContext(task_path=task_path, output_root=self.output_root)
+            ctx.start()
+            self.contexts[task_id] = ctx
+        return self.contexts[task_id]
 
-    def cleanup_container(self, task_id: str):
-        """Clean up a specific container"""
-        if task_id in self.active_containers:
-            self.active_containers[task_id].cleanup()
-            del self.active_containers[task_id]
+    def cleanup_context(self, task_id: str) -> None:
+        ctx = self.contexts.pop(task_id, None)
+        if ctx:
+            ctx.stop()
 
-    def cleanup(self):
-        """Clean up all resources"""
-        print("Cleaning up Docker resources...")
-
-        # Clean up all active containers
-        for task_id in list(self.active_containers.keys()):
-            self.cleanup_container(task_id)
-
+    def cleanup(self) -> None:
+        for tid in list(self.contexts.keys()):
+            self.cleanup_context(tid)
         try:
-            self.docker_client.containers.prune(filters={"label": "terminalbench=true"})
-        except Exception as e:
-            print(f"Warning: Failed to prune Docker resources: {e}")
+            import shutil
 
-    # Removed __del__ method to prevent premature cleanup by garbage collector
-
-    def __enter__(self):
-        """Context manager entry"""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit with cleanup"""
-        self.cleanup()
-        return False
+            shutil.rmtree(self.output_root, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def load_terminalbench_dataset(
-    dataset_name: str = "ia03/terminal-bench",
-    split: str = "test",  # Terminal-bench now uses "test" split
+    tasks_root: Optional[Path] = None,
     num_examples: int = -1,
 ) -> Dataset:
-    """Load the Terminal-Bench dataset from HuggingFace"""
+    """Build a lightweight dataset from local Terminal-Bench tasks.
 
-    print(f"Loading Terminal-Bench dataset: {dataset_name}")
-    print(f"Split: {split}")
-
-    try:
-        # Try different loading approaches based on the dataset structure
-        dataset = None
-
-        # Load dataset with explicit data files mapping
-        try:
-            print("Attempting to load dataset with explicit data files mapping...")
-
-            # Map the test files to the requested split explicitly
-            if split == "test":
-                data_files = {split: "data/test-*.parquet"}
-            else:
-                # Fallback for other splits (though only test is expected)
-                data_files = {split: "data/*.parquet"}
-
-            full_dataset = load_dataset(dataset_name, data_files=data_files)
-
-            # Check available splits
-            if isinstance(full_dataset, dict):
-                available_splits = list(full_dataset.keys())
-                print(f"Available splits: {available_splits}")
-
-                # Use the requested split if available
-                if split in full_dataset:
-                    dataset = full_dataset[split]
-                    print(f"✅ Dataset loaded successfully: {len(dataset)} tasks")
-                else:
-                    print(f"Split '{split}' not found in {available_splits}")
-                    raise Exception(f"Split '{split}' not found in dataset")
-            else:
-                # Single split dataset (shouldn't happen with explicit mapping)
-                dataset = full_dataset
-                print(f"✅ Dataset loaded successfully: {len(dataset)} tasks")
-
-        except Exception as e1:
-            print(f"Dataset loading failed: {e1}")
-            raise Exception(
-                "Failed to load Terminal-Bench dataset. Please check if the dataset exists and is accessible."
-            )
-
-        if dataset is None:
-            raise Exception("Dataset loading failed - dataset is None")
-
-        # Limit examples if specified
-        if num_examples > 0 and len(dataset) > num_examples:  # type: ignore
-            dataset = dataset.select(range(num_examples))  # type: ignore
-            print(f"Limited to {num_examples} examples")
-
-        return dataset  # type: ignore
-
-    except Exception as e:
-        print(f"Error loading Terminal-Bench dataset: {e}")
-        print("\nTroubleshooting tips:")
-        print(
-            "1. Check if the dataset exists at: https://huggingface.co/datasets/ia03/terminal-bench"
-        )
-        print("2. Verify internet connection")
-        print("3. Try updating the datasets library: pip install -U datasets")
-        print("4. Check if the dataset is private and requires authentication")
-        print(
-            "5. The dataset files may be in a data/ subdirectory - this is handled automatically"
-        )
-        raise
-
-
-def load_environment(
-    dataset_name: str = "ia03/terminal-bench",
-    split: str = "test",  # Terminal-bench uses "test" split
-    num_examples: int = -1,
-) -> vf.ToolEnv:
-    """Load Terminal-Bench environment with proper multi-turn support
-
-    Args:
-        dataset_name: Name of the dataset to load
-        split: Dataset split to use
-        num_examples: Number of examples to load (-1 for all)
-
-    Returns:
-        ToolEnv: Configured environment with proper multi-turn interaction
+    Returns a HF-style Dataset of entries with minimal info needed by ToolEnv.
     """
-    # Load dataset
-    dataset = load_terminalbench_dataset(dataset_name, split, num_examples)
+    # Default to the checked-out terminal-bench tasks folder
+    if tasks_root is None:
+        repo_root = Path(__file__).resolve().parents[2]
+        tasks_root = repo_root / "terminal-bench" / "tasks"
 
-    # Initialize task executor
-    executor = TerminalTaskExecutor()
+    if not tasks_root.exists():
+        raise RuntimeError(f"Terminal-Bench tasks directory not found at {tasks_root}")
 
-    # Convert dataset to verifiers format
-    converted_dataset = []
-    for idx, example in enumerate(dataset):
-        task_id = example.get("task_id", f"task_{idx}")  # type: ignore
-        base_description = example.get("base_description", "")  # type: ignore
-        difficulty = example.get("difficulty", "unknown")  # type: ignore
-        tags = example.get("tags", [])  # type: ignore
-        category = example.get("category", "")  # type: ignore
+    entries: List[Dict[str, Any]] = []
+    tasks = sorted([p for p in tasks_root.iterdir() if p.is_dir()])
 
-        # Format the prompt (Terminal-Bench style)
-        prompt = "You are an AI assistant helping to complete terminal tasks. You have access to a Linux terminal environment.\n\n"
-        prompt += f"## Task: {task_id}\n\n"
-        prompt += f"**Description:** {base_description}\n\n"
-        if category:
-            prompt += f"**Category:** {category}\n"
-        if difficulty:
-            prompt += f"**Difficulty:** {difficulty}\n"
-        if tags:
-            prompt += f"**Tags:** {', '.join(tags)}\n"
-        prompt += "\n**CRITICAL INSTRUCTIONS:**\n"
-        prompt += (
-            "- You MUST use the `execute_commands` function to run shell commands\n"
-        )
-        prompt += "- ALWAYS provide brief reasoning AND immediately follow with execute_commands\n"
-        prompt += "- NEVER make statements without immediate action\n"
-        prompt += "- BAD: 'Now I need to create the file.' [END]\n"
-        prompt += "- GOOD: 'Now I need to create the file.' [IMMEDIATE tool_call]\n"
-        prompt += "- Continue working until the task is completely finished\n"
-        prompt += "- Never stop until all requirements are implemented and tested\n\n"
-        prompt += "**Your approach:**\n"
-        prompt += "1. State what you're doing next (1 sentence)\n"
-        prompt += "2. IMMEDIATELY call execute_commands - no exceptions\n"
-        prompt += "3. Based on results, state next step and immediately execute\n"
-        prompt += "4. Repeat continuously until the entire task is complete\n\n"
-        prompt += "**Important notes:**\n"
-        prompt += "- You are working in a Docker container with full root access\n"
-        prompt += "- Commands will be executed sequentially in bash\n"
-        prompt += "- Avoid interactive commands that require user input\n"
-        prompt += "- If you need to install software, use package managers like apt, pip, etc.\n"
-        prompt += (
-            "- Your goal is to complete the task such that the test suite will pass\n"
-        )
-        prompt += "- You can make multiple function calls to iterate and check your progress\n"
-        prompt += (
-            "- REMEMBER: Always respond with execute_commands calls, never just text\n"
-        )
-        prompt += "- When the task is completely done, say 'TASK COMPLETED' in your final message"
+    # Prefer lightweight tasks for quick smoke tests
+    preferred_order = [
+        "hello-world",
+        "vim-terminal-task",
+        "simple-web-scraper",
+    ]
+    preferred = [p for p in tasks if p.name in preferred_order]
+    others = [p for p in tasks if p.name not in preferred_order]
+    tasks = preferred + others
 
-        converted_dataset.append(
+    if num_examples > 0:
+        tasks = tasks[:num_examples]
+
+    for task_path in tasks:
+        task_id = task_path.name
+        paths = TaskPaths(task_path)
+        task = Task.from_yaml(paths.task_config_path)
+
+        # Use Terminal-Bench's task instruction verbatim as the prompt
+        prompt = task.instruction
+
+        entries.append(
             {
                 "prompt": [{"role": "user", "content": prompt}],
-                "answer": "",  # Will be filled by the model
+                "answer": "",
                 "info": {
                     "task_id": task_id,
-                    "task_data": example,
-                    "base_description": base_description,
-                    "difficulty": difficulty,
-                    "tags": tags,
-                    "category": category,
-                    "max_agent_timeout_sec": example.get("max_agent_timeout_sec", 180),  # type: ignore
-                    "max_test_timeout_sec": example.get("max_test_timeout_sec", 30),  # type: ignore
+                    "task_path": str(task_path),
+                    "max_agent_timeout_sec": task.max_agent_timeout_sec,
+                    "max_test_timeout_sec": task.max_test_timeout_sec,
                 },
             }
         )
 
-    # Create dataset
-    dataset = Dataset.from_list(converted_dataset)
+    return Dataset.from_list(entries)
+
+
+def load_environment(
+    dataset_name: str = "local-terminal-bench",  # unused, retained for compatibility
+    split: str = "test",  # unused
+    num_examples: int = -1,
+) -> vf.ToolEnv:
+    """Load Terminal-Bench environment backed by terminal_bench primitives."""
+    dataset = load_terminalbench_dataset(num_examples=num_examples)
+
+    # Initialize task executor
+    executor = TerminalTaskExecutor()
 
     # Create parser
     def extract_commands(completion: str) -> str:
@@ -566,15 +287,14 @@ def load_environment(
         if not commands:
             return "❌ ERROR: No commands provided. You must provide at least one command to execute."
 
-        # Get task data from the current conversation state
-        # This is set up by the environment during conversation
+        # Get task context from the current conversation state
         task_id = execute_commands._current_task_id
-        task_data = execute_commands._current_task_data
+        task_path_str = execute_commands._current_task_path
 
         print(f"[TERMINALBENCH]   Current task_id: {task_id}")
-        print(f"[TERMINALBENCH]   Current task_data available: {task_data is not None}")
+        print(f"[TERMINALBENCH]   Task path set: {bool(task_path_str)}")
 
-        if not task_id or not task_data:
+        if not task_id or not task_path_str:
             return "❌ ERROR: Terminal environment not properly initialized."
 
         try:
@@ -586,11 +306,22 @@ def load_environment(
             else:
                 return f"❌ ERROR: Commands must be a string or array of strings, got {type(commands)}"
 
-            # Get or create container for this task
-            container = executor.get_container(task_id, task_data)
+            # Get or create terminal context for this task
+            task_path = Path(task_path_str)
+            ctx = executor.get_context(task_id, task_path)
 
-            # Execute commands
-            success, output = container.execute_commands(commands_str, timeout=180)
+            # Execute commands one by one for better incremental output
+            success = True
+            combined_output_parts: List[str] = []
+            for line in commands_str.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                ok, out = ctx.send_and_capture(line, timeout=180)
+                success = success and ok
+                combined_output_parts.append(out)
+
+            output = "\n\n".join(combined_output_parts)
 
             # Truncate output if it's too long to prevent overwhelming the LLM
             max_output_length = (
@@ -622,7 +353,7 @@ def load_environment(
 
     # Set up function attributes that will be set during conversation
     execute_commands._current_task_id = None
-    execute_commands._current_task_data = None
+    execute_commands._current_task_path = None
 
     # Define rubric functions for evaluation
     def task_completion_score(completion, info, parser, state) -> float:
@@ -631,23 +362,37 @@ def load_environment(
 
         try:
             task_id = info["task_id"]
-            task_data = info["task_data"]
+            task_path = Path(info["task_path"])  # type: ignore
 
             print(f"Task ID: {task_id}")
-            print(f"Task data available: {task_data is not None}")
+            print(f"Task path: {task_path}")
 
-            # Get the container (should exist if agent ran any commands)
-            if task_id not in executor.active_containers:
-                print(f"❌ No active container found for task {task_id}")
-                print(f"Active containers: {list(executor.active_containers.keys())}")
-                return 0.0  # No commands were executed
+            if task_id not in executor.contexts:
+                print(f"❌ No active terminal context found for task {task_id}")
+                print(f"Active contexts: {list(executor.contexts.keys())}")
+                return 0.0
 
-            container = executor.active_containers[task_id]
-            print(f"✅ Found active container for task {task_id}")
+            ctx = executor.contexts[task_id]
+            print(f"✅ Found active context for task {task_id}")
 
-            # Run the final tests
+            # Run the final tests inside the container
             print("🔬 Running Terminal-Bench test suite...")
-            success, output = container.run_tests(timeout=info["max_test_timeout_sec"])
+            ran_ok, post_test_pane = ctx.run_tests(
+                timeout=float(info["max_test_timeout_sec"])  # type: ignore
+            )
+
+            # Parse results using Terminal-Bench's parser (1:1 behavior)
+            try:
+                parsed = ctx.trial_handler.parser.parse(post_test_pane)
+                all_passed = (
+                    parsed is not None
+                    and len(parsed) > 0
+                    and all("PASSED" in str(v) for v in parsed.values())
+                )
+                success = bool(all_passed)
+            except Exception as pe:
+                print(f"Parser error: {pe}")
+                success = False
 
             print("\n📋 FINAL EVALUATION RESULT:")
             print(f"Tests passed: {success}")
@@ -658,9 +403,9 @@ def load_environment(
             else:
                 print("✅ Task passed all Terminal-Bench tests!")
 
-            # Clean up container after testing
-            print(f"🧹 Cleaning up container for {task_id}")
-            executor.cleanup_container(task_id)
+            # Clean up after testing
+            print(f"🧹 Cleaning up terminal for {task_id}")
+            executor.cleanup_context(task_id)
 
             return 1.0 if success else 0.0
 
@@ -671,11 +416,11 @@ def load_environment(
 
             print(f"Traceback: {traceback.format_exc()}")
 
-            # Clean up container even if evaluation failed
+            # Clean up even if evaluation failed
             try:
-                if task_id in executor.active_containers:
-                    print(f"🧹 Cleaning up container for {task_id} after error")
-                    executor.cleanup_container(task_id)
+                if task_id in executor.contexts:
+                    print(f"🧹 Cleaning up terminal for {task_id} after error")
+                    executor.cleanup_context(task_id)
             except Exception as cleanup_e:
                 print(f"Warning: Failed to cleanup container after error: {cleanup_e}")
 
@@ -700,16 +445,16 @@ def load_environment(
             """Initialize the task context at the start of a rollout."""
             info = state.get("info", {})
             task_id = info.get("task_id")
-            task_data = info.get("task_data")
+            task_path = info.get("task_path")
 
             print("[TERMINALBENCH_ENV] 🚀 Initializing task state")
             print(f"[TERMINALBENCH_ENV]   Task ID: {task_id}")
-            print(f"[TERMINALBENCH_ENV]   Task data available: {task_data is not None}")
+            print(f"[TERMINALBENCH_ENV]   Task path available: {task_path is not None}")
             print(f"[TERMINALBENCH_ENV]   State keys: {list(state.keys())}")
 
             if task_id:
                 execute_commands._current_task_id = task_id
-                execute_commands._current_task_data = task_data
+                execute_commands._current_task_path = task_path
                 print("[TERMINALBENCH_ENV]   ✅ Task context initialized")
             else:
                 print("[TERMINALBENCH_ENV]   ❌ No task_id found in state")
@@ -718,18 +463,18 @@ def load_environment(
             """Set up context for execute_commands function and delegate to parent"""
             info = state.get("info", {})
             task_id = info.get("task_id")
-            task_data = info.get("task_data")
+            task_path = info.get("task_path")
 
             print("[TERMINALBENCH_ENV] 🔧 Setting up task context")
             print(f"[TERMINALBENCH_ENV]   Task ID: {task_id}")
-            print(f"[TERMINALBENCH_ENV]   Task data available: {task_data is not None}")
+            print(f"[TERMINALBENCH_ENV]   Task path available: {task_path is not None}")
             print(f"[TERMINALBENCH_ENV]   State keys: {list(state.keys())}")
             print(
                 f"[TERMINALBENCH_ENV]   Info keys: {list(info.keys()) if info else 'No info'}"
             )
 
             execute_commands._current_task_id = task_id
-            execute_commands._current_task_data = task_data
+            execute_commands._current_task_path = task_path
 
             print("[TERMINALBENCH_ENV]   Context set, delegating to parent ToolEnv")
             return super().env_response(messages, state, **kwargs)
@@ -754,44 +499,5 @@ def load_environment(
 
 
 def cleanup_all_docker_resources():
-    """Utility function to clean up ALL Docker resources related to Terminal-Bench
-
-    This is useful for manual cleanup if resources were left behind.
-    """
-    try:
-        client = docker.from_env()
-
-        # Remove all containers with our label
-        containers = client.containers.list(
-            all=True, filters={"label": "terminalbench=true"}
-        )
-        print(f"Found {len(containers)} Terminal-Bench containers to clean up...")
-
-        for container in containers:
-            try:
-                container.stop(timeout=2)
-                container.remove(force=True)
-                print(f"Removed container {container.short_id}")
-            except Exception as e:
-                print(f"Failed to remove container {container.short_id}: {e}")
-
-        # Remove all images with terminalbench prefix
-        images = client.images.list(filters={"label": "terminalbench=true"})
-        print(f"Found {len(images)} Terminal-Bench images to clean up...")
-
-        for image in images:
-            try:
-                client.images.remove(image.id, force=True)
-                print(f"Removed image {image.short_id}")
-            except Exception as e:
-                print(f"Failed to remove image {image.short_id}: {e}")
-
-        # Prune system resources
-        print("Pruning Docker system resources...")
-        client.containers.prune()
-        client.images.prune()
-
-        print("Docker cleanup complete!")
-
-    except Exception as e:
-        print(f"Error during Docker cleanup: {e}")
+    """No-op shim retained for compatibility; Terminal manages cleanup itself."""
+    pass

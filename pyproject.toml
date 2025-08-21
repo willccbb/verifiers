@@ -29,6 +29,7 @@ dependencies = [
     "openai",
     "datasets",
     "pydantic>=2.11.7",
+    "ruamel.yaml>=0.17.0",
 ]
 
 [project.optional-dependencies]
