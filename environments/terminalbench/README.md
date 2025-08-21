@@ -42,28 +42,6 @@ env = load_environment(
 # Agent/tool calls should provide non-interactive shell commands to complete the task inside the container.
 ```
 
-## Task Structure
-
-Each task is extracted from a gzipped tarball containing:
-
-```
-task_id/
-├── Dockerfile              # Container definition
-├── task.yaml              # Task configuration  
-├── solution.sh            # Reference solution
-├── tests/                 # Test validation
-│   └── test_outputs.py   # pytest test file
-├── run-tests.sh          # Optional custom test runner
-└── [additional files]    # Data, binaries, models, etc.
-```
-
-## Evaluation Process
-
-1. **Archive Extraction**: Task archive is extracted and integrity verified
-2. **Container Setup**: Docker image built from task Dockerfile
-3. **Agent Execution**: Model-generated commands executed in container
-4. **Test Validation**: Test suite run to verify task completion
-5. **Cleanup**: Cleanup is handled automatically
 
 ## Scoring
 
