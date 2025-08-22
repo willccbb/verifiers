@@ -95,8 +95,8 @@ _LAZY_IMPORTS = {
     "get_tokenizer": "verifiers.utils.model_utils:get_tokenizer",
     "GRPOConfig": "verifiers.trainers:GRPOConfig",
     "GRPOTrainer": "verifiers.trainers:GRPOTrainer",
-    "grpo_defaults": "verifiers.trainers.grpo_defaults",
-    "lora_defaults": "verifiers.trainers.lora_defaults",
+    "grpo_defaults": "verifiers.trainers:grpo_defaults",
+    "lora_defaults": "verifiers.trainers:lora_defaults",
 }
 
 
