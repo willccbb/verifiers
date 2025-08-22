@@ -2,7 +2,8 @@
 name = "reasoning-gym-env"
 description = "ReasoningGym suite of programmatically-generated reasoning tasks"
 tags = ["reasoning-gym", "logic", "puzzles", "math", "train"]
-version = "0.1.0"
+version = "0.1.1"
+requires-python = ">=3.11"
 dependencies = [
     "verifiers>=0.1.2.post0",
     "reasoning-gym",
@@ -13,4 +14,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-include = ["vf_reasoning_gym.py"]
+include = ["reasoning_gym_env.py"]
