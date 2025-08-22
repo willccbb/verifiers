@@ -144,7 +144,7 @@ class TestSingleTurnEnv:
         # Verify sampling args were passed
         call_args = mock_singleturn_env.client.chat.completions.create.call_args
         assert "temperature" in call_args.kwargs
-        assert "max_tokens" in call_args.kwargs
+        assert "max_completion_tokens" in call_args.kwargs
 
     @pytest.mark.asyncio
     async def test_rollout_with_task_and_info(self, mock_singleturn_env):

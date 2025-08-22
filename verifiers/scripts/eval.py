@@ -27,7 +27,7 @@ def eval_environment(
     rollouts_per_example: int,
     max_concurrent_requests: int,
     max_tokens: int,
-    temperature: float,
+    temperature: float | None,
     verbose: bool,
     write_report: bool,
     save_dataset: bool,
@@ -64,10 +64,11 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
 
     client = OpenAI(api_key=os.getenv(api_key_var, "EMPTY"), base_url=api_base_url)
     vf_env = vf.load_environment(env_id=env, **env_args)
-    sampling_args = {
+    sampling_args: dict[str, int | float | None] = {
         "max_tokens": max_tokens,
-        "temperature": temperature,
     }
+    if temperature is not None:
+        sampling_args["temperature"] = temperature
     results = vf_env.evaluate(
         client=client,
         model=model,
@@ -226,7 +227,7 @@ def main():
         help="Maximum number of tokens to generate",
     )
     parser.add_argument(
-        "--temperature", "-T", type=float, default=0.7, help="Temperature for sampling"
+        "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
     )
     parser.add_argument(
         "--verbose", "-v", default=False, action="store_true", help="Verbose output"
