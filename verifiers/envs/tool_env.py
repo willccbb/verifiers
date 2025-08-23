@@ -19,7 +19,7 @@ class ToolEnv(MultiTurnEnv):
         self.error_formatter = error_formatter
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
         self.tool_map = {tool.__name__: tool for tool in self.tools}
-        super().__init__(oai_tools=self.oai_tools, **kwargs)
+        super().__init__(oai_tools=self.oai_tools, max_turns=max_turns, **kwargs)
 
     def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
         assert isinstance(messages, list)

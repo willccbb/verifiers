@@ -15,12 +15,17 @@ class StatefulToolEnv(ToolEnv):
         error_formatter: Callable[[Exception], str] = lambda e: f"{str(e)}",
         **kwargs,
     ):
+        super().__init__(
+            tools=tools,
+            max_turns=max_turns,
+            error_formatter=error_formatter,
+            **kwargs,
+        )
         self.tools = tools or []
         self.max_turns = max_turns
         self.error_formatter = error_formatter
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
         self.tool_map = {tool.__name__: tool for tool in self.tools}
-        super().__init__(oai_tools=self.oai_tools, **kwargs)
 
     @abstractmethod
     def update_tool_args(
