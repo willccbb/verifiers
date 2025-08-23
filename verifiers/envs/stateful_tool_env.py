@@ -1,12 +1,13 @@
 import json
-from typing import Any, Callable
+from abc import abstractmethod
+from typing import Callable
 
-from verifiers.envs.multiturn_env import MultiTurnEnv
+from verifiers.envs.tool_env import ToolEnv
 from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
 from verifiers.utils.tool_utils import convert_func_to_oai_tool
 
 
-class ToolEnv(MultiTurnEnv):
+class StatefulToolEnv(ToolEnv):
     def __init__(
         self,
         tools: list[Callable] | None = None,
@@ -21,13 +22,12 @@ class ToolEnv(MultiTurnEnv):
         self.tool_map = {tool.__name__: tool for tool in self.tools}
         super().__init__(oai_tools=self.oai_tools, **kwargs)
 
-    def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
-        assert isinstance(messages, list)
-        is_assistant_message = messages[-1]["role"] == "assistant"
-        no_tool_calls = (
-            "tool_calls" not in messages[-1] or messages[-1]["tool_calls"] is None
-        )
-        return is_assistant_message and no_tool_calls
+    @abstractmethod
+    def update_tool_args(
+        self, tool_args: dict, messages: Messages, state: State, **kwargs
+    ) -> dict:
+        """Update tool arguments and/or state (in-place) based on messages and state."""
+        pass
 
     def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
@@ -59,6 +59,7 @@ class ToolEnv(MultiTurnEnv):
             tool_name: str = tool_call.function.name
             tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
+            tool_args = self.update_tool_args(tool_args, messages, state, **kwargs)
             tool_message: Message = self.call_tool(tool_name, tool_args, tool_call_id)
             tool_messages.append(tool_message)
         return tool_messages, state
