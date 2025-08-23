@@ -1,0 +1,19 @@
+[project]
+name = "search-r1-ish"
+version = "0.1.0"
+dependencies = [
+    "bm25s[full]>=0.2.13",
+    "exa-py>=1.15.2",
+    "pystemmer>=3.0.0",
+    "verifiers>=0.1.2.post0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["search_r1_ish.py"]
+
+[tool.uv.sources]
+verifiers = { git = "https://github.com/willccbb/verifiers.git" }
