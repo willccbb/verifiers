@@ -150,7 +150,11 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             "temperature": temperature,
             "date": datetime.now().strftime("%Y-%m-%d"),
             "time": datetime.now().strftime("%H:%M:%S"),
+            "avg_reward": sum(results.reward) / len(results.reward),
         }
+        for k in results.metrics:
+            metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
+
         uuid_str = str(uuid.uuid4())[:8]
         env_model_str = f"{env}--{model.replace('/', '--')}"
         if save_dataset:
