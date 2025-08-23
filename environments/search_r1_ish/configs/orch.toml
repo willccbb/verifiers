@@ -1,0 +1,29 @@
+max_steps = 500
+batch_size = 1024
+micro_batch_size = 1
+seq_len = 4096
+rollouts_per_example = 16
+mask_truncated_completions = false
+
+[model]
+name = "willcb/Qwen3-1.7B"
+
+[monitor.wandb]
+project = "search-r1-ish"
+
+[environment]
+id = "search-r1-ish"
+
+[environment.args]
+judge_model = "deepseek-chat"
+judge_base_url = "https://api.deepseek.com"
+exa_api_key = "***"
+
+
+[sampling]
+max_tokens = 1024
+
+[monitor.wandb.log_extras]
+interval = 10
+
+[ckpt]
