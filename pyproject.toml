@@ -128,6 +128,8 @@ packages = ["verifiers"]
 [dependency-groups]
 dev = [
     "build>=1.2.2.post1",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
     "twine>=6.1.0",
 ]
 
