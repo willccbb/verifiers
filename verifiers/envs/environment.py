@@ -27,6 +27,7 @@ from verifiers.types import (
     SamplingArgs,
     State,
 )
+from verifiers.utils.tool_utils import sanitize_tool_calls
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -493,28 +494,6 @@ class Environment(ABC):
         )
         return results
 
-    def _sanitize_tool_calls(self, completion: Messages) -> Messages:
-        """
-        Sanitize tool calls from a completion.
-        """
-
-        assert isinstance(completion, list)
-        sanitized_completion = []
-        for m in completion:
-            if "tool_calls" in m:
-                new_m = {
-                    "role": m["role"],
-                    "content": m.get("content", ""),
-                    "tool_calls": [
-                        json.dumps(tc.model_dump())  # type: ignore
-                        for tc in m.get("tool_calls", [])
-                    ],
-                }
-                sanitized_completion.append(new_m)
-            else:
-                sanitized_completion.append(m)
-        return sanitized_completion
-
     def make_dataset(
         self,
         results: GenerateOutputs,
@@ -543,7 +522,7 @@ class Environment(ABC):
         }
         for i in range(len(results.completion)):
             results_dict["completion"].append(
-                self._sanitize_tool_calls(results.completion[i])
+                sanitize_tool_calls(results.completion[i])
             )
         results_dict.update(results.metrics)
         cols.extend(results.metrics.keys())
