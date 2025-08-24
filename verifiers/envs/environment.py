@@ -455,6 +455,10 @@ class Environment(ABC):
             # shutdown the executor to prevent thread leaks
             executor.shutdown(wait=False)
 
+    #########################################################
+    # Optional helper functions for parsing vLLM completions
+    #########################################################
+
     def parse_chat_completion_logprobs(
         self, chat_completion: ChatCompletion
     ) -> list[float]:
@@ -774,7 +778,10 @@ class Environment(ABC):
     # alias for process_env_results_vllm
     process_env_results = process_env_results_vllm
 
-    # Evaluation and dataset generation
+    #########################################################
+    # Helper functions for evaluation and dataset generation
+    #########################################################
+
     def evaluate(
         self,
         client: AsyncOpenAI | OpenAI,
