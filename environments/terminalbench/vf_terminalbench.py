@@ -1,7 +1,7 @@
 """
 Terminal-Bench environment for Verifiers
 
-This simplified environment reuses Terminal-Bench's native harness components
+This environment reuses Terminal-Bench's native harness components
 to run tasks in Docker via docker-compose and a tmux session, exposing a single
 `execute_commands` tool for the agent. It avoids duplicating container logic.
 """
@@ -106,11 +106,8 @@ if os.getenv("TB_TS_LOGS", "1") == "1":
         _orig_print(f"[{_ts()}] {msg}", end=end, file=file, flush=flush)
 
 
-# Concurrency controls
-# Prefer new names; fall back to legacy for compatibility.
-ROLLOUT_CONCURRENCY = int(
-    os.getenv("TB_ROLLOUT_CONCURRENCY", os.getenv("TB_MAX_PARALLEL_TASKS", "1"))
-)
+# Concurrency controls (no legacy fallbacks)
+ROLLOUT_CONCURRENCY = int(os.getenv("TB_ROLLOUT_CONCURRENCY", "1"))
 
 
 class _TerminalContext:
@@ -711,12 +708,7 @@ def load_environment(
                 reward=list(rewards), metrics={metric_name: list(rewards)}
             )
 
-    TEST_CONCURRENCY = int(
-        os.getenv(
-            "TB_TEST_CONCURRENCY",
-            os.getenv("TB_MAX_PARALLEL_TESTS", str(ROLLOUT_CONCURRENCY)),
-        )
-    )
+    TEST_CONCURRENCY = int(os.getenv("TB_TEST_CONCURRENCY", str(ROLLOUT_CONCURRENCY)))
     print(f"[TERMINALBENCH_ENV] Test concurrency: {TEST_CONCURRENCY}")
     rubric = ParallelTestRubric(parser=parser, max_parallel_tests=TEST_CONCURRENCY)
 

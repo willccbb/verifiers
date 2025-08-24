@@ -50,9 +50,9 @@ env = load_environment(
 These variables tune performance, timeouts, and cleanup behavior for the Terminal-Bench environment.
 
 - **TB_TS_LOGS**: Prefix module logs with timestamps. Default: `1`. Set to `0` to disable.
-- **TB_ROLLOUT_CONCURRENCY**: Max concurrent rollouts (tasks). Default: `1`. Fallback: `TB_MAX_PARALLEL_TASKS`.
+- **TB_ROLLOUT_CONCURRENCY**: Max concurrent rollouts (tasks). Default: `1`.
   - The CLI flag `--max-concurrent-requests` (in `vf-eval`) takes precedence for rollouts.
-- **TB_TEST_CONCURRENCY**: Max concurrent test evaluations. Default: equal to `TB_ROLLOUT_CONCURRENCY`. Fallback: `TB_MAX_PARALLEL_TESTS`.
+- **TB_TEST_CONCURRENCY**: Max concurrent test evaluations. Default: equals `TB_ROLLOUT_CONCURRENCY`.
 - **TB_AGENT_TOTAL_TIMEOUT_SEC**: Rollout-wide budget in seconds. If unset, uses the task’s `max_agent_timeout_sec` from `task.yaml`.
 - **TB_CMD_TIMEOUT_SEC**: Hard cap per `execute_commands` call. The effective timeout per call is `min(TB_CMD_TIMEOUT_SEC (if set), remaining rollout budget)`.
 - **TB_HANDLE_SIGNALS**: When `1`, install SIGINT/SIGTERM handlers so Ctrl-C triggers cleanup. Default: `0`.
