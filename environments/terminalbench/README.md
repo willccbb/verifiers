@@ -28,6 +28,7 @@ Please be sure to set a sufficiently high max-tokens.
 Example terminal usage:
 ```bash
 export TB_MAX_PARALLEL_TASKS=5
+export TB_MAX_PARALLEL_TESTS=5
 uv run vf-eval --api-base-url https://openrouter.ai/api/v1 --api-key-var OPENROUTER_API_KEY --model openai/gpt-5-mini --num-examples 10 --rollouts-per-example 1 --max-tokens 16384 environments.terminalbench.vf_terminalbench
 ```
 

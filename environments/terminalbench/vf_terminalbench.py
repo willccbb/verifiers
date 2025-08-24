@@ -7,6 +7,7 @@ to run tasks in Docker via docker-compose and a tmux session, exposing a single
 """
 
 import atexit
+import asyncio
 import importlib
 import os
 import types
@@ -26,6 +27,7 @@ from datasets import Dataset
 
 import verifiers as vf
 from verifiers.envs.tool_env import ToolEnv
+from verifiers.rubrics.rubric import RolloutScores
 
 # Import only the specific terminal-bench modules we need, without importing the
 # package-level __init__ (which pulls heavy agent deps).
@@ -664,13 +666,49 @@ def load_environment(
 
             return 0.0
 
-    # Create rubric
-    rubric = vf.Rubric(
-        funcs=[task_completion_score],
-        weights=[1.0],
-        parser=parser,
-        parallelize_scoring=(MAX_PARALLEL_TASKS > 1),
-    )
+    # Create rubric (parallelize evaluation/tests with a separate cap)
+    class ParallelTestRubric(vf.Rubric):
+        def __init__(self, parser, max_parallel_tests: int):
+            super().__init__(
+                funcs=[task_completion_score],
+                weights=[1.0],
+                parser=parser,
+                parallelize_scoring=False,
+            )
+            self._max_parallel_tests = max(1, int(max_parallel_tests))
+
+        async def score_rollouts(
+            self,
+            prompts,
+            completions,
+            answers,
+            states,
+            tasks,
+            infos,
+            **kwargs,
+        ) -> RolloutScores:
+            sem = asyncio.Semaphore(self._max_parallel_tests)
+
+            async def run_one(p, c, a, s, t, i):
+                async with sem:
+                    # Offload blocking test execution to a thread
+                    return await asyncio.to_thread(
+                        task_completion_score, c, i, self.parser, s
+                    )
+
+            coros = [
+                run_one(p, c, a, s, t, i)
+                for p, c, a, s, t, i in zip(
+                    prompts, completions, answers, states, tasks, infos
+                )
+            ]
+            rewards = await asyncio.gather(*coros)
+            metric_name = task_completion_score.__name__
+            return RolloutScores(reward=list(rewards), metrics={metric_name: list(rewards)})
+
+    max_parallel_tests = int(os.getenv("TB_MAX_PARALLEL_TESTS", str(MAX_PARALLEL_TASKS)))
+    print(f"[TERMINALBENCH_ENV] Max parallel tests: {max_parallel_tests}")
+    rubric = ParallelTestRubric(parser=parser, max_parallel_tests=max_parallel_tests)
 
     # Create custom ToolEnv that sets up task context
     class TerminalBenchEnv(ToolEnv):
