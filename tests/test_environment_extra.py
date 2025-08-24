@@ -21,6 +21,7 @@ from verifiers.envs.environment import Environment
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import GenerateOutputs
+from verifiers.utils.tool_utils import sanitize_tool_calls
 
 
 # Local simple concrete Environment for testing
@@ -190,9 +191,7 @@ async def test_generate_inside_running_loop(mock_openai_client):
     assert hasattr(out, "completion") and len(out.completion) == 1
 
 
-def test_sanitize_tool_calls_outputs_strings(mock_openai_client):
-    env = _make_env(mock_openai_client)
-
+def test_sanitize_tool_calls_outputs_strings():
     # Use a lightweight object with model_dump to mimic OAI tool call
     class ToolCall:
         def __init__(self, name: str, args: str):
@@ -211,7 +210,7 @@ def test_sanitize_tool_calls_outputs_strings(mock_openai_client):
     msgs = [
         [{"role": "assistant", "content": "", "tool_calls": [ToolCall("echo", "{}")]}]
     ]
-    sanitized = env._sanitize_tool_calls(msgs[0])
+    sanitized = sanitize_tool_calls(msgs[0])
     assert isinstance(sanitized[0]["tool_calls"][0], str)
 
 

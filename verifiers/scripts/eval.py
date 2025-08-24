@@ -12,6 +12,7 @@ from datasets import Dataset
 from openai import OpenAI
 
 import verifiers as vf
+from verifiers.utils.tool_utils import sanitize_tool_calls
 
 
 def eval_environment(
@@ -122,7 +123,10 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             for i in range(num_examples * rollouts_per_example)
         ]
         prompts = results.prompt
-        completions = results.completion
+        completions = []
+        for c in results.completion:
+            sanitized_c = sanitize_tool_calls(c)
+            completions.append(sanitized_c)
         rewards = results.reward
         tasks = results.task
         data_dict = {

@@ -26,7 +26,6 @@ from pydantic import BaseModel, Field
 MessageType = Literal["chat", "completion"]
 ModelResponse = Completion | ChatCompletion | None
 
-
 Message = str | ChatMessage
 Messages = str | list[ChatMessage]
 Info = dict[str, Any]
