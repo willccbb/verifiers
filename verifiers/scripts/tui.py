@@ -543,8 +543,8 @@ class VerifiersTUI(App):
     # Custom dark theme with a modern color palette
     ENABLE_COMMAND_PALETTE = False  # Disable command palette for cleaner UI
 
-    # Define custom theme
-    CUSTOM_THEME = Theme(
+    # Define custom dark theme
+    BLACK_WARM_THEME = Theme(
         name="black-warm",
         primary="#d4a373",  # Warm tan/beige
         secondary="#808080",  # Gray
@@ -557,6 +557,22 @@ class VerifiersTUI(App):
         panel="#141414",
         foreground="#ffffff",
         dark=True,
+    )
+
+    # Define custom light theme with matching warm tones
+    WHITE_WARM_THEME = Theme(
+        name="white-warm",
+        primary="#8b6f47",  # Darker warm brown (darker than dark theme for contrast)
+        secondary="#606060",  # Medium gray
+        accent="#a08b87",  # Muted warm brown-rose
+        warning="#ff8c00",  # Dark orange
+        error="#dc143c",  # Crimson
+        success="#6b8e23",  # Olive green
+        background="#f5f5f5",  # Light warm grey
+        surface="#f5f5f5",  # Light warm grey
+        panel="#f5f5f5",  # Light warm grey
+        foreground="#1a1a1a",  # Near black
+        dark=False,
     )
 
     BINDINGS = [
@@ -666,14 +682,24 @@ class VerifiersTUI(App):
         self.index = discover_results(env_dir_path, outputs_dir_path)
 
     def on_mount(self) -> None:
-        # Register and apply the custom theme
-        self.register_theme(self.CUSTOM_THEME)
+        # Register both custom themes
+        self.register_theme(self.BLACK_WARM_THEME)
+        self.register_theme(self.WHITE_WARM_THEME)
+        # Start with dark theme
         self.theme = "black-warm"
         self.push_screen(SelectEnvScreen(self.index))
 
     async def action_quit(self) -> None:
         """Quit the application."""
         self.exit()
+
+    def action_toggle_dark(self) -> None:
+        """Toggle between dark and light themes."""
+        # Toggle between our custom dark and light themes
+        if self.theme == "black-warm":
+            self.theme = "white-warm"
+        else:
+            self.theme = "black-warm"
 
 
 def main() -> None:
