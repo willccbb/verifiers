@@ -106,8 +106,11 @@ if os.getenv("TB_TS_LOGS", "1") == "1":
         _orig_print(f"[{_ts()}] {msg}", end=end, file=file, flush=flush)
 
 
-# Max parallel tasks control (read by orchestrators; default 1 = sequential)
-MAX_PARALLEL_TASKS = int(os.getenv("TB_MAX_PARALLEL_TASKS", "1"))
+# Concurrency controls
+# Prefer new names; fall back to legacy for compatibility.
+ROLLOUT_CONCURRENCY = int(
+    os.getenv("TB_ROLLOUT_CONCURRENCY", os.getenv("TB_MAX_PARALLEL_TASKS", "1"))
+)
 
 
 class _TerminalContext:
@@ -704,11 +707,18 @@ def load_environment(
             ]
             rewards = await asyncio.gather(*coros)
             metric_name = task_completion_score.__name__
-            return RolloutScores(reward=list(rewards), metrics={metric_name: list(rewards)})
+            return RolloutScores(
+                reward=list(rewards), metrics={metric_name: list(rewards)}
+            )
 
-    max_parallel_tests = int(os.getenv("TB_MAX_PARALLEL_TESTS", str(MAX_PARALLEL_TASKS)))
-    print(f"[TERMINALBENCH_ENV] Max parallel tests: {max_parallel_tests}")
-    rubric = ParallelTestRubric(parser=parser, max_parallel_tests=max_parallel_tests)
+    TEST_CONCURRENCY = int(
+        os.getenv(
+            "TB_TEST_CONCURRENCY",
+            os.getenv("TB_MAX_PARALLEL_TESTS", str(ROLLOUT_CONCURRENCY)),
+        )
+    )
+    print(f"[TERMINALBENCH_ENV] Test concurrency: {TEST_CONCURRENCY}")
+    rubric = ParallelTestRubric(parser=parser, max_parallel_tests=TEST_CONCURRENCY)
 
     # Create custom ToolEnv that sets up task context
     class TerminalBenchEnv(ToolEnv):
@@ -870,8 +880,8 @@ def load_environment(
             if max_concurrent is None or max_concurrent < 1:
                 if isinstance(mcr, int) and mcr > 0:
                     max_concurrent = mcr
-                elif MAX_PARALLEL_TASKS > 1:
-                    max_concurrent = MAX_PARALLEL_TASKS
+                elif ROLLOUT_CONCURRENCY > 1:
+                    max_concurrent = ROLLOUT_CONCURRENCY
                 else:
                     # Leave as sequential
                     max_concurrent = -1
@@ -936,7 +946,7 @@ def load_environment(
             print("[TERMINALBENCH_ENV]   Context set, delegating to parent ToolEnv")
             return super().env_response(messages, state, **kwargs)
 
-    print(f"[TERMINALBENCH_ENV] Max parallel tasks: {MAX_PARALLEL_TASKS}")
+    print(f"[TERMINALBENCH_ENV] Rollout concurrency: {ROLLOUT_CONCURRENCY}")
 
     env = TerminalBenchEnv(
         dataset=dataset,
@@ -947,7 +957,7 @@ def load_environment(
 
     # Attach executor and parallelism config to environment for cleanup and external control
     env._executor = executor  # type: ignore
-    env.max_parallel_tasks = MAX_PARALLEL_TASKS  # type: ignore
+    env.max_parallel_tasks = ROLLOUT_CONCURRENCY  # type: ignore
 
     # Removed custom __del__ method to prevent premature cleanup by garbage collector
     # Cleanup will be handled by atexit handlers and explicit cleanup in evaluation
