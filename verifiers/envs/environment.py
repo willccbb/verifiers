@@ -456,6 +456,113 @@ class Environment(ABC):
             executor.shutdown(wait=False)
 
     #########################################################
+    # Helper functions for evaluation and dataset generation
+    #########################################################
+
+    def evaluate(
+        self,
+        client: AsyncOpenAI | OpenAI,
+        model: str,
+        sampling_args: SamplingArgs | None = None,
+        num_examples: int = -1,
+        rollouts_per_example: int = 1,
+        score_rollouts: bool = True,
+        max_concurrent: int = -1,
+        **kwargs,
+    ) -> GenerateOutputs:
+        """
+        Evaluate model on the Environment evaluation dataset.
+        """
+        if self.eval_dataset is None:
+            self.logger.info("eval_dataset is not set, falling back to train dataset")
+            assert self.dataset is not None
+            inputs = self.get_dataset(n=num_examples)
+        else:
+            inputs = self.get_eval_dataset(n=num_examples)
+        assert inputs is not None, "No dataset found"
+        if rollouts_per_example > 1:
+            inputs = inputs.repeat(rollouts_per_example)
+        results = self.generate(
+            inputs,
+            client,
+            model,
+            sampling_args,
+            score_rollouts,
+            max_concurrent,
+            **kwargs,
+        )
+        return results
+
+    def _sanitize_tool_calls(self, completion: Messages) -> Messages:
+        """
+        Sanitize tool calls from a completion.
+        """
+
+        assert isinstance(completion, list)
+        sanitized_completion = []
+        for m in completion:
+            if "tool_calls" in m:
+                new_m = {
+                    "role": m["role"],
+                    "content": m.get("content", ""),
+                    "tool_calls": [
+                        json.dumps(tc.model_dump())  # type: ignore
+                        for tc in m.get("tool_calls", [])
+                    ],
+                }
+                sanitized_completion.append(new_m)
+            else:
+                sanitized_completion.append(m)
+        return sanitized_completion
+
+    def make_dataset(
+        self,
+        results: GenerateOutputs,
+        push_to_hub: bool = False,
+        hub_name: str | None = None,
+        state_columns: list[str] | None = None,
+        **kwargs,
+    ) -> Dataset:
+        """
+        Make a dataset from the evaluation results.
+        """
+        state_columns = state_columns or []
+
+        if push_to_hub and hub_name is None:
+            raise ValueError("hub_name must be provided if push_to_hub is True")
+
+        cols = ["prompt", "completion", "answer", "info", "task", "reward"]
+
+        results_dict = {
+            "prompt": results.prompt,
+            "completion": [],
+            "answer": results.answer,
+            "info": results.info,
+            "task": results.task,
+            "reward": results.reward,
+        }
+        for i in range(len(results.completion)):
+            results_dict["completion"].append(
+                self._sanitize_tool_calls(results.completion[i])
+            )
+        results_dict.update(results.metrics)
+        cols.extend(results.metrics.keys())
+        if results.state[0] is not None:
+            for col in state_columns:
+                if col in results.state[0]:
+                    results_dict[col] = [state[col] for state in results.state]
+                    cols.append(col)
+                else:
+                    self.logger.warning(
+                        f"Column {col} not found in state, skipping from dataset."
+                    )
+        dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
+        if push_to_hub:
+            assert hub_name is not None
+            dataset.push_to_hub(hub_name)
+        return dataset
+
+    #########################################################
     # Optional helper functions for parsing vLLM completions
     #########################################################
 
@@ -777,110 +884,3 @@ class Environment(ABC):
 
     # alias for process_env_results_vllm
     process_env_results = process_env_results_vllm
-
-    #########################################################
-    # Helper functions for evaluation and dataset generation
-    #########################################################
-
-    def evaluate(
-        self,
-        client: AsyncOpenAI | OpenAI,
-        model: str,
-        sampling_args: SamplingArgs | None = None,
-        num_examples: int = -1,
-        rollouts_per_example: int = 1,
-        score_rollouts: bool = True,
-        max_concurrent: int = -1,
-        **kwargs,
-    ) -> GenerateOutputs:
-        """
-        Evaluate model on the Environment evaluation dataset.
-        """
-        if self.eval_dataset is None:
-            self.logger.info("eval_dataset is not set, falling back to train dataset")
-            assert self.dataset is not None
-            inputs = self.get_dataset(n=num_examples)
-        else:
-            inputs = self.get_eval_dataset(n=num_examples)
-        assert inputs is not None, "No dataset found"
-        if rollouts_per_example > 1:
-            inputs = inputs.repeat(rollouts_per_example)
-        results = self.generate(
-            inputs,
-            client,
-            model,
-            sampling_args,
-            score_rollouts,
-            max_concurrent,
-            **kwargs,
-        )
-        return results
-
-    def _sanitize_tool_calls(self, completion: Messages) -> Messages:
-        """
-        Sanitize tool calls from a completion.
-        """
-
-        assert isinstance(completion, list)
-        sanitized_completion = []
-        for m in completion:
-            if "tool_calls" in m:
-                new_m = {
-                    "role": m["role"],
-                    "content": m.get("content", ""),
-                    "tool_calls": [
-                        json.dumps(tc.model_dump())  # type: ignore
-                        for tc in m.get("tool_calls", [])
-                    ],
-                }
-                sanitized_completion.append(new_m)
-            else:
-                sanitized_completion.append(m)
-        return sanitized_completion
-
-    def make_dataset(
-        self,
-        results: GenerateOutputs,
-        push_to_hub: bool = False,
-        hub_name: str | None = None,
-        state_columns: list[str] | None = None,
-        **kwargs,
-    ) -> Dataset:
-        """
-        Make a dataset from the evaluation results.
-        """
-        state_columns = state_columns or []
-
-        if push_to_hub and hub_name is None:
-            raise ValueError("hub_name must be provided if push_to_hub is True")
-
-        cols = ["prompt", "completion", "answer", "info", "task", "reward"]
-
-        results_dict = {
-            "prompt": results.prompt,
-            "completion": [],
-            "answer": results.answer,
-            "info": results.info,
-            "task": results.task,
-            "reward": results.reward,
-        }
-        for i in range(len(results.completion)):
-            results_dict["completion"].append(
-                self._sanitize_tool_calls(results.completion[i])
-            )
-        results_dict.update(results.metrics)
-        cols.extend(results.metrics.keys())
-        if results.state[0] is not None:
-            for col in state_columns:
-                if col in results.state[0]:
-                    results_dict[col] = [state[col] for state in results.state]
-                    cols.append(col)
-                else:
-                    self.logger.warning(
-                        f"Column {col} not found in state, skipping from dataset."
-                    )
-        dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
-        if push_to_hub:
-            assert hub_name is not None
-            dataset.push_to_hub(hub_name)
-        return dataset
