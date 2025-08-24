@@ -19,7 +19,7 @@ class ToolEnv(MultiTurnEnv):
         self.error_formatter = error_formatter
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
         self.tool_map = {tool.__name__: tool for tool in self.tools}
-        super().__init__(oai_tools=self.oai_tools, **kwargs)
+        super().__init__(oai_tools=self.oai_tools, max_turns=max_turns, **kwargs)
 
     def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
         assert isinstance(messages, list)
@@ -30,12 +30,12 @@ class ToolEnv(MultiTurnEnv):
         return is_assistant_message and no_tool_calls
 
     def call_tool(
-        self, tool_name: str, tool_args: str, tool_call_id: str, **kwargs
+        self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
     ) -> Message:
         """Call a tool based on JSON command."""
         try:
             tool_func = self.tool_map[tool_name]
-            result = str(tool_func(**json.loads(tool_args)))
+            result = str(tool_func(**tool_args))
             return {
                 "role": "tool",
                 "content": str(result),
@@ -57,7 +57,7 @@ class ToolEnv(MultiTurnEnv):
         for tool_call in messages[-1]["tool_calls"]:
             assert isinstance(tool_call, ChatCompletionMessageToolCall)
             tool_name: str = tool_call.function.name
-            tool_args: str = tool_call.function.arguments
+            tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
             tool_message: Message = self.call_tool(tool_name, tool_args, tool_call_id)
             tool_messages.append(tool_message)

@@ -198,6 +198,8 @@ class Environment(ABC):
         Returns special error messages for context length issues.
         """
         sampling_args = sampling_args or {}
+        if "max_tokens" in sampling_args:
+            sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
 
         try:
             if message_type is None:

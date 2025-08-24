@@ -283,5 +283,3 @@ If you use this code in your research, please cite:
 - Default patterns for hosted resources such as code sandboxes, auxiliary models, and MCP servers
 - Multimodal input support
 - Non-increasing token sequences via REINFORCE
-
-
