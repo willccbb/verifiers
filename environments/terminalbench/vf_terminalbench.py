@@ -15,9 +15,12 @@ import sys
 import tempfile
 import time
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import base64
+import builtins as _builtins
+import threading
 
 from datasets import Dataset
 
@@ -71,16 +74,53 @@ except ModuleNotFoundError:
         )
 
 
+# Precompiled regex for ANSI escape sequences to improve performance
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+# Thread-local storage for per-tool-call context (enables parallelism without races)
+THREAD_LOCAL = threading.local()
+
+
+# Timestamped print wrapper (enabled by default; set TB_TS_LOGS=0 to disable)
+def _ts() -> str:
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    except Exception:
+        return ""
+
+
+if os.getenv("TB_TS_LOGS", "1") == "1":
+    _orig_print = _builtins.print
+
+    def print(*args, **kwargs):  # type: ignore
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        file = kwargs.get("file", None)
+        flush = kwargs.get("flush", False)
+        try:
+            msg = sep.join(str(a) for a in args)
+        except Exception:
+            msg = " ".join(["<non-str-arg>"] * len(args))
+        _orig_print(f"[{_ts()}] {msg}", end=end, file=file, flush=flush)
+
+
+# Max parallel tasks control (read by orchestrators; default 1 = sequential)
+MAX_PARALLEL_TASKS = int(os.getenv("TB_MAX_PARALLEL_TASKS", "1"))
+
+
 class _TerminalContext:
     """Holds Terminal-Bench resources for a single task/session."""
 
     def __init__(self, task_path: Path, output_root: Path):
         # Create a TrialHandler to leverage naming, paths, and metadata
-        trial_name = f"verifiers.1-of-1.{int(time.time())}"
+        trial_name = f"verifiers.1-of-1.{int(time.time())}.{uuid.uuid4().hex[:6]}"
         self.trial_handler = TrialHandler(
             trial_name=trial_name,
             input_path=task_path,
             output_path=output_root,
+        )
+        print(
+            f"[TERMINALCTX] Init trial_name={trial_name} task_id={self.trial_handler.task_paths.input_path.name}"
         )
 
         # Initialize Terminal using Terminal-Bench's compose manager
@@ -105,11 +145,17 @@ class _TerminalContext:
         self.session: Optional[TmuxSession] = None
 
     def start(self) -> None:
+        t0 = time.time()
+        print("[TERMINALCTX] Starting docker compose and container...")
         self.terminal.start()
+        print(
+            f"[TERMINALCTX] Container started in {time.time() - t0:.2f}s; creating tmux session..."
+        )
         # Run as configured user for agent session
         self.session = self.terminal.create_session(
             "agent", is_active_stream=False, as_configured_user=True
         )
+        print("[TERMINALCTX] Tmux session 'agent' created.")
         # Best-effort: ensure shell prompt is responsive before first use
         try:
             if self.session:
@@ -118,15 +164,17 @@ class _TerminalContext:
                     block=True,
                     max_timeout_sec=10,
                 )
-                # Drain any incremental output produced during startup
-                _ = self.session.get_incremental_output()
+                # Drain any immediate output produced during startup (visible screen only)
+                _ = self.session.capture_pane(capture_entire=False)
         except Exception:
             # Non-fatal; continue even if readiness probe fails
             pass
 
     def stop(self) -> None:
         try:
+            print("[TERMINALCTX] Stopping terminal and docker compose...")
             self.terminal.stop()
+            print("[TERMINALCTX] Terminal stopped.")
         except Exception:
             pass
 
@@ -136,6 +184,8 @@ class _TerminalContext:
 
         # Execute command in a blocking manner and capture incremental output
         try:
+            print(f"[TERMINALCTX] Executing command (timeout={timeout}s): {command}")
+            t0 = time.time()
             self.session.send_keys(
                 [command, "Enter"], block=True, max_timeout_sec=timeout
             )
@@ -147,15 +197,21 @@ class _TerminalContext:
             except Exception:
                 pass
             try:
-                output = self.session.get_incremental_output()
+                output = self.session.capture_pane(capture_entire=False)
             except Exception:
                 output = ""
+            print(
+                f"[TERMINALCTX] Command timed out after {timeout}s; captured {len(output)} chars."
+            )
             return (
                 False,
                 output + f"\n[terminalbench] Command timed out after {timeout}s",
             )
 
-        output = self.session.get_incremental_output()
+        output = self.session.capture_pane(capture_entire=False)
+        print(
+            f"[TERMINALCTX] Command completed in {time.time() - t0:.2f}s; captured {len(output)} chars."
+        )
 
         # Heuristic: consider success if no clear error keywords appear in last pane
         pane_text = self.session.capture_pane(capture_entire=False)
@@ -175,6 +231,9 @@ class _TerminalContext:
         encoded = base64.b64encode(commands_block.encode("utf-8")).decode("ascii")
         # Do not exit the shell; print a status marker we can parse
         status_marker = "__VF_STATUS__"
+        print(
+            f"[TERMINALCTX] Running block of {len(commands_block)} chars (timeout={timeout}s)."
+        )
         one_liner = (
             "tmpfile=$(mktemp /tmp/vf_cmd.XXXXXX.sh) && "
             f"echo '{encoded}' | base64 -d > \"$tmpfile\" && "
@@ -182,9 +241,13 @@ class _TerminalContext:
             'rm -f "$tmpfile"; echo ' + status_marker + ":$status"
         )
 
+        t0 = time.time()
         ok, out = self.send_and_capture(one_liner, timeout)
+        print(
+            f"[TERMINALCTX] Block finished in {time.time() - t0:.2f}s; ok={ok}; output_len={len(out)}"
+        )
         # Determine success from explicit status marker if present
-        match = re.search(r"__VF_STATUS__:(\\d+)", out)
+        match = re.search(r"__VF_STATUS__:(\d+)", out)
         if match:
             exit_code_str = match.group(1)
             try:
@@ -240,13 +303,15 @@ class TerminalTaskExecutor:
     def _register_cleanup_handlers(self) -> None:
         atexit.register(self.cleanup)
 
-        def _handler(signum, frame):
-            print(f"\nReceived signal {signum}, cleaning up...")
-            self.cleanup()
-            sys.exit(0)
+        if os.getenv("TB_HANDLE_SIGNALS", "0") == "1":
 
-        signal.signal(signal.SIGINT, _handler)
-        signal.signal(signal.SIGTERM, _handler)
+            def _handler(signum, frame):
+                print(f"\nReceived signal {signum}, cleaning up...")
+                self.cleanup()
+                sys.exit(0)
+
+            signal.signal(signal.SIGINT, _handler)
+            signal.signal(signal.SIGTERM, _handler)
 
     def get_context(self, task_id: str, task_path: Path) -> _TerminalContext:
         if task_id not in self.contexts:
@@ -374,9 +439,14 @@ def load_environment(
         if not commands:
             return "❌ ERROR: No commands provided. You must provide at least one command to execute."
 
-        # Get task context from the current conversation state
-        task_id = execute_commands._current_task_id
-        task_path_str = execute_commands._current_task_path
+        # Get task context from thread-local state first, fallback to function attrs
+        task_id = (
+            getattr(THREAD_LOCAL, "task_id", None) or execute_commands._current_task_id
+        )
+        task_path_str = (
+            getattr(THREAD_LOCAL, "task_path", None)
+            or execute_commands._current_task_path
+        )
 
         print(f"[TERMINALBENCH]   Current task_id: {task_id}")
         print(f"[TERMINALBENCH]   Task path set: {bool(task_path_str)}")
@@ -397,48 +467,57 @@ def load_environment(
             task_path = Path(task_path_str)
             ctx = executor.get_context(task_id, task_path)
 
-            # Determine timeout per command block
-            info = getattr(execute_commands, "_current_info", {}) or {}
-            # Priority: env var TB_CMD_TIMEOUT_SEC > info["max_agent_timeout_sec"] > default 180
+            # Determine timeout per command block with rollout-wide budget
+            info = (
+                getattr(THREAD_LOCAL, "info", None)
+                or getattr(execute_commands, "_current_info", {})
+                or {}
+            )
+            # Base per-call cap
+            base_timeout: Optional[float]
             env_timeout = os.getenv("TB_CMD_TIMEOUT_SEC")
             try:
-                timeout_sec = float(env_timeout) if env_timeout else None
+                base_timeout = float(env_timeout) if env_timeout else None
             except Exception:
-                timeout_sec = None
-            if timeout_sec is None:
+                base_timeout = None
+            if base_timeout is None:
                 try:
-                    timeout_sec = float(info.get("max_agent_timeout_sec", 180))
+                    base_timeout = float(info.get("max_agent_timeout_sec", 180))
                 except Exception:
-                    timeout_sec = 180.0
+                    base_timeout = 180.0
+
+            # Remaining rollout budget if deadline set
+            remaining: Optional[float] = None
+            deadline = getattr(THREAD_LOCAL, "deadline", None)
+            if isinstance(deadline, (float, int)):
+                remaining = max(0.0, float(deadline) - time.time())
+
+            if remaining is not None and remaining <= 0.0:
+                return "❌ ERROR: Agent time budget exhausted; not executing further commands."
+
+            if remaining is not None:
+                timeout_sec = max(1.0, min(base_timeout, remaining))
+            else:
+                timeout_sec = float(base_timeout)
 
             # Execute as a single block to preserve heredocs and multi-line structure
             success, output = ctx.run_block(commands_str, timeout=timeout_sec)
 
             # Sanitize terminal output to avoid overly large or non-JSON-safe payloads
-            def _strip_ansi(s: str) -> str:
-                ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-                return ansi_escape.sub("", s)
-
             def _sanitize_output(s: str) -> str:
-                s = _strip_ansi(s)
                 # Replace non-printable characters except tab/newline/carriage return
-                s = "".join(
+                return "".join(
                     ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in s
                 )
-                return s
 
-            output = _sanitize_output(output)
-
-            # Truncate output if it's too long to prevent overwhelming the LLM
-            # Keep conservative to reduce model request size and lower API error risk
+            # Truncate early, then strip ANSI and sanitize for performance
             max_output_length = 8000
-            if len(output) > max_output_length:
-                truncated_output = (
-                    output[:max_output_length]
-                    + f"\n\n... [Output truncated. Total length: {len(output)} characters]"
-                )
-            else:
-                truncated_output = output
+            raw = output
+            if len(raw) > max_output_length:
+                raw = raw[:max_output_length]
+                raw += f"\n\n... [Output truncated. Total length: {len(output)} characters]"
+            raw = ANSI_ESCAPE_RE.sub("", raw)
+            truncated_output = _sanitize_output(raw)
 
             # Format response
             result = "Command(s) executed"
@@ -490,6 +569,7 @@ def load_environment(
             )
 
             # Parse results using Terminal-Bench's parser (1:1 behavior)
+            parsed = None
             try:
                 parsed = ctx.trial_handler.parser.parse(post_test_pane)
                 all_passed = (
@@ -504,8 +584,7 @@ def load_environment(
 
             # Provide detailed diagnostics
             def _strip_ansi(s: str) -> str:
-                ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
-                return ansi_escape.sub("", s)
+                return ANSI_ESCAPE_RE.sub("", s)
 
             def _sanitize(s: str) -> str:
                 s = _strip_ansi(s)
@@ -590,7 +669,7 @@ def load_environment(
         funcs=[task_completion_score],
         weights=[1.0],
         parser=parser,
-        parallelize_scoring=False,
+        parallelize_scoring=(MAX_PARALLEL_TASKS > 1),
     )
 
     # Create custom ToolEnv that sets up task context
@@ -599,6 +678,177 @@ def load_environment(
             self.executor = executor
             tools = [execute_commands]
             super().__init__(tools=tools, max_turns=20, **kwargs)
+            # Serialize only shared attributes; prefer thread-local context
+            self._tool_call_lock = threading.Lock()
+
+        def setup_state(self, state: dict, **kwargs):
+            # Ensure execute_commands has the correct context early in the rollout
+            info = state.get("info", {}) or {}
+            execute_commands._current_task_id = info.get("task_id")
+            execute_commands._current_task_path = info.get("task_path")
+            execute_commands._current_info = info
+            return super().setup_state(state, **kwargs)
+
+        def _run_tool_call_threadsafe(
+            self,
+            tool_name: str,
+            tool_args: dict,
+            tool_call_id: str,
+            info: dict,
+            deadline: float | None,
+        ) -> dict:
+            # Thread-local context for parallel tool calls
+            THREAD_LOCAL.task_id = info.get("task_id")
+            THREAD_LOCAL.task_path = info.get("task_path")
+            THREAD_LOCAL.info = info
+            THREAD_LOCAL.deadline = deadline
+            # Keep function attrs for legacy paths (minimal lock scope)
+            with self._tool_call_lock:
+                execute_commands._current_task_id = THREAD_LOCAL.task_id
+                execute_commands._current_task_path = THREAD_LOCAL.task_path
+                execute_commands._current_info = THREAD_LOCAL.info
+            return self.call_tool(tool_name, tool_args, tool_call_id)
+
+        async def rollout(
+            self,
+            client,
+            model: str,
+            prompt,
+            answer: str = "",
+            task: str = "default",
+            info: dict | None = None,
+            sampling_args=None,
+            **kwargs,
+        ) -> tuple[list[dict], dict]:
+            """Async rollout that offloads blocking tool calls to threads for parallelism."""
+            from copy import deepcopy as _dc
+
+            info = info or {}
+            # Establish rollout-wide time budget (align with TB harness semantics)
+            env_total = os.getenv("TB_AGENT_TOTAL_TIMEOUT_SEC")
+            try:
+                total_budget = float(env_total) if env_total else None
+            except Exception:
+                total_budget = None
+            if total_budget is None:
+                try:
+                    total_budget = float(info.get("max_agent_timeout_sec", 360.0))
+                except Exception:
+                    total_budget = 360.0
+            start_time = time.time()
+            deadline = start_time + float(total_budget)
+            is_completed = False
+            state = {
+                "prompt": prompt,
+                "completion": [],
+                "answer": answer,
+                "task": task,
+                "info": info,
+                "responses": [],
+                "turn": 0,
+            }
+            state = self.setup_state(state)
+            assert isinstance(prompt, list)
+            completion: list[dict] = []
+            rollout_msgs: list[dict] = _dc(prompt)
+            while not is_completed:
+                # Stop if rollout-wide budget exhausted
+                if time.time() >= deadline:
+                    print(
+                        "[TERMINALBENCH_ENV] ⏳ Agent time budget exhausted; ending rollout."
+                    )
+                    break
+                if self.is_completed(rollout_msgs, state, **kwargs):
+                    is_completed = True
+                    break
+                response = await self.get_model_response(
+                    client=client,
+                    model=model,
+                    prompt=rollout_msgs,
+                    oai_tools=info.get("oai_tools", None),
+                    sampling_args=sampling_args,
+                    message_type=self.message_type,
+                )
+                state["responses"].append(response)
+                # Assistant message
+                response_text: str = response.choices[0].message.content or ""  # type: ignore
+                response_message: dict = {
+                    "role": "assistant",
+                    "content": response_text,
+                }
+                if response.choices[0].message.tool_calls:
+                    response_message["tool_calls"] = response.choices[
+                        0
+                    ].message.tool_calls  # type: ignore
+                rollout_msgs.append(response_message)
+                completion.append(response_message)
+                state["turn"] += 1
+                if (
+                    self.is_completed(rollout_msgs, state, **kwargs)
+                    or state["turn"] >= self.max_turns
+                ):
+                    is_completed = True
+                else:
+                    # Async tool execution: run each tool in a thread
+                    assert "tool_calls" in rollout_msgs[-1]
+                    tool_calls = rollout_msgs[-1]["tool_calls"] or []
+                    tool_messages: list[dict] = []
+                    # Execute sequentially to preserve order and avoid tmux conflicts per task
+                    for tool_call in tool_calls:
+                        tool_name: str = tool_call.function.name
+                        import json as _json
+
+                        tool_args: dict = _json.loads(tool_call.function.arguments)
+                        tool_call_id: str = tool_call.id or ""
+                        # Offload blocking execute_commands to a thread, with thread-safe context set
+                        import asyncio as _asyncio
+
+                        tool_message = await _asyncio.to_thread(
+                            self._run_tool_call_threadsafe,
+                            tool_name,
+                            tool_args,
+                            tool_call_id,
+                            state.get("info", {}) or {},
+                            deadline,
+                        )
+                        tool_messages.append(tool_message)
+                    assert isinstance(rollout_msgs, list)
+                    rollout_msgs += tool_messages
+                    completion += tool_messages
+            return completion, state
+
+        async def a_generate(
+            self,
+            inputs,
+            client=None,
+            model: str | None = None,
+            sampling_args=None,
+            score_rollouts: bool = True,
+            max_concurrent: int = -1,
+            **kwargs,
+        ):
+            # Map external "max_concurrent_requests" to core "max_concurrent"
+            mcr = kwargs.pop("max_concurrent_requests", None)
+            if max_concurrent is None or max_concurrent < 1:
+                if isinstance(mcr, int) and mcr > 0:
+                    max_concurrent = mcr
+                elif MAX_PARALLEL_TASKS > 1:
+                    max_concurrent = MAX_PARALLEL_TASKS
+                else:
+                    # Leave as sequential
+                    max_concurrent = -1
+            print(
+                f"[TERMINALBENCH_ENV] Rollout parallelism resolved to: {max_concurrent if max_concurrent > 0 else 'sequential'}"
+            )
+            return await super().a_generate(
+                inputs,
+                client=client,
+                model=model,
+                sampling_args=sampling_args,
+                score_rollouts=score_rollouts,
+                max_concurrent=max_concurrent,
+                **kwargs,
+            )
 
         def _init_state(self, state: dict):
             """Initialize the task context at the start of a rollout."""
@@ -648,6 +898,8 @@ def load_environment(
             print("[TERMINALBENCH_ENV]   Context set, delegating to parent ToolEnv")
             return super().env_response(messages, state, **kwargs)
 
+    print(f"[TERMINALBENCH_ENV] Max parallel tasks: {MAX_PARALLEL_TASKS}")
+
     env = TerminalBenchEnv(
         dataset=dataset,
         rubric=rubric,
@@ -655,8 +907,9 @@ def load_environment(
         message_type="chat",  # Required for function calling
     )
 
-    # Attach executor to environment for cleanup
+    # Attach executor and parallelism config to environment for cleanup and external control
     env._executor = executor  # type: ignore
+    env.max_parallel_tasks = MAX_PARALLEL_TASKS  # type: ignore
 
     # Removed custom __del__ method to prevent premature cleanup by garbage collector
     # Cleanup will be handled by atexit handlers and explicit cleanup in evaluation

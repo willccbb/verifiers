@@ -27,6 +27,7 @@ A subset of tasks can be selected via `num_examples` (default: all). The Termina
 Please be sure to set a sufficiently high max-tokens.
 Example terminal usage:
 ```bash
+export TB_MAX_PARALLEL_TASKS=5
 uv run vf-eval --api-base-url https://openrouter.ai/api/v1 --api-key-var OPENROUTER_API_KEY --model openai/gpt-5-mini --num-examples 10 --rollouts-per-example 1 --max-tokens 16384 environments.terminalbench.vf_terminalbench
 ```
 
@@ -42,6 +43,33 @@ env = load_environment(
 # Agent/tool calls should provide non-interactive shell commands to complete the task inside the container.
 ```
 
+
+## Environment variables
+
+These variables tune performance, timeouts, and cleanup behavior for the Terminal-Bench environment.
+
+- **TB_TS_LOGS**: Prefix module logs with timestamps. Default: `1`. Set to `0` to disable.
+- **TB_MAX_PARALLEL_TASKS**: Max concurrent rollouts (tasks) to run. Default: `1`.
+  - The CLI flag `--max-concurrent-requests` (in `vf-eval`) takes precedence for rollouts.
+- **TB_AGENT_TOTAL_TIMEOUT_SEC**: Rollout-wide budget in seconds. If unset, uses the task’s `max_agent_timeout_sec` from `task.yaml`.
+- **TB_CMD_TIMEOUT_SEC**: Hard cap per `execute_commands` call. The effective timeout per call is `min(TB_CMD_TIMEOUT_SEC (if set), remaining rollout budget)`.
+- **TB_HANDLE_SIGNALS**: When `1`, install SIGINT/SIGTERM handlers so Ctrl-C triggers cleanup. Default: `0`.
+- **TB_NO_REBUILD**: When `1`, skip `docker compose build` for faster start. Default: `0`.
+- **TB_CLEANUP**: When `1`, perform extra cleanup on stop (`docker compose down --rmi all --volumes` + cache prune). Default: `0`.
+- **TB_DEV_LOCAL**: When `1`, import `terminal_bench` from the local repo at `terminal-bench/` instead of an installed package. Default: `0`.
+
+Example:
+
+```bash
+export TB_TS_LOGS=1
+export TB_MAX_PARALLEL_TASKS=4
+export TB_AGENT_TOTAL_TIMEOUT_SEC=300
+export TB_CMD_TIMEOUT_SEC=120
+export TB_NO_REBUILD=1
+export TB_HANDLE_SIGNALS=1
+```
+
+Parallel rollouts use a semaphore; tool execution is offloaded to threads to keep the event loop free.
 
 ## Scoring
 
