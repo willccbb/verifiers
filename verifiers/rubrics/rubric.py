@@ -1,5 +1,4 @@
 import asyncio
-from asyncio.coroutines import iscoroutinefunction
 import inspect
 import logging
 
