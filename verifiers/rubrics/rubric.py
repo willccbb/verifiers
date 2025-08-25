@@ -99,6 +99,8 @@ class Rubric:
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
                 ans = func(**merged)
+                if inspect.iscoroutinefunction(func):
+                    ans = await ans
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
@@ -106,6 +108,8 @@ class Rubric:
             allowed = {k: v for k, v in merged.items() if k in sig.parameters}
             try:
                 ans = func(**allowed)
+                if inspect.iscoroutinefunction(func):
+                    ans = await ans
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
