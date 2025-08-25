@@ -98,14 +98,14 @@ class Rubric:
         merged = {**common, **kwargs}
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
-                ans = func(**merged)
+                ans = await func(**merged)
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
         else:
             allowed = {k: v for k, v in merged.items() if k in sig.parameters}
             try:
-                ans = func(**allowed)
+                ans = await func(**allowed)
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0

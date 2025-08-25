@@ -1,5 +1,6 @@
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Literal,
 )
@@ -31,7 +32,7 @@ Messages = str | list[ChatMessage]
 Info = dict[str, Any]
 State = dict[str, Any]
 SamplingArgs = dict[str, Any]
-RewardFunc = Callable[..., float]
+RewardFunc = Callable[..., float | Awaitable[float]]
 
 # oai tools
 JsonPrimitive = Literal["string", "number", "integer", "boolean", "array", "object"]
