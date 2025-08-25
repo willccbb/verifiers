@@ -548,6 +548,77 @@ def load_environment(
         print("\n⚖️  EVALUATING TASK COMPLETION ⚖️")
 
         try:
+            # If we already evaluated at rollout end, reuse stored results to avoid re-spinning containers
+            try:
+                if isinstance(state, dict) and state.get("_tb_evaluated", False):
+                    print("Using cached Terminal-Bench test results from rollout")
+                    task_id = info.get("task_id", "<unknown>")
+                    task_path = (
+                        Path(info.get("task_path", ""))
+                        if info.get("task_path")
+                        else None
+                    )  # type: ignore
+                    print(f"Task ID: {task_id}")
+                    print(f"Task path: {task_path}")
+
+                    success = bool(state.get("terminalbench_parsed_success", False))
+                    post_test_pane = str(state.get("terminalbench_test_output", ""))
+
+                    # Diagnostics output similar to normal path
+                    def _strip_ansi(s: str) -> str:
+                        return ANSI_ESCAPE_RE.sub("", s)
+
+                    def _sanitize(s: str) -> str:
+                        s = _strip_ansi(s)
+                        return "".join(
+                            ch if (ch.isprintable() or ch in "\t\n\r") else "�"
+                            for ch in s
+                        )
+
+                    sanitized_pane = _sanitize(post_test_pane)
+                    pane_lines = sanitized_pane.splitlines()
+                    tail_lines = 120
+                    tail_text = "\n".join(pane_lines[-tail_lines:])
+                    if len(tail_text) > 6000:
+                        tail_text = tail_text[-6000:]
+
+                    print("\n🧪 Test run status:")
+                    print(
+                        f" - Runner indicated ok: {bool(state.get('terminalbench_ran_ok', False))}"
+                    )
+                    if state.get("terminalbench_parsed_results") is not None:
+                        try:
+                            print(
+                                f" - Parsed results: {state.get('terminalbench_parsed_results')}"
+                            )
+                        except Exception:
+                            pass
+                    print("----- Test output (tail) -----")
+                    print(tail_text)
+                    print("----- End test output -----\n")
+
+                    # Agent commands tail if available
+                    if state.get("terminalbench_commands_log_tail"):
+                        print("📜 Agent commands log (tail):")
+                        print("----- Commands (tail) -----")
+                        print(str(state.get("terminalbench_commands_log_tail")))
+                        print("----- End commands -----\n")
+
+                    print("\n📋 FINAL EVALUATION RESULT:")
+                    print(f"Tests passed: {success}")
+                    print(f"Score: {1.0 if success else 0.0}")
+                    if not success:
+                        print("❌ Task failed Terminal-Bench tests")
+                    else:
+                        print("✅ Task passed all Terminal-Bench tests!")
+
+                    # Context was already cleaned up at rollout end
+                    return 1.0 if success else 0.0
+            except Exception as e_cached:
+                print(
+                    f"Warning: failed to use cached test results, falling back to fresh eval: {e_cached}"
+                )
+
             task_id = info["task_id"]
             task_path = Path(info["task_path"])  # type: ignore
 
@@ -727,7 +798,108 @@ def load_environment(
             execute_commands._current_task_id = info.get("task_id")
             execute_commands._current_task_path = info.get("task_path")
             execute_commands._current_info = info
+
+            # Proactively create/start a terminal context so container is ready during first model turn
+            try:
+                task_id = info.get("task_id")
+                task_path = info.get("task_path")
+                if task_id and task_path:
+                    # Favor speed for local runs unless explicitly overridden by user
+                    os.environ.setdefault("TB_NO_REBUILD", "1")
+                    os.environ.setdefault("TB_CLEANUP", "0")
+                    self.executor.get_context(task_id, Path(task_path))
+            except Exception as e:
+                print(
+                    f"[TERMINALBENCH_ENV]   Warning: failed to start context in setup_state: {e}"
+                )
+
             return super().setup_state(state, **kwargs)
+
+        def is_completed(self, messages, state, **kwargs):
+            # Use default ToolEnv completion condition
+            base_done = super().is_completed(messages, state, **kwargs)
+            if not base_done:
+                return False
+
+            # Already evaluated and cleaned up for this rollout
+            if isinstance(state, dict) and state.get("_tb_evaluated", False):
+                return True
+
+            # Run tests and cleanup now, cache results in state for rubric usage
+            try:
+                info = state.get("info", {}) or {}
+                task_id = info.get("task_id")
+                task_path_str = info.get("task_path")
+                if not task_id or not task_path_str:
+                    return True
+
+                # Ensure a context exists (should already from setup_state)
+                os.environ.setdefault("TB_NO_REBUILD", "1")
+                os.environ.setdefault("TB_CLEANUP", "0")
+                ctx = self.executor.get_context(task_id, Path(task_path_str))
+
+                # Execute tests inside the container
+                ran_ok, post_test_pane = ctx.run_tests(
+                    timeout=float(info.get("max_test_timeout_sec", 180.0))
+                )
+
+                # Parse and determine success using Terminal-Bench's parser
+                parsed = None
+                success = False
+                try:
+                    parsed = ctx.trial_handler.parser.parse(post_test_pane)
+                    all_passed = (
+                        parsed is not None
+                        and len(parsed) > 0
+                        and all("PASSED" in str(v) for v in parsed.values())
+                    )
+                    success = bool(all_passed)
+                except Exception as pe:
+                    print(
+                        f"[TERMINALBENCH_ENV] Parser error during is_completed eval: {pe}"
+                    )
+                    success = False
+
+                # Capture agent commands log tail for debugging
+                commands_log_tail = None
+                try:
+                    commands_log_path = ctx.trial_handler.trial_paths.commands_path
+                    if commands_log_path.exists():
+                        try:
+                            log_text = commands_log_path.read_text(errors="replace")
+                            log_lines = log_text.splitlines()
+                            commands_log_tail = "\n".join(log_lines[-80:])
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # Cache results in state for rubric
+                state["_tb_evaluated"] = True
+                state["terminalbench_ran_ok"] = bool(ran_ok)
+                state["terminalbench_parsed_results"] = parsed
+                state["terminalbench_parsed_success"] = bool(success)
+                state["terminalbench_test_output"] = str(post_test_pane)
+                if commands_log_tail is not None:
+                    state["terminalbench_commands_log_tail"] = commands_log_tail
+
+                # Cleanup container immediately after evaluation
+                try:
+                    print(
+                        f"[TERMINALBENCH_ENV] 🧹 Cleaning up terminal for {task_id} at rollout end"
+                    )
+                    self.executor.cleanup_context(task_id)
+                except Exception as ce:
+                    print(
+                        f"[TERMINALBENCH_ENV] Warning: cleanup failed for {task_id}: {ce}"
+                    )
+
+                return True
+            except Exception as e:
+                print(
+                    f"[TERMINALBENCH_ENV] Warning: per-task eval in is_completed failed: {e}"
+                )
+                return True
 
         def _run_tool_call_threadsafe(
             self,
