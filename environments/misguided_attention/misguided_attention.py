@@ -8,6 +8,7 @@ from openai import OpenAI
 from datasets import Dataset
 
 import verifiers as vf
+from verifiers.parsers.parser import Parser
 
 
 def xor_bytes(data: bytes, key: bytes) -> bytes:
@@ -97,14 +98,6 @@ def load_dataset_raw(
     except Exception as e:
         print(f"Error loading descrambled JSON: {e}")
         return None
-
-
-def normalize_weights(weights: List[float]) -> List[float]:
-    """Normalize weights to sum to 1.0."""
-    total = sum(weights)
-    if total == 0:
-        return [1.0 / len(weights)] * len(weights)
-    return [w / total for w in weights]
 
 
 def parse_answer_spec(answer: str) -> tuple[list[str], list[float]]:
@@ -276,7 +269,6 @@ def load_environment(
         judge_model: Model name for the judge
         judge_base_url: Base URL for the judge API (default: DeepSeek)
         judge_api_key_var: Environment variable name for API key
-        normalize_weights_flag: Whether to normalize criterion weights
         max_examples: Maximum number of examples to load (-1 for all)
     """
 
@@ -326,9 +318,7 @@ def load_environment(
     # System prompt for the task
     system_prompt = """Please answer the following question:"""
 
-    # Parser function (identity for this task)
-    def parser(response: str) -> str:
-        return response.strip()
+    parser = Parser()
 
     # Create the rubric
     rubric = JudgeRubric(
@@ -341,6 +331,7 @@ def load_environment(
             "temperature": judge_temperature,
             "max_tokens": judge_max_tokens,
         },
+        parser=parser,
     )
 
     def misguided_attention_evaluation(
