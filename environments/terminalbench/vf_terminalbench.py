@@ -85,6 +85,34 @@ ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 THREAD_LOCAL = threading.local()
 
 
+# Shared helpers for output processing
+def strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
+
+
+def sanitize_text(text: str) -> str:
+    text = strip_ansi(text)
+    return "".join(ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in text)
+
+
+def extract_tail(text: str, max_lines: int = 120, max_chars: int = 6000) -> str:
+    sanitized = sanitize_text(text)
+    lines = sanitized.splitlines()
+    tail = "\n".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
+
+
+def sanitize_and_truncate(text: str, max_output_length: int = 8000) -> str:
+    raw = text
+    if len(raw) > max_output_length:
+        raw = raw[:max_output_length] + (
+            f"\n\n... [Output truncated. Total length: {len(text)} characters]"
+        )
+    return sanitize_text(raw)
+
+
 # Timestamped print wrapper (enabled by default; set TB_TS_LOGS=0 to disable)
 def _ts() -> str:
     try:
@@ -217,11 +245,8 @@ class _TerminalContext:
             f"[TERMINALCTX] Command completed in {time.time() - t0:.2f}s; captured {len(output)} chars."
         )
 
-        # Heuristic: consider success if no clear error keywords appear in last pane
-        pane_text = self.session.capture_pane(capture_entire=False)
-        failed = any(
-            k in pane_text for k in ["command not found", "Traceback", "ERROR"]
-        )  # noqa: E501
+        # Heuristic: consider success if no clear error keywords appear in captured pane
+        failed = any(k in output for k in ["command not found", "Traceback", "ERROR"])  # noqa: E501
         return (not failed), output
 
     def run_block(self, commands_block: str, timeout: float) -> Tuple[bool, str]:
@@ -333,8 +358,6 @@ class TerminalTaskExecutor:
         for tid in list(self.contexts.keys()):
             self.cleanup_context(tid)
         try:
-            import shutil
-
             shutil.rmtree(self.output_root, ignore_errors=True)
         except Exception:
             pass
@@ -583,21 +606,8 @@ def load_environment(
             # Execute as a single block to preserve heredocs and multi-line structure
             success, output = ctx.run_block(commands_str, timeout=timeout_sec)
 
-            # Sanitize terminal output to avoid overly large or non-JSON-safe payloads
-            def _sanitize_output(s: str) -> str:
-                # Replace non-printable characters except tab/newline/carriage return
-                return "".join(
-                    ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in s
-                )
-
-            # Truncate early, then strip ANSI and sanitize for performance
-            max_output_length = 8000
-            raw = output
-            if len(raw) > max_output_length:
-                raw = raw[:max_output_length]
-                raw += f"\n\n... [Output truncated. Total length: {len(output)} characters]"
-            raw = ANSI_ESCAPE_RE.sub("", raw)
-            truncated_output = _sanitize_output(raw)
+            # Sanitize and truncate terminal output
+            truncated_output = sanitize_and_truncate(output)
 
             # Format response
             result = "Command(s) executed"
@@ -642,23 +652,8 @@ def load_environment(
                     success = bool(state.get("terminalbench_parsed_success", False))
                     post_test_pane = str(state.get("terminalbench_test_output", ""))
 
-                    # Diagnostics output similar to normal path
-                    def _strip_ansi(s: str) -> str:
-                        return ANSI_ESCAPE_RE.sub("", s)
-
-                    def _sanitize(s: str) -> str:
-                        s = _strip_ansi(s)
-                        return "".join(
-                            ch if (ch.isprintable() or ch in "\t\n\r") else "�"
-                            for ch in s
-                        )
-
-                    sanitized_pane = _sanitize(post_test_pane)
-                    pane_lines = sanitized_pane.splitlines()
-                    tail_lines = 120
-                    tail_text = "\n".join(pane_lines[-tail_lines:])
-                    if len(tail_text) > 6000:
-                        tail_text = tail_text[-6000:]
+                    # Diagnostics output using shared helpers
+                    tail_text = extract_tail(post_test_pane)
 
                     print("\n🧪 Test run status:")
                     print(
@@ -734,22 +729,7 @@ def load_environment(
                 success = False
 
             # Provide detailed diagnostics
-            def _strip_ansi(s: str) -> str:
-                return ANSI_ESCAPE_RE.sub("", s)
-
-            def _sanitize(s: str) -> str:
-                s = _strip_ansi(s)
-                return "".join(
-                    ch if (ch.isprintable() or ch in "\t\n\r") else "�" for ch in s
-                )
-
-            sanitized_pane = _sanitize(post_test_pane)
-            # Show the last 120 lines (or up to 6000 chars) for brevity
-            pane_lines = sanitized_pane.splitlines()
-            tail_lines = 120
-            tail_text = "\n".join(pane_lines[-tail_lines:])
-            if len(tail_text) > 6000:
-                tail_text = tail_text[-6000:]
+            tail_text = extract_tail(post_test_pane)
 
             print("\n🧪 Test run status:")
             print(f" - Runner indicated ok: {ran_ok}")
