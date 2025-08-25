@@ -1,0 +1,19 @@
+[project]
+name = "enigmata"
+version = "0.1.1"
+tags = ["enigmata", "single-turn", "reasoning", "puzzles"]
+description = "Enigmata environment for verifiers"
+requires-python = ">=3.11"
+dependencies = [
+    "verifiers>=0.1.0",
+    "datasets",
+    "python-sat",
+    "python-constraint",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["enigmata.py"]
