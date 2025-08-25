@@ -9,6 +9,7 @@ from datasets import load_dataset
 import json
 import subprocess
 import random
+from functools import lru_cache
 
 try:
     import numpy as _np  # type: ignore
@@ -60,6 +61,140 @@ def _set_global_seed(seed: int) -> None:
             _np.random.seed(seed)
         except Exception:
             pass
+
+
+def _ensure_enigmata_on_path() -> Path:
+    """
+    Ensure `Enigmata` is importable by adding it to sys.path if needed, and
+    return the resolved `Enigmata` root path.
+    """
+    repo_root: Path = Path(__file__).parent
+    enigmata_root: Path = repo_root / "Enigmata"
+    if str(enigmata_root) not in sys.path:
+        sys.path.append(str(enigmata_root))
+    return enigmata_root
+
+
+def _iter_problems(
+    generate_func,
+    n: int,
+    *,
+    difficulty: str,
+    language: str,
+    split: str,
+    enigmata_root: Path,
+    task_name: str,
+):
+    """
+    Yield up to `n` problems from a task's `generate` callable.
+
+    Supports both generator functions (with or without a `count` parameter)
+    and regular functions returning a single problem per call.
+    """
+    is_generator_func = inspect.isgeneratorfunction(generate_func)
+    params = inspect.signature(generate_func).parameters
+    call_kwargs = {
+        "difficulty": difficulty,
+        "language": language,
+        "split": split,
+    }
+
+    produced = 0
+    any_failure = False
+    if is_generator_func:
+        if "count" in params:
+            with _cwd(enigmata_root):
+                gen = generate_func(n, **call_kwargs)
+            try:
+                for problem in gen:
+                    yield problem
+                    produced += 1
+                    if produced >= n:
+                        break
+            except Exception:
+                # If generator fails during iteration, stop yielding for this difficulty
+                any_failure = True
+            finally:
+                if produced == 0 and any_failure:
+                    print(
+                        f"Info: task '{task_name}' does not support difficulty '{difficulty}'; skipping."
+                    )
+        else:
+            while produced < n:
+                try:
+                    with _cwd(enigmata_root):
+                        gen = generate_func(**call_kwargs)
+                        problem = next(gen)
+                    yield problem
+                    produced += 1
+                except Exception:
+                    # Skip failures and continue attempting
+                    any_failure = True
+                    continue
+            if produced == 0 and any_failure:
+                print(
+                    f"Info: task '{task_name}' does not support difficulty '{difficulty}'; skipping."
+                )
+    else:
+        while produced < n:
+            try:
+                with _cwd(enigmata_root):
+                    problem = generate_func(**call_kwargs)
+                yield problem
+                produced += 1
+            except Exception:
+                any_failure = True
+                continue
+        if produced == 0 and any_failure:
+            print(
+                f"Info: task '{task_name}' does not support difficulty '{difficulty}'; skipping."
+            )
+
+
+@lru_cache(maxsize=None)
+def _resolve_verifier(task_name: str):
+    """
+    Resolve and cache the task-specific `verify` function; returns callable or None.
+    """
+    try:
+        module = importlib.import_module(f"verifiable_tasks.tasks.{task_name}.verifier")
+        candidate = getattr(module, "verify", None)
+        return candidate if callable(candidate) else None
+    except Exception:
+        return None
+
+
+def _extract_task_and_meta(kwargs) -> (str, Dict[str, Any]):
+    """
+    Extract `task_name` and `meta` from kwargs and optional nested containers.
+    """
+    task_name: str = kwargs.get("task_name") or "unknown"
+    meta_json = kwargs.get("meta_json")
+    meta_value = kwargs.get("meta")
+
+    container = kwargs.get("example") or kwargs.get("row") or kwargs.get("record")
+    if isinstance(container, dict):
+        task_name = container.get("task_name", task_name)
+        if meta_json is None:
+            meta_json = container.get("meta_json")
+        if meta_value is None:
+            meta_value = container.get("meta")
+
+    meta: Dict[str, Any] = {}
+    if isinstance(meta_json, str):
+        try:
+            meta = json.loads(meta_json)
+        except Exception:
+            meta = {}
+    elif isinstance(meta_value, dict):
+        meta = dict(meta_value)
+    elif isinstance(meta_value, str):
+        try:
+            meta = json.loads(meta_value)
+        except Exception:
+            meta = {}
+
+    return task_name, meta
 
 
 def normalize_problem(
@@ -189,10 +324,7 @@ def generate_dataset(
         _set_global_seed(int(seed))
 
     # Ensure `Enigmata` is on sys.path to import `verifiable_tasks.tasks.*`
-    repo_root: Path = Path(__file__).parent
-    enigmata_root: Path = repo_root / "Enigmata"
-    if str(enigmata_root) not in sys.path:
-        sys.path.append(str(enigmata_root))
+    enigmata_root: Path = _ensure_enigmata_on_path()
 
     tasks_dir: Path = enigmata_root / "verifiable_tasks" / "tasks"
 
@@ -228,62 +360,26 @@ def generate_dataset(
                 continue
 
             generate_func = getattr(generator_module, "generate")
-            is_generator_func = inspect.isgeneratorfunction(generate_func)
-            params = inspect.signature(generate_func).parameters
 
             for difficulty in selected_difficulties:
-                collected: List[Any] = []
-                try:
-                    if is_generator_func:
-                        if "count" in params:
-                            with _cwd(enigmata_root):
-                                gen = generate_func(
-                                    problems_per_difficulty,
-                                    difficulty=difficulty,
-                                    language=language,
-                                    split=split,
-                                )
-                            for i, problem in enumerate(gen):
-                                collected.append(problem)
-                                if i + 1 >= problems_per_difficulty:
-                                    break
-                        else:
-                            for _ in range(problems_per_difficulty):
-                                try:
-                                    with _cwd(enigmata_root):
-                                        gen = generate_func(
-                                            difficulty=difficulty,
-                                            language=language,
-                                            split=split,
-                                        )
-                                        problem = next(gen)
-                                    collected.append(problem)
-                                except Exception:
-                                    continue
-                    else:
-                        for _ in range(problems_per_difficulty):
-                            try:
-                                with _cwd(enigmata_root):
-                                    problem = generate_func(
-                                        difficulty=difficulty,
-                                        language=language,
-                                        split=split,
-                                    )
-                                collected.append(problem)
-                            except Exception:
-                                continue
-                except Exception:
-                    collected = []
-
-                for problem in collected:
-                    normalized = normalize_problem(
-                        problem=problem,
-                        task_name=task_name,
-                        difficulty=difficulty,
-                        split=split,
-                        language=language,
+                for problem in _iter_problems(
+                    generate_func,
+                    problems_per_difficulty,
+                    difficulty=difficulty,
+                    language=language,
+                    split=split,
+                    enigmata_root=enigmata_root,
+                    task_name=task_name,
+                ):
+                    examples.append(
+                        normalize_problem(
+                            problem=problem,
+                            task_name=task_name,
+                            difficulty=difficulty,
+                            split=split,
+                            language=language,
+                        )
                     )
-                    examples.append(normalized)
 
     return Dataset.from_list(examples)
 
@@ -448,99 +544,20 @@ def load_environment(
         )
 
     # Ensure `Enigmata` is on sys.path so we can import task verifiers dynamically
-    repo_root: Path = Path(__file__).parent
-    enigmata_root: Path = repo_root / "Enigmata"
-    if str(enigmata_root) not in sys.path:
-        sys.path.append(str(enigmata_root))
-
-    # Lightweight cache to avoid re-importing verifier modules repeatedly
-    verify_fn_cache: Dict[str, Any] = {}
+    enigmata_root: Path = _ensure_enigmata_on_path()
 
     def reward_func(prompt, parser, completion, answer, **kwargs):
-        """
-        Per-sample reward function.
-
-        Mirrors the logic of `compute_score` in `Enigmata/test_eval.py` by:
-        - Resolving the correct task verifier from `verifiable_tasks.tasks.<task>.verifier`
-        - Passing through the model's raw completion, the ground-truth answer, and the task meta
-        - Returning the verifier's numeric score (typically 0/1)
-
-        Parameters
-        - prompt: The current example's question as a string.
-        - parser: A callable for post-processing the completion if needed (unused here).
-        - completion: The model's output string for this example.
-        - answer: The ground-truth answer string for this example.
-        - **kwargs: Additional context keys such as `task_name`, `meta_json` (JSON
-                    string), `meta` (dict/JSON string), or a nested `example`/`row`/`record`
-                    dict carrying these fields.
-        """
-
-        # Defensive defaults
-        task_name: str = "unknown"
-        meta: Any = {}
-
-        # Extract task_name/meta primarily from kwargs since prompt is a string
-        try:
-            # Direct keys
-            task_name = kwargs.get("task_name", task_name)
-            meta_json = kwargs.get("meta_json")
-            meta_value = kwargs.get("meta")
-
-            # Nested example/row/record containers if present
-            container = (
-                kwargs.get("example") or kwargs.get("row") or kwargs.get("record")
-            )
-            if isinstance(container, dict):
-                task_name = container.get("task_name", task_name)
-                if meta_json is None:
-                    meta_json = container.get("meta_json")
-                if meta_value is None:
-                    meta_value = container.get("meta")
-
-            # Decode meta, preferring meta_json if provided
-            if isinstance(meta_json, str):
-                try:
-                    meta = json.loads(meta_json)
-                except Exception:
-                    meta = {}
-            elif isinstance(meta_value, dict):
-                meta = dict(meta_value)
-            elif isinstance(meta_value, str):
-                try:
-                    meta = json.loads(meta_value)
-                except Exception:
-                    meta = {}
-        except Exception:
-            task_name = task_name
-            meta = {}
-
-        # Resolve the verifier function for this task, with caching
-        verify_fn = verify_fn_cache.get(task_name)
+        """Per-sample reward using cached verifier and extracted meta."""
+        task_name, meta = _extract_task_and_meta(kwargs)
+        verify_fn = _resolve_verifier(task_name)
         if verify_fn is None:
-            try:
-                module = importlib.import_module(
-                    f"verifiable_tasks.tasks.{task_name}.verifier"
-                )
-                candidate = getattr(module, "verify", None)
-                if callable(candidate):
-                    verify_fn = candidate
-                    verify_fn_cache[task_name] = verify_fn
-            except Exception:
-                verify_fn = None
-
-        # If we cannot resolve a verifier, return zero reward
-        if verify_fn is None:
+            print(f"Cannot resolve verifier for task: {task_name}")
             return 0.0
-
-        # Compute score using the task-specific verifier; mirror test_eval semantics
         try:
-            # Keep completion as a raw string; verifiers expect string outputs
             solution_str = (
                 completion if isinstance(completion, str) else str(completion)
             )
-            score = verify_fn(solution_str, answer, meta)
-            # Coerce to float for compatibility
-            return float(score)
+            return float(verify_fn(solution_str, answer, meta))
         except Exception:
             return 0.0
 
