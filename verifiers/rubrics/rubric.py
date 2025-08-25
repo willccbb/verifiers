@@ -1,4 +1,5 @@
 import asyncio
+from asyncio.coroutines import iscoroutinefunction
 import inspect
 import logging
 
@@ -98,14 +99,18 @@ class Rubric:
         merged = {**common, **kwargs}
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
-                ans = await func(**merged)
+                ans = func(**merged)
+                if inspect.iscoroutinefunction(func):
+                    ans = await ans
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
         else:
             allowed = {k: v for k, v in merged.items() if k in sig.parameters}
             try:
-                ans = await func(**allowed)
+                ans = func(**allowed)
+                if inspect.iscoroutinefunction(func):
+                    ans = await ans
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
