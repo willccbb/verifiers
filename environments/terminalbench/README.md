@@ -27,9 +27,11 @@ A subset of tasks can be selected via `num_examples` (default: all). The Termina
 Please be sure to set a sufficiently high max-tokens.
 Example terminal usage:
 ```bash
-export TB_ROLLOUT_CONCURRENCY=5     # concurrent agent rollouts
-export TB_TEST_CONCURRENCY=5        # concurrent test evaluations
-uv run vf-eval --api-base-url https://openrouter.ai/api/v1 --api-key-var OPENROUTER_API_KEY --model openai/gpt-5-mini --num-examples 10 --rollouts-per-example 1 --max-tokens 16384 environments.terminalbench.vf_terminalbench
+export TB_ROLLOUT_CONCURRENCY=30
+export TB_TEST_CONCURRENCY=30
+export TB_TEST_TIMEOUT_SEC=300
+export TB_AGENT_TOTAL_TIMEOUT_SEC=300
+uv run vf-eval --api-base-url https://openrouter.ai/api/v1 --api-key-var OPENROUTER_API_KEY --model openai/gpt-5-mini --num-examples -1 --rollouts-per-example 1 --max-tokens 16384 environments.terminalbench.vf_terminalbench  2>&1 | tee output.txt
 ```
 
 ```python
@@ -55,6 +57,7 @@ These variables tune performance, timeouts, and cleanup behavior for the Termina
 - **TB_TEST_CONCURRENCY**: Max concurrent test evaluations. Default: equals `TB_ROLLOUT_CONCURRENCY`.
 - **TB_AGENT_TOTAL_TIMEOUT_SEC**: Rollout-wide budget in seconds. If unset, uses the task’s `max_agent_timeout_sec` from `task.yaml`.
 - **TB_CMD_TIMEOUT_SEC**: Hard cap per `execute_commands` call. The effective timeout per call is `min(TB_CMD_TIMEOUT_SEC (if set), remaining rollout budget)`.
+- **TB_TEST_TIMEOUT_SEC**: Global cap for Terminal-Bench test execution. If set, overrides each task’s `max_test_timeout_sec` when running tests.
 - **TB_HANDLE_SIGNALS**: When `1`, install SIGINT/SIGTERM handlers so Ctrl-C triggers cleanup. Default: `0`.
 - **TB_NO_REBUILD**: When `1`, skip `docker compose build` for faster start. Default: `0`.
 - **TB_CLEANUP**: When `1`, perform extra cleanup on stop (`docker compose down --rmi all --volumes` + cache prune). Default: `1`.
@@ -68,6 +71,7 @@ export TB_ROLLOUT_CONCURRENCY=4
 export TB_TEST_CONCURRENCY=4
 export TB_AGENT_TOTAL_TIMEOUT_SEC=300
 export TB_CMD_TIMEOUT_SEC=120
+export TB_TEST_TIMEOUT_SEC=90
 export TB_NO_REBUILD=1
 export TB_HANDLE_SIGNALS=1
 ```
@@ -86,3 +90,18 @@ Tasks may require:
 - Elevated privileges for certain operations
 - Specific base images (Ubuntu/Debian with apt)
 - Resource limits (2GB memory, 1 CPU by default)
+
+You may run out of predefined address pools depending on the number of containers you're running concurrently.
+To increase it, you may have to modify your Docker configuration. For example:
+```bash
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+{
+  "default-address-pools": [
+    { "base": "172.16.0.0/12",  "size": 24 },
+    { "base": "192.168.0.0/16", "size": 24 },
+    { "base": "10.128.0.0/9",   "size": 24 }
+  ]
+}
+EOF
+```
