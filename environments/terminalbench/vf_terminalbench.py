@@ -740,7 +740,7 @@ def load_environment(
             # Always ensure a context exists/reused for this task
             try:
                 os.environ.setdefault("TB_NO_REBUILD", "1")
-                os.environ.setdefault("TB_CLEANUP", "0")
+                os.environ.setdefault("TB_CLEANUP", "1")
                 ctx = executor.get_context(task_id, task_path)
             except Exception as e:
                 print(f"Failed to create context for {task_id}: {e}")
@@ -910,7 +910,7 @@ def load_environment(
                 task_path = info.get("task_path")
                 if task_id and task_path:
                     os.environ.setdefault("TB_NO_REBUILD", "1")
-                    os.environ.setdefault("TB_CLEANUP", "0")
+                    os.environ.setdefault("TB_CLEANUP", "1")
                     self.executor.prewarm_context(task_id, Path(task_path))
             except Exception as e:
                 print(
@@ -939,7 +939,7 @@ def load_environment(
 
                 # Ensure a context exists (should already from setup_state)
                 os.environ.setdefault("TB_NO_REBUILD", "1")
-                os.environ.setdefault("TB_CLEANUP", "0")
+                os.environ.setdefault("TB_CLEANUP", "1")
                 ctx = self.executor.get_context(task_id, Path(task_path_str))
 
                 # Execute tests inside the container (allow env override)
