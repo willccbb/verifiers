@@ -328,6 +328,10 @@ class TerminalTaskExecutor:
         self.contexts: Dict[str, _TerminalContext] = {}
         self.output_root = Path(tempfile.mkdtemp(prefix="terminalbench_vf_"))
         self._register_cleanup_handlers()
+        # Guards to ensure single start per task and optional background prewarm
+        self._locks: Dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+        self._prewarm_started: set[str] = set()
 
     def _register_cleanup_handlers(self) -> None:
         atexit.register(self.cleanup)
@@ -342,12 +346,47 @@ class TerminalTaskExecutor:
             signal.signal(signal.SIGINT, _handler)
             signal.signal(signal.SIGTERM, _handler)
 
+    def _get_task_lock(self, task_id: str) -> threading.Lock:
+        with self._locks_guard:
+            if task_id not in self._locks:
+                self._locks[task_id] = threading.Lock()
+            return self._locks[task_id]
+
     def get_context(self, task_id: str, task_path: Path) -> _TerminalContext:
-        if task_id not in self.contexts:
-            ctx = _TerminalContext(task_path=task_path, output_root=self.output_root)
-            ctx.start()
-            self.contexts[task_id] = ctx
-        return self.contexts[task_id]
+        # Ensure only one thread starts a context per task
+        lock = self._get_task_lock(task_id)
+        with lock:
+            if task_id not in self.contexts:
+                ctx = _TerminalContext(
+                    task_path=task_path, output_root=self.output_root
+                )
+                ctx.start()
+                self.contexts[task_id] = ctx
+            return self.contexts[task_id]
+
+    def prewarm_context(self, task_id: str, task_path: Path) -> None:
+        """Start the task context in a background thread if not already started or in-flight."""
+        try:
+            # Fast path: already started
+            if task_id in self.contexts:
+                return
+            with self._locks_guard:
+                if task_id in self._prewarm_started:
+                    return
+                self._prewarm_started.add(task_id)
+
+            def _run():
+                try:
+                    self.get_context(task_id, task_path)
+                finally:
+                    with self._locks_guard:
+                        self._prewarm_started.discard(task_id)
+
+            t = threading.Thread(target=_run, name=f"tb-prewarm-{task_id}", daemon=True)
+            t.start()
+        except Exception:
+            # Best-effort: ignore prewarm errors; regular get_context will surface issues
+            pass
 
     def cleanup_context(self, task_id: str) -> None:
         ctx = self.contexts.pop(task_id, None)
@@ -710,9 +749,17 @@ def load_environment(
 
             # Run the final tests inside the container
             print("🔬 Running Terminal-Bench test suite...")
-            ran_ok, post_test_pane = ctx.run_tests(
-                timeout=float(info["max_test_timeout_sec"])  # type: ignore
-            )
+            # Allow global override via TB_TEST_TIMEOUT_SEC
+            _env_test_to = os.getenv("TB_TEST_TIMEOUT_SEC")
+            try:
+                _test_timeout = (
+                    float(_env_test_to)
+                    if _env_test_to
+                    else float(info["max_test_timeout_sec"])  # type: ignore
+                )
+            except Exception:
+                _test_timeout = float(info["max_test_timeout_sec"])  # type: ignore
+            ran_ok, post_test_pane = ctx.run_tests(timeout=_test_timeout)
 
             # Parse results using Terminal-Bench's parser (1:1 behavior)
             parsed = None
@@ -857,18 +904,17 @@ def load_environment(
             execute_commands._current_task_path = info.get("task_path")
             execute_commands._current_info = info
 
-            # Proactively create/start a terminal context so container is ready during first model turn
+            # Proactively prewarm terminal context in a background thread to avoid blocking
             try:
                 task_id = info.get("task_id")
                 task_path = info.get("task_path")
                 if task_id and task_path:
-                    # Favor speed for local runs unless explicitly overridden by user
                     os.environ.setdefault("TB_NO_REBUILD", "1")
                     os.environ.setdefault("TB_CLEANUP", "0")
-                    self.executor.get_context(task_id, Path(task_path))
+                    self.executor.prewarm_context(task_id, Path(task_path))
             except Exception as e:
                 print(
-                    f"[TERMINALBENCH_ENV]   Warning: failed to start context in setup_state: {e}"
+                    f"[TERMINALBENCH_ENV]   Warning: failed to prewarm context in setup_state: {e}"
                 )
 
             return super().setup_state(state, **kwargs)
@@ -896,10 +942,17 @@ def load_environment(
                 os.environ.setdefault("TB_CLEANUP", "0")
                 ctx = self.executor.get_context(task_id, Path(task_path_str))
 
-                # Execute tests inside the container
-                ran_ok, post_test_pane = ctx.run_tests(
-                    timeout=float(info.get("max_test_timeout_sec", 180.0))
-                )
+                # Execute tests inside the container (allow env override)
+                _env_test_to = os.getenv("TB_TEST_TIMEOUT_SEC")
+                try:
+                    _test_timeout = (
+                        float(_env_test_to)
+                        if _env_test_to
+                        else float(info.get("max_test_timeout_sec", 180.0))
+                    )
+                except Exception:
+                    _test_timeout = float(info.get("max_test_timeout_sec", 180.0))
+                ran_ok, post_test_pane = ctx.run_tests(timeout=_test_timeout)
 
                 # Parse and determine success using Terminal-Bench's parser
                 parsed = None
@@ -1017,75 +1070,99 @@ def load_environment(
                 "responses": [],
                 "turn": 0,
             }
-            state = self.setup_state(state)
-            assert isinstance(prompt, list)
-            completion: list[dict] = []
-            rollout_msgs: list[dict] = _dc(prompt)
-            while not is_completed:
-                # Stop if rollout-wide budget exhausted
-                if time.time() >= deadline:
-                    print(
-                        "[TERMINALBENCH_ENV] ⏳ Agent time budget exhausted; ending rollout."
-                    )
-                    break
-                if self.is_completed(rollout_msgs, state, **kwargs):
-                    is_completed = True
-                    break
-                response = await self.get_model_response(
-                    client=client,
-                    model=model,
-                    prompt=rollout_msgs,
-                    oai_tools=info.get("oai_tools", None),
-                    sampling_args=sampling_args,
-                    message_type=self.message_type,
-                )
-                state["responses"].append(response)
-                # Assistant message
-                response_text: str = response.choices[0].message.content or ""  # type: ignore
-                response_message: dict = {
-                    "role": "assistant",
-                    "content": response_text,
-                }
-                if response.choices[0].message.tool_calls:
-                    response_message["tool_calls"] = response.choices[
-                        0
-                    ].message.tool_calls  # type: ignore
-                rollout_msgs.append(response_message)
-                completion.append(response_message)
-                state["turn"] += 1
-                if (
-                    self.is_completed(rollout_msgs, state, **kwargs)
-                    or state["turn"] >= self.max_turns
-                ):
-                    is_completed = True
-                else:
-                    # Async tool execution: run each tool in a thread
-                    assert "tool_calls" in rollout_msgs[-1]
-                    tool_calls = rollout_msgs[-1]["tool_calls"] or []
-                    tool_messages: list[dict] = []
-                    # Execute sequentially to preserve order and avoid tmux conflicts per task
-                    for tool_call in tool_calls:
-                        tool_name: str = tool_call.function.name
-                        import json as _json
-
-                        tool_args: dict = _json.loads(tool_call.function.arguments)
-                        tool_call_id: str = tool_call.id or ""
-                        # Offload blocking execute_commands to a thread, with thread-safe context set
-                        import asyncio as _asyncio
-
-                        tool_message = await _asyncio.to_thread(
-                            self._run_tool_call_threadsafe,
-                            tool_name,
-                            tool_args,
-                            tool_call_id,
-                            state.get("info", {}) or {},
-                            deadline,
+            try:
+                state = self.setup_state(state)
+                assert isinstance(prompt, list)
+                completion: list[dict] = []
+                rollout_msgs: list[dict] = _dc(prompt)
+                while not is_completed:
+                    # Stop if rollout-wide budget exhausted
+                    if time.time() >= deadline:
+                        print(
+                            "[TERMINALBENCH_ENV] ⏳ Agent time budget exhausted; ending rollout."
                         )
-                        tool_messages.append(tool_message)
-                    assert isinstance(rollout_msgs, list)
-                    rollout_msgs += tool_messages
-                    completion += tool_messages
-            return completion, state
+                        break
+                    if self.is_completed(rollout_msgs, state, **kwargs):
+                        is_completed = True
+                        break
+                    response = await self.get_model_response(
+                        client=client,
+                        model=model,
+                        prompt=rollout_msgs,
+                        oai_tools=info.get("oai_tools", None),
+                        sampling_args=sampling_args,
+                        message_type=self.message_type,
+                    )
+                    state["responses"].append(response)
+                    # Assistant message
+                    response_text: str = response.choices[0].message.content or ""  # type: ignore
+                    response_message: dict = {
+                        "role": "assistant",
+                        "content": response_text,
+                    }
+                    if response.choices[0].message.tool_calls:
+                        response_message["tool_calls"] = response.choices[
+                            0
+                        ].message.tool_calls  # type: ignore
+                    rollout_msgs.append(response_message)
+                    completion.append(response_message)
+                    state["turn"] += 1
+                    if (
+                        self.is_completed(rollout_msgs, state, **kwargs)
+                        or state["turn"] >= self.max_turns
+                    ):
+                        is_completed = True
+                    else:
+                        # Async tool execution: run each tool in a thread
+                        assert "tool_calls" in rollout_msgs[-1]
+                        tool_calls = rollout_msgs[-1]["tool_calls"] or []
+                        tool_messages: list[dict] = []
+                        # Execute sequentially to preserve order and avoid tmux conflicts per task
+                        for tool_call in tool_calls:
+                            tool_name: str = tool_call.function.name
+                            import json as _json
+
+                            tool_args: dict = _json.loads(tool_call.function.arguments)
+                            tool_call_id: str = tool_call.id or ""
+                            # Offload blocking execute_commands to a thread, with thread-safe context set
+                            import asyncio as _asyncio
+
+                            tool_message = await _asyncio.to_thread(
+                                self._run_tool_call_threadsafe,
+                                tool_name,
+                                tool_args,
+                                tool_call_id,
+                                state.get("info", {}) or {},
+                                deadline,
+                            )
+                            tool_messages.append(tool_message)
+                        assert isinstance(rollout_msgs, list)
+                        rollout_msgs += tool_messages
+                        completion += tool_messages
+                return completion, state
+            finally:
+                # Ensure we don't leave containers running if we exit early (timeouts/errors)
+                try:
+                    task_id_cleanup = (
+                        (state.get("info") or {}).get("task_id")
+                        if isinstance(state, dict)
+                        else None
+                    )
+                except Exception:
+                    task_id_cleanup = (info or {}).get("task_id")
+                if task_id_cleanup:
+                    try:
+                        print(
+                            f"[TERMINALBENCH_ENV] 🧹 Ensuring terminal cleanup for {task_id_cleanup} at rollout finish"
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        self.executor.cleanup_context(task_id_cleanup)
+                    except Exception as ce:
+                        print(
+                            f"[TERMINALBENCH_ENV] Warning: best-effort cleanup failed for {task_id_cleanup}: {ce}"
+                        )
 
         async def a_generate(
             self,
@@ -1107,6 +1184,16 @@ def load_environment(
                 else:
                     # Leave as sequential
                     max_concurrent = -1
+            # Clamp to configured rollout concurrency to avoid oversubscription
+            if isinstance(max_concurrent, int) and max_concurrent > 0:
+                try:
+                    configured = int(
+                        os.getenv("TB_ROLLOUT_CONCURRENCY", str(ROLLOUT_CONCURRENCY))
+                    )
+                except Exception:
+                    configured = ROLLOUT_CONCURRENCY
+                if max_concurrent > configured:
+                    max_concurrent = configured
             print(
                 f"[TERMINALBENCH_ENV] Rollout parallelism resolved to: {max_concurrent if max_concurrent > 0 else 'sequential'}"
             )
@@ -1135,15 +1222,17 @@ def load_environment(
                 execute_commands._current_task_id = task_id
                 execute_commands._current_task_path = task_path
                 execute_commands._current_info = info
-                # Proactively create/start a terminal context so tests can run
+                # Prewarm context in the background; non-blocking
                 try:
                     if task_path:
-                        self.executor.get_context(task_id, Path(task_path))
+                        self.executor.prewarm_context(task_id, Path(task_path))
                 except Exception as e:
                     print(
-                        f"[TERMINALBENCH_ENV]   Warning: failed to start context early: {e}"
+                        f"[TERMINALBENCH_ENV]   Warning: failed to prewarm context early: {e}"
                     )
-                print("[TERMINALBENCH_ENV]   ✅ Task context initialized")
+                print(
+                    "[TERMINALBENCH_ENV]   ✅ Task context initialized (prewarm started)"
+                )
             else:
                 print("[TERMINALBENCH_ENV]   ❌ No task_id found in state")
 
