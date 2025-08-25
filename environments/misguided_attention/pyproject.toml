@@ -1,0 +1,17 @@
+[project]
+name = "misguided_attention"
+version = "0.1.1"
+tags = ["misguided-attention", "single-turn", "reasoning", "puzzles", "eval"]
+description = "MisguidedAttention SingleTurn environment for verifiers"
+requires-python = ">=3.11"
+dependencies = [
+    "verifiers>=0.1.0",
+    "datasets",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["misguided_attention.py"]
