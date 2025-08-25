@@ -16,15 +16,7 @@ except Exception:  # pragma: no cover - optional dependency
     _np = None
 
 import verifiers as vf
-
-
-# Minimal defaults to satisfy environment construction. Adjust as needed by
-# consumers of this module.
-system_prompt = ""
-
-
-def parser(x):
-    return x
+from verifiers.parsers.parser import Parser
 
 
 def _cwd(path: Path):
@@ -68,9 +60,6 @@ def _set_global_seed(seed: int) -> None:
             _np.random.seed(seed)
         except Exception:
             pass
-
-    # Note: Generators under `Enigmata/verifiable_tasks/tasks/*/generator.py`
-    # do not use torch-based randomness; torch seeding is intentionally omitted.
 
 
 def normalize_problem(
@@ -167,6 +156,7 @@ def generate_dataset(
     split: str = "train",
     language: str = "en",
     seed: Optional[int] = None,
+    tasks: Union[str, List[str]] = "all",
 ) -> Dataset:
     """
     Generate a HuggingFace Dataset by discovering task generators and
@@ -177,6 +167,8 @@ def generate_dataset(
     - Supports generator functions (with or without `count`) and regular
       functions that return one problem per invocation.
     - Attaches `task_name`, `difficulty`, `split`, `language` metadata.
+    - Optional `tasks` filter restricts generation to specific task name(s)
+      (string or list). Use "all" (default) to include every available task.
     """
 
     selected_difficulties: List[str] = difficulties or ["easy", "medium", "hard"]
@@ -207,6 +199,11 @@ def generate_dataset(
     # Reduce noise from progress bars used by some generators
     os.environ.setdefault("TQDM_DISABLE", "1")
 
+    # Normalize task filter to a set for fast membership checks
+    allowed_names = None
+    if tasks and tasks != "all":
+        allowed_names = {tasks} if isinstance(tasks, str) else set(tasks)
+
     examples: List[Dict[str, Any]] = []
     if tasks_dir.exists() and tasks_dir.is_dir():
         for task_name in sorted(os.listdir(tasks_dir)):
@@ -214,6 +211,8 @@ def generate_dataset(
             if not task_path.is_dir():
                 continue
             if not (task_path / "generator.py").exists():
+                continue
+            if allowed_names is not None and task_name not in allowed_names:
                 continue
 
             module_path = f"verifiable_tasks.tasks.{task_name}.generator"
@@ -425,36 +424,28 @@ def load_environment(
         dataset = generate_dataset(
             count=num_train_examples,
             seed=effective_seed,
+            tasks=tasks,
         )
         raw_eval_dataset = load_dataset("BytedTsinghua-SIA/Enigmata-Eval")
         eval_dataset = _adapt_eval_dataset(raw_eval_dataset)
+        # Only for external eval datasets, apply task filtering post-load
+        if tasks and tasks != "all":
+            names = {tasks} if isinstance(tasks, str) else set(tasks)
+            eval_dataset = eval_dataset.filter(
+                lambda row: row.get("task_name") in names
+            )
     else:
         dataset = generate_dataset(
             count=num_train_examples,
             seed=effective_seed,
+            tasks=tasks,
         )
         # Derive a different sequence for eval by offsetting the seed when present
         eval_dataset = generate_dataset(
             count=num_eval_examples,
             seed=None if effective_seed is None else effective_seed + 1,
+            tasks=tasks,
         )
-
-    # Optional task filtering: keep only specified tasks
-    def _filter_by_tasks(ds: Dataset, selected_tasks: Union[str, List[str]]):
-        if ds is None:
-            return ds
-        # If "all" or falsy, return as-is
-        if not selected_tasks or selected_tasks == "all":
-            return ds
-        # Normalize to a set of names
-        if isinstance(selected_tasks, str):
-            names = {selected_tasks}
-        else:
-            names = set(selected_tasks)
-        return ds.filter(lambda row: row.get("task_name") in names)
-
-    dataset = _filter_by_tasks(dataset, tasks)
-    eval_dataset = _filter_by_tasks(eval_dataset, tasks)
 
     # Ensure `Enigmata` is on sys.path so we can import task verifiers dynamically
     repo_root: Path = Path(__file__).parent
@@ -553,6 +544,7 @@ def load_environment(
         except Exception:
             return 0.0
 
+    parser = Parser()
     # Single-function rubric with unit weight, using identity parser
     rubric = vf.Rubric(funcs=[reward_func], weights=[1.0], parser=parser)
 
