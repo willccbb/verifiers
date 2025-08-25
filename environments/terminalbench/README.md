@@ -57,7 +57,7 @@ These variables tune performance, timeouts, and cleanup behavior for the Termina
 - **TB_CMD_TIMEOUT_SEC**: Hard cap per `execute_commands` call. The effective timeout per call is `min(TB_CMD_TIMEOUT_SEC (if set), remaining rollout budget)`.
 - **TB_HANDLE_SIGNALS**: When `1`, install SIGINT/SIGTERM handlers so Ctrl-C triggers cleanup. Default: `0`.
 - **TB_NO_REBUILD**: When `1`, skip `docker compose build` for faster start. Default: `0`.
-- **TB_CLEANUP**: When `1`, perform extra cleanup on stop (`docker compose down --rmi all --volumes` + cache prune). Default: `0`.
+- **TB_CLEANUP**: When `1`, perform extra cleanup on stop (`docker compose down --rmi all --volumes` + cache prune). Default: `1`.
 - **TB_DEV_LOCAL**: When `1`, import `terminal_bench` from the local repo at `terminal-bench/` instead of an installed package. Default: `0`.
 
 Example:
