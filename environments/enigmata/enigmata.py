@@ -8,6 +8,12 @@ from datasets import Dataset
 from datasets import load_dataset
 import json
 import subprocess
+import random
+
+try:
+    import numpy as _np  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _np = None
 
 import verifiers as vf
 
@@ -35,6 +41,36 @@ def _cwd(path: Path):
             return False
 
     return _Cwd()
+
+
+def _set_global_seed(seed: int) -> None:
+    """
+    Set global RNG seeds for reproducible generation without modifying code
+    inside the embedded `Enigmata/` directory.
+
+    - Python's `random`
+    - NumPy, if available
+    - PYTHONHASHSEED to stabilize hash randomization
+    """
+
+    try:
+        os.environ["PYTHONHASHSEED"] = str(seed)
+    except Exception:
+        pass
+
+    try:
+        random.seed(seed)
+    except Exception:
+        pass
+
+    if _np is not None:
+        try:
+            _np.random.seed(seed)
+        except Exception:
+            pass
+
+    # Note: Generators under `Enigmata/verifiable_tasks/tasks/*/generator.py`
+    # do not use torch-based randomness; torch seeding is intentionally omitted.
 
 
 def normalize_problem(
@@ -130,6 +166,7 @@ def generate_dataset(
     count: int = 100,
     split: str = "train",
     language: str = "en",
+    seed: Optional[int] = None,
 ) -> Dataset:
     """
     Generate a HuggingFace Dataset by discovering task generators and
@@ -144,6 +181,20 @@ def generate_dataset(
 
     selected_difficulties: List[str] = difficulties or ["easy", "medium", "hard"]
     problems_per_difficulty: int = count
+
+    # Apply deterministic seeding if provided. Do this before importing any
+    # task modules so that import-time randomness is controlled as well.
+    if seed is None:
+        # Allow environment variable override if caller didn't provide a seed.
+        # This enables reproducibility without code changes via ENIGMATA_SEED.
+        try:
+            env_seed = os.getenv("ENIGMATA_SEED")
+            if env_seed is not None and env_seed != "":
+                seed = int(env_seed)
+        except Exception:
+            seed = None
+    if seed is not None:
+        _set_global_seed(int(seed))
 
     # Ensure `Enigmata` is on sys.path to import `verifiable_tasks.tasks.*`
     repo_root: Path = Path(__file__).parent
@@ -311,6 +362,7 @@ def load_environment(
     use_predefined_eval_dataset: bool = False,
     system_prompt: str = "",
     tasks: Union[str, List[str]] = "all",
+    seed: Optional[int] = None,
     **kwargs,
 ) -> vf.Environment:
     # The following block ensures that the 'Enigmata' repository, which contains
@@ -359,18 +411,32 @@ def load_environment(
                 "Could not clone the required 'Enigmata' repository."
             ) from e
 
+    # Determine seed from args or environment variable
+    effective_seed: Optional[int] = seed
+    if effective_seed is None:
+        try:
+            env_seed = os.getenv("ENIGMATA_SEED")
+            if env_seed is not None and env_seed != "":
+                effective_seed = int(env_seed)
+        except Exception:
+            effective_seed = None
+
     if use_predefined_eval_dataset:
         dataset = generate_dataset(
             count=num_train_examples,
+            seed=effective_seed,
         )
         raw_eval_dataset = load_dataset("BytedTsinghua-SIA/Enigmata-Eval")
         eval_dataset = _adapt_eval_dataset(raw_eval_dataset)
     else:
         dataset = generate_dataset(
             count=num_train_examples,
+            seed=effective_seed,
         )
+        # Derive a different sequence for eval by offsetting the seed when present
         eval_dataset = generate_dataset(
             count=num_eval_examples,
+            seed=None if effective_seed is None else effective_seed + 1,
         )
 
     # Optional task filtering: keep only specified tasks

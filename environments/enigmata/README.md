@@ -54,6 +54,38 @@ Notes:
 - Use `-a` / `--env-args` to pass environment configuration as JSON.
 - When `use_predefined_eval_dataset` is `false`, both train and eval sets are generated on the fly.
 - You can also generate and evaluate offline using the scripts in `Enigmata/` (see that README for details).
+- Reproducibility: pass `seed` in env args, or set env var `ENIGMATA_SEED` to seed RNGs without editing code under `Enigmata/`. Eval generation uses `seed + 1` automatically when `seed` is provided.
+
+### Seeding and Reproducibility
+
+Minimal seeding is applied to stabilize generation without touching code under `Enigmata/`:
+
+- Python `random`
+- NumPy (if available)
+- `PYTHONHASHSEED`
+
+#### Examples
+
+Deterministic generation with a fixed seed:
+
+```bash
+uv run vf-eval enigmata \
+  -a '{"num_train_examples": 100, "num_eval_examples": 100, "seed": 42}'
+```
+
+Use environment variable instead of args:
+
+```bash
+ENIGMATA_SEED=123 uv run vf-eval enigmata \
+  -a '{"num_train_examples": 100, "num_eval_examples": 100}'
+```
+
+Different seeds for train vs eval:
+
+```bash
+uv run vf-eval enigmata \
+  -a '{"num_train_examples": 100, "num_eval_examples": 100, "seed": 7}'
+```
 
 ### Environment Arguments
 
@@ -64,6 +96,7 @@ Notes:
 | `use_predefined_eval_dataset` | bool | `false` | If `true`, loads `BytedTsinghua-SIA/Enigmata-Eval` from HF for eval |
 | `tasks` | str or list | `"all"` | Filter to a task or list of tasks (e.g., `"sudoku"`, `["sudoku","maze"]`) |
 | `system_prompt` | str | `""` | Optional system prompt propagated to the environment |
+| `seed` | Optional[int] | `None` | Global seed for reproducible generation (Python, NumPy). Eval uses `seed+1` |
 
 ### Metrics
 

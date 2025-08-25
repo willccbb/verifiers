@@ -1,6 +1,6 @@
 [project]
 name = "enigmata"
-version = "0.1.1"
+version = "0.1.2"
 tags = ["enigmata", "single-turn", "reasoning", "puzzles"]
 description = "Enigmata environment for verifiers"
 requires-python = ">=3.11"
