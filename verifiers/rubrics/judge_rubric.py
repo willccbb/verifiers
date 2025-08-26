@@ -69,10 +69,23 @@ class JudgeRubric(Rubric):
         cached = state.get("judge_response")
         if isinstance(cached, dict) and judge_prompt in cached:
             return cached[judge_prompt]
+        # Normalize judge sampling args for chat API
+        judge_args = dict(self.judge_sampling_args or {})
+        if "max_tokens" in judge_args:
+            if judge_args["max_tokens"] is None:
+                judge_args.pop("max_tokens")
+            else:
+                judge_args["max_completion_tokens"] = judge_args.pop("max_tokens")
+        if (
+            "max_completion_tokens" in judge_args
+            and judge_args["max_completion_tokens"] is None
+        ):
+            judge_args.pop("max_completion_tokens")
+        judge_args = {k: v for k, v in judge_args.items() if v is not None}
         judge_response = await self.judge_client.chat.completions.create(
             model=self.judge_model,
             messages=[{"role": "user", "content": judge_prompt}],
-            **self.judge_sampling_args,
+            **judge_args,
         )
         judge_response = str(judge_response.choices[0].message.content)
         if not isinstance(cached, dict):
