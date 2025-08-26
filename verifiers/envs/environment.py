@@ -797,7 +797,6 @@ class Environment(ABC):
         ):
             # Format-specific processing
             if is_chat_format:
-                print(type(prompt), type(completion))
                 assert isinstance(prompt, list) and isinstance(completion, list)
                 (
                     prompt_ids,
