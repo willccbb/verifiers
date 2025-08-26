@@ -85,11 +85,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     print(f"Provider: {api_base_url}")
     print(f"Examples: {num_examples}")
     print(f"Rollouts per example: {rollouts_per_example}")
-    print(results.reward)
     print("--- Example ---")
-    print(len(results.prompt[0]), len(results.completion[0]))
-    print(results.prompt[0])
-    print(results.completion[0])
     sanitized_prompt = [sanitize_messages(p) for p in results.prompt]
     sanitized_completion = [sanitize_messages(c) for c in results.completion]
     vf.print_prompt_completions_sample(

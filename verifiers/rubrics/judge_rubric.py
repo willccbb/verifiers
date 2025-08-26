@@ -1,10 +1,11 @@
 from typing import Any
 
-from openai import OpenAI, AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import Messages, State
+from verifiers.utils.async_utils import maybe_await
 
 DEFAULT_JUDGE_PROMPT = """Given a ground truth answer \
 and a response, determine if the response is correct.
@@ -82,7 +83,8 @@ class JudgeRubric(Rubric):
         ):
             judge_args.pop("max_completion_tokens")
         judge_args = {k: v for k, v in judge_args.items() if v is not None}
-        judge_response = await self.judge_client.chat.completions.create(
+        judge_response = await maybe_await(
+            self.judge_client.chat.completions.create,
             model=self.judge_model,
             messages=[{"role": "user", "content": judge_prompt}],
             **judge_args,

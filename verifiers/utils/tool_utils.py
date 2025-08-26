@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import json
 import re
-from copy import deepcopy
 from typing import Any, Literal, Union, get_args, get_origin
 
 from verifiers.types import (
@@ -199,29 +198,6 @@ def sanitize_tool_calls(messages: Messages):
                 ],
             }
             sanitized_messages.append(new_m)
-        else:
-            sanitized_messages.append(m)
-    return sanitized_messages
-
-
-def sanitize_image_urls(messages: Messages) -> Messages:
-    """
-    Sanitize image URLs from messages.
-    """
-    if not isinstance(messages, list):
-        return messages
-    sanitized_messages = []
-    for m in messages:
-        if "content" in m and isinstance(m["content"], list):
-            new_content = []
-            for c in m["content"]:
-                if isinstance(c, dict) and "image_url" in c:
-                    new_dict = deepcopy(c)
-                    new_dict.pop("image_url")
-                    new_content.append(new_dict)
-                else:
-                    new_content.append(c)
-            sanitized_messages.append({"role": m["role"], "content": new_content})
         else:
             sanitized_messages.append(m)
     return sanitized_messages
