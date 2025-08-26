@@ -8,9 +8,6 @@ from rich.table import Table
 from rich.text import Text
 
 from verifiers.types import Messages
-from verifiers.utils.message_utils import (
-    message_to_printable,
-)
 
 
 def setup_logging(
@@ -53,10 +50,9 @@ def print_prompt_completions_sample(
         if isinstance(messages, str):
             return Text(messages)
         out = Text()
-        for idx, message in enumerate(list(messages)):
+        for idx, msg in enumerate(list(messages)):
             if idx > 0:
                 out.append("\n\n")
-            msg = message_to_printable(message)
             assert isinstance(msg, dict)
             role = msg.get("role", "")
             content = msg.get("content", "")

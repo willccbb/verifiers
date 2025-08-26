@@ -12,7 +12,7 @@ from datasets import Dataset
 from openai import OpenAI
 
 import verifiers as vf
-from verifiers.utils.message_utils import sanitize_messages
+from verifiers.utils.message_utils import messages_to_printable
 
 
 def eval_environment(
@@ -86,10 +86,10 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     print(f"Examples: {num_examples}")
     print(f"Rollouts per example: {rollouts_per_example}")
     print("--- Example ---")
-    sanitized_prompt = [sanitize_messages(p) for p in results.prompt]
-    sanitized_completion = [sanitize_messages(c) for c in results.completion]
+    printable_prompts = [messages_to_printable(p) for p in results.prompt]
+    printable_completions = [messages_to_printable(c) for c in results.completion]
     vf.print_prompt_completions_sample(
-        sanitized_prompt, sanitized_completion, results.reward, step=0
+        printable_prompts, printable_completions, results.reward, step=0
     )
     print("--- All ---")
     print("Rewards:")
@@ -124,8 +124,8 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         tasks = results.task
         data_dict = {
             "id": ids,
-            "prompt": sanitized_prompt,
-            "completion": sanitized_completion,
+            "prompt": printable_prompts,
+            "completion": printable_completions,
             "task": tasks,
         }
         if results.info[0] != {}:
