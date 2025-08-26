@@ -1,5 +1,3 @@
-import types
-
 import verifiers.scripts.eval as vf_eval
 
 
