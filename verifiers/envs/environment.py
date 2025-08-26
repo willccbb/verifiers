@@ -199,13 +199,25 @@ class Environment(ABC):
         Returns special error messages for context length issues.
         """
         sampling_args = sampling_args or {}
+        # Resolve message type first
+        if message_type is None:
+            message_type = self.message_type
+        # Normalize sampling args:
+        # - If max_tokens is provided for chat, rename to max_completion_tokens
+        # - Drop any None-valued entries to avoid sending them to the client
         if "max_tokens" in sampling_args:
-            sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
+            if sampling_args["max_tokens"] is None:
+                sampling_args.pop("max_tokens")
+            elif message_type == "chat":
+                sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
+        if (
+            "max_completion_tokens" in sampling_args
+            and sampling_args["max_completion_tokens"] is None
+        ):
+            sampling_args.pop("max_completion_tokens")
+        clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
 
         try:
-            if message_type is None:
-                message_type = self.message_type
-
             if message_type == "chat":
                 assert isinstance(prompt, list)
                 if oai_tools:
@@ -213,13 +225,13 @@ class Environment(ABC):
                         model=model,
                         messages=prompt,  # type: ignore
                         tools=oai_tools,
-                        **sampling_args,
+                        **clean_sampling_args,
                     )
                 else:
                     response = await client.chat.completions.create(
                         model=model,
                         messages=prompt,  # type: ignore
-                        **sampling_args,
+                        **clean_sampling_args,
                     )
                 return response
             elif message_type == "completion":
@@ -229,7 +241,7 @@ class Environment(ABC):
                     )
                 assert isinstance(prompt, str)
                 response = await client.completions.create(
-                    model=model, prompt=prompt, **sampling_args
+                    model=model, prompt=prompt, **clean_sampling_args
                 )
                 return response
         except Exception as e:

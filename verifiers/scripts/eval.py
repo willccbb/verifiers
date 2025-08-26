@@ -26,7 +26,7 @@ def eval_environment(
     num_examples: int,
     rollouts_per_example: int,
     max_concurrent_requests: int,
-    max_tokens: int,
+    max_tokens: int | None,
     temperature: float | None,
     verbose: bool,
     save_dataset: bool,
@@ -252,8 +252,8 @@ def main():
         "--max-tokens",
         "-t",
         type=int,
-        default=1024,
-        help="Maximum number of tokens to generate",
+        default=None,
+        help="Maximum number of tokens to generate (unset to use model default)",
     )
     parser.add_argument(
         "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
