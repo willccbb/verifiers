@@ -27,8 +27,7 @@ from verifiers.types import (
     SamplingArgs,
     State,
 )
-from verifiers.utils.message_utils import cleanup_messages
-from verifiers.utils.tool_utils import sanitize_tool_calls
+from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -519,6 +518,7 @@ class Environment(ABC):
         """
         Make a dataset from the evaluation results.
         """
+        # TODO: enable saving of multimodal datasets
         state_columns = state_columns or []
 
         if push_to_hub and hub_name is None:

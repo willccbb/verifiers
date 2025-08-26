@@ -20,8 +20,8 @@ from datasets import Dataset
 from verifiers.envs.environment import Environment
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
-from verifiers.types import GenerateOutputs
-from verifiers.utils.tool_utils import sanitize_tool_calls
+from verifiers.types import GenerateOutputs, Info, Messages, SamplingArgs
+from verifiers.utils.message_utils import sanitize_tool_calls
 
 
 # Local simple concrete Environment for testing
@@ -30,16 +30,17 @@ class DummyEnvironment(Environment):
         self,
         client,
         model,
-        prompt,
+        prompt: Messages,
         answer: str = "",
         task: str = "default",
-        info: dict = {},
-        sampling_args: dict = {},
+        info: Info | None = {},
+        sampling_args: SamplingArgs | None = None,
         **kwargs,
     ):
         response = await self.get_model_response(
             prompt=prompt, client=client, model=model, sampling_args=sampling_args
         )
+        assert response is not None
         if self.message_type == "chat":
             completion = [
                 {"role": "assistant", "content": response.choices[0].message.content}
