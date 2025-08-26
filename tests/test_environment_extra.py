@@ -120,7 +120,6 @@ def test_run_rollouts_with_semaphore(mock_openai_client):
 
 
 def test_process_env_results_zero_truncated_reward_vllm(mock_openai_client):
-    print("begin_zero_truncated")
     # Use pre-formatted dataset to avoid map/progress side effects in test
     ds = Dataset.from_dict(
         {
@@ -128,7 +127,7 @@ def test_process_env_results_zero_truncated_reward_vllm(mock_openai_client):
             "answer": ["a"],
         }
     )
-    env = _make_env(mock_openai_client, dataset=ds)
+    env = _make_env(mock_openai_client, dataset=ds, message_type="completion")
 
     # Mock tokenizer: encode maps length to token list
     class Tok:
@@ -238,7 +237,7 @@ def test_truncation_masks_completion_format_vllm(mock_openai_client):
             "answer": ["a"],
         }
     )
-    env = _make_env(mock_openai_client, dataset=ds)
+    env = _make_env(mock_openai_client, dataset=ds, message_type="completion")
 
     class Tok:
         def encode(self, text, **kwargs):

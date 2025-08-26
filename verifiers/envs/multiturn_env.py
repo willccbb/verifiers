@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from copy import deepcopy
 
 from openai import AsyncOpenAI
 
@@ -69,7 +68,7 @@ class MultiTurnEnv(Environment):
             assert isinstance(prompt, str)
             completion = ""
             state["responses_start_idx"] = []
-        rollout = deepcopy(prompt)
+        rollout = list(prompt) if not isinstance(prompt, str) else prompt
         while not is_completed:
             if self.is_completed(rollout, state, **kwargs):
                 is_completed = True
