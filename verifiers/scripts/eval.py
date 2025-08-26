@@ -26,7 +26,7 @@ def eval_environment(
     num_examples: int,
     rollouts_per_example: int,
     max_concurrent_requests: int,
-    max_tokens: int,
+    max_tokens: int | None,
     temperature: float | None,
     verbose: bool,
     save_dataset: bool,
@@ -258,9 +258,9 @@ def main():
     parser.add_argument(
         "--max-tokens",
         "-t",
-        type=int,
-        default=1024,
-        help="Maximum number of tokens to generate",
+        type=str,
+        default="1024",
+        help="Maximum number of tokens to generate (use 'None' to unset)",
     )
     parser.add_argument(
         "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
@@ -291,6 +291,15 @@ def main():
     )
     args = parser.parse_args()
 
+    # Parse optional max_tokens from string input
+    if isinstance(args.max_tokens, str):
+        if args.max_tokens.lower() in ("none", ""):
+            parsed_max_tokens = None
+        else:
+            parsed_max_tokens = int(args.max_tokens)
+    else:
+        parsed_max_tokens = args.max_tokens
+
     eval_environment(
         env=args.env,
         env_args=args.env_args,
@@ -302,7 +311,7 @@ def main():
         num_examples=args.num_examples,
         rollouts_per_example=args.rollouts_per_example,
         max_concurrent_requests=args.max_concurrent_requests,
-        max_tokens=args.max_tokens,
+        max_tokens=parsed_max_tokens,
         temperature=args.temperature,
         verbose=args.verbose,
         save_dataset=args.save_dataset,
