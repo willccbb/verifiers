@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import json
 import re
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -9,7 +8,6 @@ from verifiers.types import (
     ChatCompletionToolParam,
     FunctionParameters,
     JsonPrimitive,
-    Messages,
 )
 
 _JSON_PRIMITIVE_MAP: dict[type, JsonPrimitive] = {
@@ -178,26 +176,3 @@ def convert_func_to_oai_tool(func: Any) -> ChatCompletionToolParam:
             "parameters": parameters_schema,
         },
     }
-
-
-def sanitize_tool_calls(messages: Messages):
-    """
-    Sanitize tool calls from messages.
-    """
-    if not isinstance(messages, list):
-        return messages
-    sanitized_messages = []
-    for m in messages:
-        if "tool_calls" in m:
-            new_m = {
-                "role": m["role"],
-                "content": m.get("content", ""),
-                "tool_calls": [
-                    json.dumps(tc.model_dump())  # type: ignore
-                    for tc in m.get("tool_calls", [])
-                ],
-            }
-            sanitized_messages.append(new_m)
-        else:
-            sanitized_messages.append(m)
-    return sanitized_messages

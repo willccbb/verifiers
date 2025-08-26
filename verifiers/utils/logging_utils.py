@@ -61,7 +61,9 @@ def print_prompt_completions_sample(
             out.append(content, style=style)
             if "tool_calls" in msg:
                 for tool_call in msg["tool_calls"]:
-                    tool_call_str = json.dumps(dict(tool_call["function"]), indent=2)
+                    name = getattr(tool_call.function, "name", "")
+                    args = getattr(tool_call.function, "arguments", {})
+                    tool_call_str = json.dumps({"name": name, "args": args}, indent=2)
                     out.append(f"\n\n[tool call]\n{tool_call_str}", style=style)
         return out
 

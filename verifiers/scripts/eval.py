@@ -12,7 +12,7 @@ from datasets import Dataset
 from openai import OpenAI
 
 import verifiers as vf
-from verifiers.utils.message_utils import messages_to_printable
+from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
 
 def eval_environment(
@@ -124,8 +124,8 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         tasks = results.task
         data_dict = {
             "id": ids,
-            "prompt": printable_prompts,
-            "completion": printable_completions,
+            "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
+            "completion": [sanitize_tool_calls(c) for c in printable_completions],
             "task": tasks,
         }
         if results.info[0] != {}:
@@ -170,9 +170,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             print(f"Saved dataset to {results_path}")
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
-                dataset_name = (
-                    f"{env}_{model}_n={num_examples}_r={rollouts_per_example}"
-                )
+                dataset_name = f"{env}_{model.replace('/', '-')}_n{num_examples}_r{rollouts_per_example}"
             else:
                 dataset_name = hf_hub_dataset_name
             dataset.push_to_hub(dataset_name)
