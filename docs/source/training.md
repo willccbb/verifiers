@@ -95,6 +95,7 @@ args.gradient_accumulation_steps = 4    # Steps before optimizer update
 
 ```python
 # Sampling configuration
+args.max_tokens = 1024           # Max tokens per (turn-level) response 
 args.temperature = 1.0          # Higher = more diverse completions
 args.top_p = 1.0               # Nucleus sampling threshold
 args.top_k = None              # Top-k filtering (None = disabled)
@@ -248,6 +249,7 @@ RL is notoriously sensitive to implementation details. Here's practical guidance
 - Ensure your rubric differentiates quality levels
 
 ### Infrastructure
+- Ensure `huggingface` and `wandb` logins are configured
 - Set `OPENAI_API_KEY` (can be dummy for vLLM)
 - Increase ulimit for high concurrency: `ulimit -n 4096`
 - For NCCL issues: try `NCCL_P2P_DISABLE=1`
