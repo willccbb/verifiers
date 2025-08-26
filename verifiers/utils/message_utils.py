@@ -1,6 +1,7 @@
 from collections.abc import Iterable
+from typing import cast
 
-from verifiers.types import ChatMessage, Message, Messages
+from verifiers.types import ChatMessage, Messages
 
 
 def sanitize_object(obj: object):
@@ -93,35 +94,70 @@ def content_to_printable(content: object) -> str:
     return str(content)
 
 
-def message_to_printable(message: Message):
-    """
-    Render message content to readable text, handling multimodal lists.
-    - Text parts: return their text
-    - Image-like parts: return "[image]"
-    Falls back to str(content).
-    """
-    if isinstance(message, str):
-        return message
-    out_msg = {}
-    out_msg["role"] = message["role"]
-    if "tool_calls" in message:
-        out_msg["tool_calls"] = []
-        for tool_call in message["tool_calls"]:
-            out_msg["tool_calls"].append(dict(tool_call))
-    if "content" in message:
-        out_msg["content"] = ""
-        if isinstance(message["content"], str):
-            out_msg["content"] = message["content"]
-        elif message["content"] is None:
-            out_msg["content"] = ""
-        else:
-            old_parts = []
-            parts = []
-            for content in message["content"]:
-                old_parts.append(content)
-                if content["type"] == "text":
-                    parts.append(content["text"])
-                elif content["type"] == "image_url":
-                    parts.append("[image]")
-            out_msg["content"] = "\n\n".join(parts)
-    return out_msg
+def message_to_printable(message: ChatMessage) -> ChatMessage:
+    new_message = {}
+    new_message["role"] = message["role"]
+    new_message["content"] = []
+    if "tool_calls" in message and message["tool_calls"]:
+        new_message["tool_calls"] = message["tool_calls"]
+    content = message.get("content")
+    if content is None:
+        return cast(ChatMessage, new_message)
+    if isinstance(content, str):
+        new_message["content"].append(content)
+    else:
+        for c in content:
+            if isinstance(c, str):
+                new_message["content"].append(c)
+            else:
+                c_dict = dict(c)
+                if c_dict["type"] == "text":
+                    new_message["content"].append(c_dict["text"])
+                elif c_dict["type"] == "image_url":
+                    new_message["content"].append("[image]")
+    print(new_message["content"])
+    new_message["content"] = "\n\n".join(new_message["content"])
+    return cast(ChatMessage, new_message)
+
+
+def messages_to_printable(messages: Messages) -> Messages:
+    if isinstance(messages, str):
+        return messages
+    return [message_to_printable(m) for m in messages]
+
+
+def cleanup_message(message: ChatMessage) -> ChatMessage:
+    new_message = {}
+    new_message["role"] = message["role"]
+    new_message["content"] = []
+    content = message.get("content")
+    if content is None:
+        return cast(ChatMessage, new_message)
+    if isinstance(content, str):
+        new_message["content"] = content
+    else:
+        for c in content:
+            new_c = c.copy()
+            c_dict = dict(c)
+            if "image_url" in c_dict and "type" in c_dict and c_dict["type"] == "text":
+                new_c.pop("image_url")
+                new_message["content"].append(new_c)
+            elif (
+                "image_url" in c_dict
+                and "type" in c_dict
+                and c_dict["type"] == "image_url"
+            ):
+                new_c.pop("text")
+                new_message["content"].append(new_c)
+            else:
+                new_message["content"].append(new_c)
+    return cast(ChatMessage, new_message)
+
+
+def cleanup_messages(messages: Messages) -> Messages:
+    if isinstance(messages, str):
+        return messages
+    new_messages = []
+    for m in messages:
+        new_messages.append(cleanup_message(m))
+    return new_messages

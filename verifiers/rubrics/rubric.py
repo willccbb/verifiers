@@ -11,6 +11,7 @@ from verifiers.types import (
     RolloutScores,
     State,
 )
+from verifiers.utils.async_utils import maybe_await
 
 
 class Rubric:
@@ -94,22 +95,17 @@ class Rubric:
             task=task,
             info=info,
         )
-        ans = 0.0
         merged = {**common, **kwargs}
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
-                ans = func(**merged)
-                if inspect.iscoroutinefunction(func):
-                    ans = await ans
+                ans = float(await maybe_await(func, **merged))
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0
         else:
             allowed = {k: v for k, v in merged.items() if k in sig.parameters}
             try:
-                ans = func(**allowed)
-                if inspect.iscoroutinefunction(func):
-                    ans = await ans
+                ans = float(await maybe_await(func, **allowed))
             except Exception as e:
                 self.logger.error(f"Error calling reward function {func.__name__}: {e}")
                 ans = 0.0

@@ -1,4 +1,6 @@
 from typing import (
+    TYPE_CHECKING,
+    Annotated,
     Any,
     Awaitable,
     Callable,
@@ -6,9 +8,9 @@ from typing import (
 )
 
 from openai.types.chat.chat_completion import ChatCompletion
-from openai.types.chat.chat_completion_message_param import (
-    ChatCompletionMessageParam as ChatMessage,
-)
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+
+# openai types
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,  # noqa: F401
 )
@@ -21,13 +23,19 @@ from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SkipValidation
 
 # typing aliases
+if TYPE_CHECKING:
+    ChatMessage = ChatCompletionMessageParam
+else:
+    ChatMessage = Annotated[ChatCompletionMessageParam, SkipValidation]
+
 MessageType = Literal["chat", "completion"]
 ModelResponse = Completion | ChatCompletion | None
 
 Message = str | ChatMessage
+
 Messages = str | list[ChatMessage]
 Info = dict[str, Any]
 State = dict[str, Any]

@@ -27,6 +27,7 @@ from verifiers.types import (
     SamplingArgs,
     State,
 )
+from verifiers.utils.message_utils import cleanup_messages
 from verifiers.utils.tool_utils import sanitize_tool_calls
 
 if TYPE_CHECKING:
@@ -216,7 +217,6 @@ class Environment(ABC):
         ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
-
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
@@ -384,6 +384,8 @@ class Environment(ABC):
                 info = json.loads(info)
             if self.oai_tools and "oai_tools" not in info:
                 info["oai_tools"] = self.oai_tools
+
+        results_dict["prompt"] = [cleanup_messages(p) for p in results_dict["prompt"]]
 
         # prepare GenerateOutputs and run rollouts
         results = GenerateOutputs(

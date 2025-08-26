@@ -43,7 +43,7 @@ def load_environment(
                 if "error" in msg["content"].lower()
             ]
         )
-        return num_errors
+        return float(num_errors)
 
     rubric = vf.Rubric(
         funcs=[correct_answer_reward_func, num_turns, num_tool_calls, num_errors],

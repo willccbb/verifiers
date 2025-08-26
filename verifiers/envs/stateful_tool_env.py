@@ -34,7 +34,7 @@ class StatefulToolEnv(ToolEnv):
         """Update tool arguments and/or state (in-place) based on messages and state."""
         pass
 
-    def call_tool(
+    async def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
     ) -> Message:
         """Call a tool based on JSON command."""
@@ -53,7 +53,7 @@ class StatefulToolEnv(ToolEnv):
                 "tool_call_id": tool_call_id,
             }
 
-    def env_response(
+    async def env_response(
         self, messages: Messages, state: State, **kwargs
     ) -> tuple[Messages, State]:
         assert isinstance(messages, list)
@@ -65,6 +65,8 @@ class StatefulToolEnv(ToolEnv):
             tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
             tool_args = self.update_tool_args(tool_args, messages, state, **kwargs)
-            tool_message: Message = self.call_tool(tool_name, tool_args, tool_call_id)
+            tool_message: Message = await self.call_tool(
+                tool_name, tool_args, tool_call_id
+            )
             tool_messages.append(tool_message)
         return tool_messages, state
