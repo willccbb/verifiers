@@ -191,8 +191,8 @@ def load_environment(
         judge_client=judge_client, judge_model=judge_model, parser=vf_env.parser
     )
 
-    def judge_reward_func(prompt, completion, answer, state, **kwargs) -> float:
-        judge_response = judge_rubric.judge(prompt, completion, answer, state, **kwargs)
+    async def judge_reward_func(judge, prompt, completion, answer, state) -> float:
+        judge_response = await judge(prompt, completion, answer, state)
         if "yes" in judge_response.lower():
             return 1.0
         else:

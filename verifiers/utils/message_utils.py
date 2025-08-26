@@ -28,7 +28,6 @@ def message_to_printable(message: ChatMessage) -> ChatMessage:
                     new_message["content"].append(c_dict["text"])
                 elif c_dict["type"] == "image_url":
                     new_message["content"].append("[image]")
-    print(new_message["content"])
     new_message["content"] = "\n\n".join(new_message["content"])
     return cast(ChatMessage, new_message)
 
