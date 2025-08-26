@@ -41,18 +41,18 @@ def eval_environment(
         else:
             endpoints_file = endpoints_path_obj
 
-        if endpoints_file.exists():
-            spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
-            assert spec and spec.loader
-            endpoints_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(endpoints_module)
-            ENDPOINTS = endpoints_module.ENDPOINTS
-        else:
-            raise ImportError(f"endpoints.py not found at {endpoints_file}")
+        if not endpoints_file.exists():
+            raise FileNotFoundError(f"endpoints.py not found at {endpoints_file}")
+
+        spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
+        assert spec and spec.loader
+        endpoints_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(endpoints_module)
+        ENDPOINTS = endpoints_module.ENDPOINTS
+
     except (ImportError, AttributeError):
         print(
-            f"No local endpoint registry found at {endpoints_path}. \
-Please specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
+            f"No local endpoint registry found at {endpoints_path}. \nPlease specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
         )
         ENDPOINTS = {}
 
