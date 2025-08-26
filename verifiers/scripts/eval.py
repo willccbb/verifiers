@@ -28,6 +28,7 @@ def eval_environment(
     max_concurrent_requests: int,
     max_tokens: int | None,
     temperature: float | None,
+    sampling_args: dict | None,
     verbose: bool,
     save_dataset: bool,
     save_to_hf_hub: bool,
@@ -62,15 +63,18 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
 
     client = OpenAI(api_key=os.getenv(api_key_var, "EMPTY"), base_url=api_base_url)
     vf_env = vf.load_environment(env_id=env, **env_args)
-    sampling_args: dict[str, int | float | None] = {
-        "max_tokens": max_tokens,
-    }
-    if temperature is not None:
-        sampling_args["temperature"] = temperature
+    # Merge sampling args with precedence to JSON payload over explicit flags
+    merged_sampling_args: dict = {}
+    if sampling_args is not None:
+        merged_sampling_args.update(sampling_args)
+    if "max_tokens" not in merged_sampling_args:
+        merged_sampling_args["max_tokens"] = max_tokens
+    if temperature is not None and "temperature" not in merged_sampling_args:
+        merged_sampling_args["temperature"] = temperature
     results = vf_env.evaluate(
         client=client,
         model=model,
-        sampling_args=sampling_args,
+        sampling_args=merged_sampling_args,
         num_examples=num_examples,
         rollouts_per_example=rollouts_per_example,
         max_concurrent_requests=max_concurrent_requests,
@@ -143,8 +147,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             "model": model,
             "num_examples": num_examples,
             "rollouts_per_example": rollouts_per_example,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "sampling_args": merged_sampling_args,
             "date": datetime.now().strftime("%Y-%m-%d"),
             "time": datetime.now().strftime("%H:%M:%S"),
             "avg_reward": sum(results.reward) / len(results.reward),
@@ -259,6 +262,16 @@ def main():
         "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
     )
     parser.add_argument(
+        "--sampling-args",
+        "-S",
+        type=json.loads,
+        default=None,
+        help=(
+            "Sampling arguments as JSON object. Keys here override --max-tokens/--temperature. "
+            'Example: \'{"enable_thinking": false, "max_tokens": 256}\''
+        ),
+    )
+    parser.add_argument(
         "--verbose", "-v", default=False, action="store_true", help="Verbose output"
     )
     parser.add_argument(
@@ -297,6 +310,7 @@ def main():
         max_concurrent_requests=args.max_concurrent_requests,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
+        sampling_args=args.sampling_args,
         verbose=args.verbose,
         save_dataset=args.save_dataset,
         save_to_hf_hub=args.save_to_hf_hub,
