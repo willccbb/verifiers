@@ -636,7 +636,7 @@ class Environment(ABC):
             conversation=prompt,  # type: ignore
             add_generation_prompt=True,
         )
-        messages_consumed = deepcopy(prompt)
+        messages_consumed = [m for m in prompt]
         prompt_mask: list[int] = [0] * len(prompt_ids)
         completion_ids: list[int] = []
         completion_mask: list[int] = []
@@ -784,9 +784,7 @@ class Environment(ABC):
         """
         Process results with vLLM tokens/logprobs.
         """
-        # Determine format from first prompt
-        # TODO: why not from self.message_type?
-        is_chat_format = isinstance(prompts[0], list)
+        is_chat_format = self.message_type == "chat"
 
         all_prompt_ids = []
         all_prompt_masks = []

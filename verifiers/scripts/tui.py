@@ -124,58 +124,30 @@ def load_run_results(run: RunInfo) -> List[Dict[str, Any]]:
 # ----------------------------
 # Formatting helpers
 # ----------------------------
-def format_prompt(prompt: Any) -> str:
-    """Format prompt for display."""
-    if isinstance(prompt, str):
-        return prompt
-    if isinstance(prompt, list):
-        lines = []
-        for msg in prompt:
-            role = msg.get("role", "")
-            content = str(msg.get("content", ""))
-            # Assistant in white, all others in grey
-            if role == "assistant":
-                lines.append(f"[b]{role}:[/b] {content}")
-            else:
-                lines.append(f"[dim][b]{role}:[/b] {content}[/dim]")
-        return "\n\n".join(lines)
-    return str(prompt)
 
 
-def format_completion(completion: Any) -> str:
+def format_prompt_or_completion(prompt_or_completion) -> str:
     """Format completion for display."""
-    if isinstance(completion, dict):
-        role = completion.get("role", "")
-        content = completion.get("content", "")
-        # Assistant in white, all others in grey
-        if role == "assistant":
-            return f"[b]{role}:[/b] {content}"
-        else:
-            return f"[dim][b]{role}:[/b] {content}[/dim]"
-    if isinstance(completion, list):
+    if isinstance(prompt_or_completion, list):
         lines = []
-        for msg in completion:
+        for msg in prompt_or_completion:
+            assert isinstance(msg, dict)
             role = msg.get("role", "")
             content = str(msg.get("content", ""))
             # Assistant in white, all others in grey
             if role == "assistant":
                 lines.append(f"[b]{role}:[/b] {content}")
+            elif role == "tool":
+                lines.append(f"[dim][b]tool result:[/b] {content}[/dim]")
             else:
                 lines.append(f"[dim][b]{role}:[/b] {content}[/dim]")
-            tool_calls = msg.get("tool_calls", [])
-            for tool_call in tool_calls:
-                lines.append("[dim][b]tool call:[/b][/dim]")
-                func = (
-                    tool_call.get("function", {}) if isinstance(tool_call, dict) else {}
-                )
-                name = func.get("name") if isinstance(func, dict) else None
-                args = func.get("arguments") if isinstance(func, dict) else None
-                if name is not None:
-                    lines.append(f"  [dim]name: {name}[/dim]")
-                if args is not None:
-                    lines.append(f"  [dim]args: {args}[/dim]")
+            if "tool_calls" in msg and msg["tool_calls"]:
+                for tool_call in msg["tool_calls"]:
+                    lines.append(
+                        f"[b]tool call:[/b] {tool_call['function']['name']}\n{tool_call['function']['arguments']}"
+                    )
         return "\n\n".join(lines)
-    return str(completion)
+    return str(prompt_or_completion)
 
 
 # ----------------------------
@@ -413,7 +385,7 @@ class ViewRunScreen(Screen):
                         id="completion-scroll",
                     )
 
-            # Details section
+            # Details section (horizontal scroll)
             yield Panel(Static("", id="details"), classes="details-panel")
 
         yield Footer()
@@ -480,12 +452,12 @@ class ViewRunScreen(Screen):
         # Update prompt
         prompt = record.get("prompt", "")
         prompt_widget = self.query_one("#prompt-content", Static)
-        prompt_widget.update(format_prompt(prompt))
+        prompt_widget.update(format_prompt_or_completion(prompt))
 
         # Update completion
         completion = record.get("completion", "")
         completion_widget = self.query_one("#completion-content", Static)
-        completion_widget.update(format_completion(completion))
+        completion_widget.update(format_prompt_or_completion(completion))
 
         # Update details
         details_lines = []
@@ -499,6 +471,9 @@ class ViewRunScreen(Screen):
         answer = record.get("answer", None)
         if answer not in (None, ""):
             details_lines.append(f"[b]Answer:[/b] {answer}")
+        info = record.get("info", None)
+        if info not in (None, {}):
+            details_lines.append(f"[b]Info:[/b] {str(info)}")
         task = record.get("task", None)
         if task not in (None, ""):
             details_lines.append(f"[b]Task:[/b] {task}")

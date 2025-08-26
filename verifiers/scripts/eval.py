@@ -12,7 +12,7 @@ from datasets import Dataset
 from openai import OpenAI
 
 import verifiers as vf
-from verifiers.utils.tool_utils import sanitize_tool_calls
+from verifiers.utils.message_utils import sanitize_messages
 
 
 def eval_environment(
@@ -81,10 +81,15 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     print(f"Provider: {api_base_url}")
     print(f"Examples: {num_examples}")
     print(f"Rollouts per example: {rollouts_per_example}")
-
+    print(results.reward)
     print("--- Example ---")
+    print(len(results.prompt[0]), len(results.completion[0]))
+    print(results.prompt[0])
+    print(results.completion[0])
+    sanitized_prompt = [sanitize_messages(p) for p in results.prompt]
+    sanitized_completion = [sanitize_messages(c) for c in results.completion]
     vf.print_prompt_completions_sample(
-        results.prompt, results.completion, results.reward, step=0
+        sanitized_prompt, sanitized_completion, results.reward, step=0
     )
     print("--- All ---")
     print("Rewards:")
@@ -93,14 +98,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
     )
     n = num_examples
     r = rollouts_per_example
-    if verbose:
-        for i in range(len(results.prompt)):
-            print(f"Prompt: {results.prompt[i]}")
-            print(f"Completion: {results.completion[i]}")
-            print(f"Reward: {results.reward[i]}")
-            print(f"Answer: {results.answer[i]}")
-            print(f"Info: {results.info[i]}")
-            print(f"Task: {results.task[i]}")
+
     if n < 0:
         n = len(results.reward) // r
     for i in range(r):
@@ -122,17 +120,12 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             i // rollouts_per_example
             for i in range(num_examples * rollouts_per_example)
         ]
-        prompts = results.prompt
-        completions = []
-        for c in results.completion:
-            sanitized_c = sanitize_tool_calls(c)
-            completions.append(sanitized_c)
         rewards = results.reward
         tasks = results.task
         data_dict = {
             "id": ids,
-            "prompt": prompts,
-            "completion": completions,
+            "prompt": sanitized_prompt,
+            "completion": sanitized_completion,
             "task": tasks,
         }
         if results.info[0] != {}:
