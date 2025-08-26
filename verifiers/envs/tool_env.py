@@ -31,7 +31,7 @@ class ToolEnv(MultiTurnEnv):
 
     def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
-    ) -> Message:
+    ) -> tuple[Message, bool]:
         """Call a tool based on JSON command."""
         try:
             tool_func = self.tool_map[tool_name]
@@ -40,13 +40,13 @@ class ToolEnv(MultiTurnEnv):
                 "role": "tool",
                 "content": str(result),
                 "tool_call_id": tool_call_id,
-            }
+            }, True
         except Exception as e:
             return {
                 "role": "tool",
                 "content": self.error_formatter(e),
                 "tool_call_id": tool_call_id,
-            }
+            }, False
 
     def env_response(
         self, messages: Messages, state: State, **kwargs
@@ -59,6 +59,8 @@ class ToolEnv(MultiTurnEnv):
             tool_name: str = tool_call.function.name
             tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
-            tool_message: Message = self.call_tool(tool_name, tool_args, tool_call_id)
+            tool_message, success = self.call_tool(tool_name, tool_args, tool_call_id)
             tool_messages.append(tool_message)
+            if not success:
+                break
         return tool_messages, state
