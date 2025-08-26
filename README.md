@@ -144,6 +144,12 @@ For tasks involving LLM judges, you may wish to use `vf.JudgeRubric()` for manag
 
 Note on concurrency: environment APIs accept `max_concurrent` to control parallel rollouts. The `vf-eval` CLI currently exposes `--max-concurrent-requests`; ensure this maps to your environment’s concurrency as expected.
 
+`vf-eval` also supports specifying `sampling_args` as a JSON object, which is sent to the vLLM inference engine:
+
+```bash
+vf-eval vf-environment-name --sampling-args '{"reasoning_effort": "low"}'
+```
+
 ### ToolEnv
 
 For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools can be specified as generic Python functions (with type hints and docstrings), which will then be passed in JSON schema form to each inference request.
