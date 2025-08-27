@@ -94,7 +94,7 @@ The primary constraint we impose on rollout logic is that token sequences must b
 
 ### SingleTurnEnv
 
-For tasks requiring only a single response from a model for each prompt, you can use `SingleTurnEnv` directly by specifying a Dataset and a Rubric.
+For tasks requiring only a single response from a model for each prompt, you can use `SingleTurnEnv` directly by specifying a Dataset and a Rubric. Rubrics are sets of reward functions, which can be either sync or async.
 
 ```python
 from datasets import load_dataset
@@ -110,7 +110,7 @@ def reward_B(parser, completion) -> float:
 	# auxiliary reward fn, e.g. format
 	...
 
-def metric(completion) -> float:
+async def metric(completion) -> float:
 	# non-reward metric, e.g. proper noun count
 	...
 
@@ -121,7 +121,7 @@ vf_env = SingleTurnEnv(
 	rubric=rubric
 )
 results = vf_env.evaluate(client=OpenAI(), model="gpt-4.1-mini", num_examples=100, rollouts_per_example=1)
-vf_env.make_dataset(results, push_to_hub=True, hub_name="my-new-environment-eval-results") # save results to HF hub
+vf_env.make_dataset(results) # HF dataset format
 ```
 
 Datasets should be formatted with columns for:
@@ -149,6 +149,8 @@ Note on concurrency: environment APIs accept `max_concurrent` to control paralle
 ```bash
 vf-eval vf-environment-name --sampling-args '{"reasoning_effort": "low"}'
 ```
+
+Use `vf-eval -s` to save outputs as dataset-formatted JSON, and view all locally-saved eval results with `vf-tui`.
 
 ### ToolEnv
 
@@ -183,10 +185,10 @@ class YourMultiTurnEnv(vf.MultiTurnEnv):
 				 max_turns: int,
                  **kwargs):
 	
-  def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
+  async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
     # return whether or not a rollout is completed
 
-  def env_response(self, messages: Messages, state: State, **kwargs) -> Tuple[Messages, State]:
+  async def env_response(self, messages: Messages, state: State, **kwargs) -> Tuple[Messages, State]:
     # return new environment message(s) + updated state
 ```
 
