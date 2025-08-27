@@ -144,6 +144,12 @@ For tasks involving LLM judges, you may wish to use `vf.JudgeRubric()` for manag
 
 Note on concurrency: environment APIs accept `max_concurrent` to control parallel rollouts. The `vf-eval` CLI currently exposes `--max-concurrent-requests`; ensure this maps to your environment’s concurrency as expected.
 
+`vf-eval` also supports specifying `sampling_args` as a JSON object, which is sent to the vLLM inference engine:
+
+```bash
+vf-eval vf-environment-name --sampling-args '{"reasoning_effort": "low"}'
+```
+
 ### ToolEnv
 
 For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools can be specified as generic Python functions (with type hints and docstrings), which will then be passed in JSON schema form to each inference request.
@@ -240,21 +246,7 @@ If you do not require LoRA support, you may want to use the `prime-rl` trainer, 
 
 ## Further Documentation
 
-See the full [docs](https://verifiers.readthedocs.io/en/latest/) for more info, including:
-- Dataset configuration options (system prompts, few-shot examples, eval datasets)
-- Parsers (e.g. ThinkParser, XMLParser)
-- Advanced Rubric patterns
-- Composing Environments (EnvGroup) and Rubrics (RubricGroup)
-- Creating and saving rollout datasets using Environments
-- More Environment example walkthroughs
-- Hardware considerations
-- SFT warmup for improving small-model training efficiency
-- RL + GRPO best practices
-- Common footguns
-
-## Footguns
-
-**Non-Increasing Chat Templates:** The Qwen3 and DeepSeek-R1 model series both remove `<think>` sections from messages when processing inputs, which violates the increasing context requirement for multi-turn GRPO-style training. We provide versions of many of these models with modified chat templates [here](https://huggingface.co/collections/willcb/qwen3-68434f4883925bfdb4570ee5).
+See the full [docs](https://verifiers.readthedocs.io/en/latest/) for more information.
 
 ## Contributions
 
@@ -278,7 +270,6 @@ If you use this code in your research, please cite:
 
 
 ## Roadmap
-
 - A community Environments hub for crowdsourcing, sharing, and discovering new RL environments built with `verifiers`
 - Default patterns for hosted resources such as code sandboxes, auxiliary models, and MCP servers
 - Multimodal input support

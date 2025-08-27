@@ -190,6 +190,15 @@ def load_environment(
     judge_rubric = JudgeRubric(
         judge_client=judge_client, judge_model=judge_model, parser=vf_env.parser
     )
+
+    async def judge_reward_func(judge, prompt, completion, answer, state) -> float:
+        judge_response = await judge(prompt, completion, answer, state)
+        if "yes" in judge_response.lower():
+            return 1.0
+        else:
+            return 0.0
+
+    judge_rubric.add_reward_func(judge_reward_func, weight=1.0)
     vf_env.rubric = vf.RubricGroup(rubrics=[judge_rubric, vf_env.rubric])
 
     return vf_env

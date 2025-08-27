@@ -3,6 +3,7 @@ from typing import Any, Callable
 
 from verifiers.envs.multiturn_env import MultiTurnEnv
 from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
+from verifiers.utils.async_utils import maybe_await
 from verifiers.utils.tool_utils import convert_func_to_oai_tool
 
 
@@ -21,7 +22,9 @@ class ToolEnv(MultiTurnEnv):
         self.tool_map = {tool.__name__: tool for tool in self.tools}
         super().__init__(oai_tools=self.oai_tools, max_turns=max_turns, **kwargs)
 
-    def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
+    async def is_completed(
+        self, messages: Messages, state: State, **kwargs: Any
+    ) -> bool:
         assert isinstance(messages, list)
         is_assistant_message = messages[-1]["role"] == "assistant"
         no_tool_calls = (
@@ -29,13 +32,13 @@ class ToolEnv(MultiTurnEnv):
         )
         return is_assistant_message and no_tool_calls
 
-    def call_tool(
+    async def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
     ) -> Message:
         """Call a tool based on JSON command."""
         try:
             tool_func = self.tool_map[tool_name]
-            result = str(tool_func(**tool_args))
+            result = str(await maybe_await(tool_func, **tool_args))
             return {
                 "role": "tool",
                 "content": str(result),
@@ -48,7 +51,7 @@ class ToolEnv(MultiTurnEnv):
                 "tool_call_id": tool_call_id,
             }
 
-    def env_response(
+    async def env_response(
         self, messages: Messages, state: State, **kwargs
     ) -> tuple[Messages, State]:
         assert isinstance(messages, list)
@@ -59,6 +62,8 @@ class ToolEnv(MultiTurnEnv):
             tool_name: str = tool_call.function.name
             tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
-            tool_message: Message = self.call_tool(tool_name, tool_args, tool_call_id)
+            tool_message: Message = await self.call_tool(
+                tool_name, tool_args, tool_call_id
+            )
             tool_messages.append(tool_message)
         return tool_messages, state

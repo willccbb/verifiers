@@ -12,7 +12,7 @@ def load_environment(
     **kwargs,
 ):
     dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
-    system_prompt = """Use tool calls for all calculations."""
+    system_prompt = "Use python for all calculations (variables do not persist). Give your answer inside \\boxed{}."
 
     parser = vf.Parser(extract_fn=extract_boxed_answer)
 
@@ -43,7 +43,7 @@ def load_environment(
                 if "error" in msg["content"].lower()
             ]
         )
-        return num_errors
+        return float(num_errors)
 
     rubric = vf.Rubric(
         funcs=[correct_answer_reward_func, num_turns, num_tool_calls, num_errors],
