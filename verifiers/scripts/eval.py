@@ -116,10 +116,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             print(out)
 
     if save_dataset or save_to_hf_hub:
-        ids = [
-            i // rollouts_per_example
-            for i in range(num_examples * rollouts_per_example)
-        ]
+        ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
         rewards = results.reward
         tasks = results.task
         data_dict = {
@@ -141,7 +138,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         metadata = {
             "env": env,
             "model": model,
-            "num_examples": num_examples,
+            "num_examples": n,
             "rollouts_per_example": rollouts_per_example,
             "sampling_args": merged_sampling_args,
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -170,7 +167,9 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             print(f"Saved dataset to {results_path}")
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
-                dataset_name = f"{env}_{model.replace('/', '-')}_n{num_examples}_r{rollouts_per_example}"
+                dataset_name = (
+                    f"{env}_{model.replace('/', '-')}_n{n}_r{rollouts_per_example}"
+                )
             else:
                 dataset_name = hf_hub_dataset_name
             dataset.push_to_hub(dataset_name)
