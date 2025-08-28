@@ -31,6 +31,7 @@ def load_environment(
     rubric = vf.Rubric(
         funcs=[correct_answer_reward_func, parser.get_format_reward_func()],
         weights=[1.0, 0.0],
+        parser=parser,
     )
 
     vf_env = vf.SingleTurnEnv(
