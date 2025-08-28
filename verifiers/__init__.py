@@ -18,6 +18,7 @@ from .rubrics.judge_rubric import JudgeRubric
 from .rubrics.rubric import Rubric
 from .rubrics.rubric_group import RubricGroup
 from .rubrics.tool_rubric import ToolRubric
+from .samplers import Sampler, OpenAISampler, MockSampler
 from .utils.data_utils import (
     extract_boxed_answer,
     extract_hash_answer,
@@ -74,6 +75,9 @@ __all__ = [
     "SingleTurnEnv",
     "ToolEnv",
     "EnvGroup",
+    "Sampler",
+    "OpenAISampler",
+    "MockSampler",
     "extract_boxed_answer",
     "extract_hash_answer",
     "load_example_dataset",

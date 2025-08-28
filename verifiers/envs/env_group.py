@@ -9,6 +9,7 @@ from verifiers import (
 )
 from verifiers.envs.environment import Environment
 from verifiers.rubrics.rubric import Rubric
+from verifiers.samplers import Sampler
 from verifiers.types import RolloutScore
 
 
@@ -148,13 +149,14 @@ class EnvGroup(Environment):
 
     async def rollout(
         self,
-        client: AsyncOpenAI,
-        model: str,
-        prompt: str | list[ChatMessage],
+        client: AsyncOpenAI | None = None,  # Optional: for backwards compatibility
+        model: str | None = None,  # Optional: for backwards compatibility
+        prompt: str | list[ChatMessage] | None = None,
         answer: str = "",
         task: str = "default",
         info: Info | None = None,
         sampling_args: SamplingArgs | None = None,
+        sampler: Sampler | None = None,  # Optional: takes precedence over client/model
         **kwargs,
     ) -> tuple[str | list[ChatMessage], State]:
         """
@@ -173,7 +175,7 @@ class EnvGroup(Environment):
 
         # Pass through all arguments
         return await env.rollout(
-            client, model, prompt, answer, task, info, sampling_args, **kwargs
+            client, model, prompt, answer, task, info, sampling_args, sampler, **kwargs
         )
 
     def get_env_for_task(self, task: str) -> Environment:

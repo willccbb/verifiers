@@ -7,7 +7,6 @@ from typing import (
     Literal,
 )
 
-from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 # openai types
@@ -18,7 +17,6 @@ from openai.types.chat.chat_completion_role import ChatCompletionRole  # noqa: F
 from openai.types.chat.chat_completion_tool_param import (
     ChatCompletionToolParam,  # noqa: F401
 )
-from openai.types.completion import Completion
 from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
@@ -32,7 +30,7 @@ else:
     ChatMessage = Annotated[ChatCompletionMessageParam, SkipValidation]
 
 MessageType = Literal["chat", "completion"]
-ModelResponse = Completion | ChatCompletion | None
+
 
 Message = str | ChatMessage
 

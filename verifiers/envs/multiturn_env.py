@@ -3,10 +3,8 @@ from abc import abstractmethod
 from openai import AsyncOpenAI
 
 from verifiers.envs.environment import Environment
+from verifiers.samplers import Sampler
 from verifiers.types import (
-    ChatCompletion,
-    ChatMessage,
-    Completion,
     Info,
     Messages,
     SamplingArgs,
@@ -38,18 +36,24 @@ class MultiTurnEnv(Environment):
 
     async def rollout(
         self,
-        client: AsyncOpenAI,
-        model: str,
-        prompt: Messages,
+        client: AsyncOpenAI | None = None,  # Optional: for backwards compatibility
+        model: str | None = None,  # Optional: for backwards compatibility
+        prompt: Messages | None = None,
         answer: str = "",
         task: str = "default",
         info: Info | None = None,
         sampling_args: SamplingArgs | None = None,
+        sampler: Sampler | None = None,  # Use provided sampler or self.sampler
         **kwargs,
     ) -> tuple[Messages, State]:
         """
         Generate a multi-turn rollout with the environment (messages, state).
         """
+        if sampler is None and (client is not None or model is not None):
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(client=client, model=model)
+
         info = info or {}
         is_completed = False
         state = {
@@ -74,36 +78,29 @@ class MultiTurnEnv(Environment):
             if await maybe_await(self.is_completed, rollout, state, **kwargs):
                 is_completed = True
                 break
-            response = await self.get_model_response(
-                client=client,
-                model=model,
-                prompt=rollout,
-                oai_tools=info.get("oai_tools", None),
-                sampling_args=sampling_args,
-                message_type=self.message_type,
-            )
-            state["responses"].append(response)
+
+            active_sampler = sampler or self.sampler
+            sample_config = dict(sampling_args or {})
+            if info.get("oai_tools"):
+                sample_config["tools"] = info.get("oai_tools")
+
             if self.message_type == "chat":
                 assert isinstance(rollout, list)
                 assert isinstance(completion, list)
-                assert isinstance(response, ChatCompletion)
-                response_text: str = response.choices[0].message.content or ""  # type: ignore
-                response_message: ChatMessage = {
-                    "role": "assistant",
-                    "content": response_text,
-                }
-                if response.choices[0].message.tool_calls:
-                    response_message["tool_calls"] = response.choices[  # type: ignore
-                        0
-                    ].message.tool_calls
+                response_message = await active_sampler.sample(rollout, **sample_config)
+                state["responses"].append(response_message)
                 rollout.append(response_message)
                 completion.append(response_message)
             else:
                 assert isinstance(rollout, str)
                 assert isinstance(completion, str)
-                assert isinstance(response, Completion)
+                chat_messages = [{"role": "user", "content": rollout}]
+                response_message = await active_sampler.sample(
+                    chat_messages, **sample_config
+                )
+                response_text = response_message["content"]
+                state["responses"].append(response_message)
                 state["responses_start_idx"].append(len(completion))
-                response_text: str = response.choices[0].text or ""  # type: ignore
                 rollout += response_text
                 completion += response_text
             state["turn"] += 1

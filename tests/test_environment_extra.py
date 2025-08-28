@@ -1,7 +1,7 @@
 """Additional tests for verifiers.envs.environment.Environment.
 
 Covers:
-- get_model_response chat tools vs. completion error
+- sample chat tools vs. completion error
 - run_rollouts with semaphore
 - process_env_results zero_truncated_completions path
 - evaluate fallback to train dataset and repeat behavior
@@ -37,17 +37,23 @@ class DummyEnvironment(Environment):
         sampling_args: SamplingArgs | None = None,
         **kwargs,
     ):
-        response = await self.get_model_response(
-            prompt=prompt, client=client, model=model, sampling_args=sampling_args
-        )
-        assert response is not None
-        if self.message_type == "chat":
-            completion = [
-                {"role": "assistant", "content": response.choices[0].message.content}
-            ]
-            state = {"responses": [response]}
+        # Use sampler if provided, otherwise create one from client/model
+        if "sampler" not in kwargs:
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(client=client, model=model)
         else:
-            completion = response.choices[0].text
+            sampler = kwargs["sampler"]
+
+        message = await self.sample(
+            prompt=prompt, sampler=sampler, sampling_args=sampling_args
+        )
+        assert message is not None
+        if self.message_type == "chat":
+            completion = [message]
+            state = {"responses": [message]}
+        else:
+            completion = message["content"]
             state = {}
         return completion, state
 
@@ -67,7 +73,7 @@ def _make_env(
 
 
 @pytest.mark.asyncio
-async def test_get_model_response_chat_with_tools(mock_openai_client):
+async def test_sample_chat_with_tools(mock_openai_client):
     env = _make_env(mock_openai_client)
     prompt = [{"role": "user", "content": "Hello"}]
     tools = [
@@ -76,31 +82,41 @@ async def test_get_model_response_chat_with_tools(mock_openai_client):
             "function": {"name": "echo", "description": "echo", "parameters": {}},
         }
     ]
-    resp = await env.get_model_response(
-        client=mock_openai_client,
-        model="test-model",
+    from verifiers.samplers import OpenAISampler
+
+    sampler = OpenAISampler(client=mock_openai_client, model="test-model")
+
+    message = await env.sample(
         prompt=prompt,
+        sampler=sampler,
         oai_tools=tools,
         message_type="chat",
     )
-    # Ensure the client was invoked and received tools kwarg
-    assert hasattr(resp, "choices")
+    # Ensure the message has the expected format
+    assert message["role"] == "assistant"
+    assert "content" in message
     assert mock_openai_client.chat.completions.create.await_count == 1
     kwargs = mock_openai_client.chat.completions.create.await_args.kwargs
     assert "tools" in kwargs and kwargs["tools"] == tools
 
 
 @pytest.mark.asyncio
-async def test_get_model_response_completion_rejects_tools(mock_openai_client):
+async def test_sample_completion_converts_to_chat_for_tools(mock_openai_client):
+    """The sample() method converts completion format to chat, allowing tools."""
     env = _make_env(mock_openai_client, message_type="completion")
-    with pytest.raises(ValueError, match="oai_tools are not supported for completion"):
-        await env.get_model_response(
-            client=mock_openai_client,
-            model="test-model",
-            prompt="Complete this",
-            oai_tools=[{"type": "function", "function": {"name": "noop"}}],
-            message_type="completion",
-        )
+    from verifiers.samplers import OpenAISampler
+
+    sampler = OpenAISampler(client=mock_openai_client, model="test-model")
+
+    # This works because sample() converts completion prompt to chat format
+    message = await env.sample(
+        prompt="Complete this",
+        sampler=sampler,
+        oai_tools=[{"type": "function", "function": {"name": "noop"}}],
+        message_type="completion",
+    )
+    assert message["role"] == "assistant"
+    assert "content" in message
 
 
 def test_run_rollouts_with_semaphore(mock_openai_client):
@@ -108,8 +124,6 @@ def test_run_rollouts_with_semaphore(mock_openai_client):
     prompts = [[{"role": "user", "content": "hi"}] for _ in range(3)]
     answers = ["", "", ""]
     coro = env.run_rollouts(
-        client=mock_openai_client,
-        model="test-model",
         prompts=prompts,
         answers=answers,
         tasks=["default"] * 3,

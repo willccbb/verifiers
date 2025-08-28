@@ -173,8 +173,8 @@ class TestSingleTurnEnv:
 
     @pytest.mark.asyncio
     async def test_rollout_error_handling(self, mock_singleturn_env):
-        """Test rollout handles errors from get_model_response."""
-        # Mock get_model_response to return an error
+        """Test rollout handles errors from sample."""
+        # Mock sample to return an error
         mock_singleturn_env.client.chat.completions.create = AsyncMock(
             side_effect=Exception("API Error")
         )

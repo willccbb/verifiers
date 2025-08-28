@@ -11,6 +11,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
+from verifiers.samplers import Sampler
 from verifiers.types import (
     ChatCompletion,
     ChatCompletionToolParam,
@@ -21,7 +22,6 @@ from verifiers.types import (
     Info,
     Messages,
     MessageType,
-    ModelResponse,
     ProcessedOutputs,
     RewardFunc,
     SamplingArgs,
@@ -44,6 +44,7 @@ class Environment(ABC):
         self,
         client: AsyncOpenAI | None = None,
         model: str | None = None,
+        sampler: Sampler | None = None,
         dataset: Dataset | None = None,
         eval_dataset: Dataset | None = None,
         system_prompt: str | None = None,
@@ -56,6 +57,18 @@ class Environment(ABC):
         max_workers: int = 512,
         **kwargs,
     ):
+        # Handle backwards compatibility
+        if sampler is None and (client is not None or model is not None):
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(client=client, model=model)
+        elif sampler is None:
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler()
+
+        self.sampler = sampler
+        # Keep client and model for backwards compatibility
         self.client = client
         self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
@@ -182,81 +195,67 @@ class Environment(ABC):
     def get_reward_weights(self) -> list[float]:
         return self.rubric.get_reward_weights()
 
-    async def get_model_response(
+    async def sample(
         self,
-        client: AsyncOpenAI,
-        model: str,
         prompt: Messages,
+        sampler: Sampler | None = None,
         oai_tools: list[ChatCompletionToolParam] | None = None,
         sampling_args: SamplingArgs | None = None,
         message_type: MessageType | None = None,
         **kwargs,
-    ) -> ModelResponse:
+    ) -> ChatMessage:
         """
-        Get model response for a given prompt (chat or completion).
+        Get a sample from the model using the sampler abstraction.
 
-        Convenience function for wrapping (chat, completion) API calls.
-        Returns special error messages for context length issues.
+        Args:
+            prompt: Input messages (chat format) or string (completion format)
+            sampler: Optional sampler override (uses self.sampler if not provided)
+            oai_tools: OpenAI-style tools for function calling
+            sampling_args: Sampling parameters (temperature, max_tokens, etc.)
+            message_type: Override message type (chat/completion)
+
+        Returns:
+            ChatMessage with role='assistant', content, and optional tool_calls
         """
-        sampling_args = sampling_args or {}
-        # Resolve message type first
+        active_sampler = sampler or self.sampler
+        if active_sampler is None:
+            raise ValueError(
+                "No sampler available. Provide either a sampler parameter, "
+                "or initialize the environment with a sampler."
+            )
+
+        # Prepare config for sampler
+        config = dict(sampling_args or {})
+        if oai_tools:
+            config["tools"] = oai_tools
+
+        # Resolve message type
         if message_type is None:
             message_type = self.message_type
-        # Normalize sampling args:
-        # - If max_tokens is provided for chat, rename to max_completion_tokens
-        # - Drop any None-valued entries to avoid sending them to the client
-        if "max_tokens" in sampling_args:
-            if sampling_args["max_tokens"] is None:
-                sampling_args.pop("max_tokens")
-            elif message_type == "chat":
-                sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
-        if (
-            "max_completion_tokens" in sampling_args
-            and sampling_args["max_completion_tokens"] is None
-        ):
-            sampling_args.pop("max_completion_tokens")
-        clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
+
         try:
-            if message_type == "chat":
-                assert isinstance(prompt, list)
-                if oai_tools:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        tools=oai_tools,
-                        **clean_sampling_args,
-                    )
-                else:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        **clean_sampling_args,
-                    )
-                return response
-            elif message_type == "completion":
-                if oai_tools:
-                    raise ValueError(
-                        "oai_tools are not supported for completion tasks."
-                    )
-                assert isinstance(prompt, str)
-                response = await client.completions.create(
-                    model=model, prompt=prompt, **clean_sampling_args
-                )
-                return response
+            # Convert completion format to chat format if needed
+            if message_type == "completion" and isinstance(prompt, str):
+                chat_prompt = [{"role": "user", "content": prompt}]
+                return await active_sampler.sample(chat_prompt, **config)
+            else:
+                # Already in chat format
+                return await active_sampler.sample(prompt, **config)
         except Exception as e:
-            self.logger.error(f"Error getting model response: {e} \n\nExiting...")
+            self.logger.error(f"Error sampling from model: {e} \n\nExiting...")
             raise e
 
     @abstractmethod
     async def rollout(
         self,
-        client: AsyncOpenAI,
-        model: str,
-        prompt: Messages,
+        client: AsyncOpenAI | None = None,  # Optional: for backwards compatibility
+        model: str | None = None,  # Optional: for backwards compatibility
+        prompt: Messages | None = None,
         answer: str = "",
         task: str = "default",
         info: Info | None = None,
         sampling_args: SamplingArgs | None = None,
+        sampler: Sampler | None = None,  # Optional: takes precedence over client/model
         **kwargs,
     ) -> tuple[Messages, State]:
         """
@@ -268,13 +267,12 @@ class Environment(ABC):
     async def run_rollout_with_semaphore(
         self,
         semaphore: asyncio.Semaphore,
-        client: AsyncOpenAI,
-        model: str,
         prompt: Messages,
         answer: str = "",
         task: str = "default",
         info: Info | None = None,
         sampling_args: SamplingArgs | None = None,
+        sampler: Sampler | None = None,
         **kwargs,
     ) -> tuple[Messages, State]:
         """
@@ -282,19 +280,28 @@ class Environment(ABC):
         """
         async with semaphore:
             return await self.rollout(
-                client, model, prompt, answer, task, info, sampling_args, **kwargs
+                None,
+                None,
+                prompt,
+                answer,
+                task,
+                info,
+                sampling_args,
+                sampler=sampler,
+                **kwargs,
             )
 
     async def run_rollouts(
         self,
-        client: AsyncOpenAI,
-        model: str,
-        prompts: list[Messages],
-        answers: list[str],
-        tasks: list[str],
-        infos: list[Info],
+        client: AsyncOpenAI | None = None,  # Optional: for backwards compatibility
+        model: str | None = None,  # Optional: for backwards compatibility
+        prompts: list[Messages] | None = None,
+        answers: list[str] | None = None,
+        tasks: list[str] | None = None,
+        infos: list[Info] | None = None,
         sampling_args: SamplingArgs | None = None,
         max_concurrent: int = -1,
+        sampler: Sampler | None = None,
         **kwargs,
     ) -> list[tuple[Messages, State]]:
         """
@@ -302,18 +309,22 @@ class Environment(ABC):
         """
         from tqdm.asyncio import tqdm_asyncio
 
+        if sampler is None and (client is not None or model is not None):
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(client=client, model=model)
+
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
             rollout_tasks = [
                 self.run_rollout_with_semaphore(
                     semaphore,
-                    client,
-                    model,
                     prompt,
                     answer,
                     task,
                     info,
                     sampling_args,
+                    sampler=sampler,
                     **kwargs,
                 )
                 for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
@@ -321,7 +332,15 @@ class Environment(ABC):
         else:
             rollout_tasks = [
                 self.rollout(
-                    client, model, prompt, answer, task, info, sampling_args, **kwargs
+                    None,
+                    None,
+                    prompt,
+                    answer,
+                    task,
+                    info,
+                    sampling_args,
+                    sampler=sampler,
+                    **kwargs,
                 )
                 for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
             ]
@@ -344,13 +363,14 @@ class Environment(ABC):
         """
         if isinstance(inputs, GenerateInputs):
             inputs = inputs.model_dump()
-        # use class-level client and model if not provided
-        if client is None:
-            assert self.client is not None
-            client = self.client
-        if model is None:
-            assert self.model is not None
-            model = self.model
+        sampler = None
+        if client is not None or model is not None:
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(
+                client=client or self.client, model=model or self.model
+            )
+
         gen_sampling_args = deepcopy(self.sampling_args)
         if sampling_args is not None:
             gen_sampling_args.update(sampling_args)
@@ -402,10 +422,9 @@ class Environment(ABC):
             answers=results.answer,
             tasks=results.task,
             infos=results.info,
-            client=client,
-            model=model,
             sampling_args=gen_sampling_args,
             max_concurrent=max_concurrent,
+            sampler=sampler,  # Pass the sampler we created
             **kwargs,
         )
         results.completion = [rollout[0] for rollout in rollouts]

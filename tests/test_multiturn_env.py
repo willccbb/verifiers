@@ -397,7 +397,8 @@ class TestMultiTurnEnv:
 
         # Check that all responses are stored
         assert len(state["responses"]) == 3
-        # Each response should have the structure returned by get_model_response
+        # Each response should have the structure returned by sample
         for response in state["responses"]:
-            assert hasattr(response, "choices")
-            assert len(response.choices) > 0
+            assert isinstance(response, dict)
+            assert response["role"] == "assistant"
+            assert "content" in response

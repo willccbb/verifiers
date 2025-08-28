@@ -25,16 +25,22 @@ class SimpleEnvironment(Environment):
         **kwargs,
     ):
         """Simple test rollout implementation."""
-        response = await self.get_model_response(
-            prompt=prompt, client=client, model=model, sampling_args=sampling_args
+        # Use sampler if provided, otherwise create one from client/model
+        if "sampler" not in kwargs:
+            from verifiers.samplers import OpenAISampler
+
+            sampler = OpenAISampler(client=client, model=model)
+        else:
+            sampler = kwargs["sampler"]
+
+        message = await self.sample(
+            prompt=prompt, sampler=sampler, sampling_args=sampling_args
         )
         if self.message_type == "chat":
-            completion = [
-                {"role": "assistant", "content": response.choices[0].message.content}
-            ]
-            state = {"responses": [response]}
+            completion = [message]
+            state = {"responses": [message]}
         else:
-            completion = response.choices[0].text
+            completion = message["content"]
             state = {}
         return completion, state
 
@@ -146,8 +152,8 @@ class TestEnvironmentBase:
         assert len(subset) == 1
 
     @pytest.mark.asyncio
-    async def test_get_model_response_chat(self, mock_openai_client):
-        """Test get_model_response with chat format."""
+    async def test_sample_chat(self, mock_openai_client):
+        """Test sample() with chat format."""
         env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
@@ -157,23 +163,25 @@ class TestEnvironmentBase:
         )
 
         prompt = [{"role": "user", "content": "Hello"}]
-        response = await env.get_model_response(
+        from verifiers.samplers import OpenAISampler
+
+        sampler = OpenAISampler(client=mock_openai_client, model="test-model")
+
+        message = await env.sample(
             prompt=prompt,
-            client=mock_openai_client,
-            model="test-model",
+            sampler=sampler,
             message_type="chat",
         )
 
-        # Check response structure
-        assert hasattr(response, "choices")
-        assert len(response.choices) > 0
-        assert hasattr(response.choices[0], "message")
-        assert hasattr(response.choices[0].message, "content")
+        # Check message structure
+        assert message["role"] == "assistant"
+        assert "content" in message
+        assert isinstance(message["content"], str)
         mock_openai_client.chat.completions.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_model_response_completion(self, mock_openai_client):
-        """Test get_model_response with completion format."""
+    async def test_sample_completion(self, mock_openai_client):
+        """Test sample() with completion format."""
         env = SimpleEnvironment(
             client=mock_openai_client,
             model="test-model",
@@ -184,17 +192,20 @@ class TestEnvironmentBase:
         )
 
         prompt = "Complete this:"
-        response = await env.get_model_response(
+        from verifiers.samplers import OpenAISampler
+
+        sampler = OpenAISampler(client=mock_openai_client, model="test-model")
+
+        message = await env.sample(
             prompt=prompt,
-            client=mock_openai_client,
-            model="test-model",
+            sampler=sampler,
             message_type="completion",
         )
 
-        # Check response structure
-        assert hasattr(response, "choices")
-        assert len(response.choices) > 0
-        assert hasattr(response.choices[0], "text")
+        # Check message structure
+        assert message["role"] == "assistant"
+        assert "content" in message
+        assert isinstance(message["content"], str)
         mock_openai_client.completions.create.assert_called_once()
 
     def test_process_chat_format(self, mock_openai_client, sample_dataset):
@@ -484,8 +495,6 @@ class TestEnvironmentBase:
 
         # Mock the rollout method calls
         results = await env.run_rollouts(
-            client=mock_openai_client,
-            model="test-model",
             prompts=prompts,
             answers=answers,
             tasks=tasks,
