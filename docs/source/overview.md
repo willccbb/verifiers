@@ -60,7 +60,7 @@ Leverages models' built-in tool calling for agentic workflows:
 env = vf.ToolEnv(
     tools=[search, calculate, execute_code],  # Python functions
     max_turns=10,
-    dataset=dataset,
+    dataset=dataset, # HuggingFace dataset
     rubric=rubric
 )
 ```
