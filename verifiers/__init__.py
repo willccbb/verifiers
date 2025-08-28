@@ -88,6 +88,9 @@ __all__ = [
     "GRPOConfig",
     "grpo_defaults",
     "lora_defaults",
+    "get_optimal_training_config",
+    "handle_training_timeout_error",
+    "validate_training_config",
 ]
 
 _LAZY_IMPORTS = {
@@ -99,6 +102,9 @@ _LAZY_IMPORTS = {
     "grpo_defaults": "verifiers.trainers:grpo_defaults",
     "lora_defaults": "verifiers.trainers:lora_defaults",
     "MathRubric": "verifiers.rubrics.math_rubric:MathRubric",
+    "get_optimal_training_config": "verifiers.utils.training_utils:get_optimal_training_config",
+    "handle_training_timeout_error": "verifiers.utils.training_utils:handle_training_timeout_error",
+    "validate_training_config": "verifiers.utils.training_utils:validate_training_config",
 }
 
 
@@ -128,3 +134,9 @@ if TYPE_CHECKING:
         get_tokenizer,
     )
     from .rubrics.math_rubric import MathRubric  # noqa: F401
+    from .utils.training_utils import (  # noqa: F401
+        get_optimal_training_config,
+        handle_training_timeout_error,
+        validate_training_config,
+    )
+    
