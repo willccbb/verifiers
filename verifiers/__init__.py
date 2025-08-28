@@ -69,6 +69,7 @@ __all__ = [
     "JudgeRubric",
     "RubricGroup",
     "ToolRubric",
+    "MathRubric",
     "Environment",
     "MultiTurnEnv",
     "SingleTurnEnv",
@@ -97,6 +98,7 @@ _LAZY_IMPORTS = {
     "GRPOTrainer": "verifiers.trainers:GRPOTrainer",
     "grpo_defaults": "verifiers.trainers:grpo_defaults",
     "lora_defaults": "verifiers.trainers:lora_defaults",
+    "MathRubric": "verifiers.rubrics.math_rubric:MathRubric",
 }
 
 
@@ -125,3 +127,4 @@ if TYPE_CHECKING:
         get_model_and_tokenizer,
         get_tokenizer,
     )
+    from .rubrics.math_rubric import MathRubric  # noqa: F401
