@@ -9,11 +9,14 @@ import verifiers as vf
 from datasets import Dataset
 from openai import AsyncOpenAI
 
-# Use the bundled question list; no external repo dependency
+# Use the bundled question list; try package-relative then absolute fallback
 try:
     from .question_list import questions as LOCAL_QUESTIONS
 except Exception:
-    LOCAL_QUESTIONS = []  # type: ignore
+    try:
+        from question_list import questions as LOCAL_QUESTIONS  # type: ignore
+    except Exception:
+        LOCAL_QUESTIONS = []  # type: ignore
 
 
 
