@@ -1,4 +1,3 @@
-import argparse
 import importlib
 import importlib.util
 import json
@@ -6,16 +5,19 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
+import typer
 from datasets import Dataset
+from openai import OpenAI
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal, VerticalScroll
+from textual.widgets import Footer, Label, Static
 
 import verifiers as vf
-from verifiers.utils.client_utils import setup_client
-from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
-
-# Setup logger for eval script using verifiers logging format
-logger = logging.getLogger("verifiers.scripts.eval")
+from verifiers.utils.message_utils import sanitize_tool_calls
+from verifiers.scripts.tui import format_prompt_or_completion
 
 
 def eval_environment(
@@ -32,12 +34,10 @@ def eval_environment(
     max_tokens: int | None,
     temperature: float | None,
     sampling_args: dict | None,
-    verbose: bool,
     save_dataset: bool,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
-):
-    logger.setLevel("DEBUG" if verbose else "INFO")
+) -> Dict[str, Any]:
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():
@@ -110,39 +110,51 @@ def eval_environment(
         rollouts_per_example=rollouts_per_example,
         max_concurrent=max_concurrent,
     )
-    logger.info("Evaluation completed successfully")
-    logger.info("--- Evaluation ---")
-    logger.info(f"Environment: {env}")
-    logger.info(f"Model: {model}")
-    logger.info(f"Provider: {api_base_url}")
-    logger.info(f"Examples: {num_examples}")
-    logger.info(f"Rollouts per example: {rollouts_per_example}")
-    logger.info("--- Example ---")
-    printable_prompts = [messages_to_printable(p) for p in results.prompt]
-    printable_completions = [messages_to_printable(c) for c in results.completion]
-    vf.print_prompt_completions_sample(
-        printable_prompts, printable_completions, results.reward, step=0
-    )
-    logger.info("--- All ---")
-    logger.info("Rewards:")
-    logger.info(
-        f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
-    )
+
+    # Prepare evaluation results data
+    printable_prompts = [format_prompt_or_completion(p) for p in results.prompt]
+    printable_completions = [format_prompt_or_completion(c) for c in results.completion]
+
+    # Calculate statistics
+    n = num_examples
     r = rollouts_per_example
-    n = len(results.reward) // r
+    if n < 0:
+        n = len(results.reward) // r
+
+    # Prepare rewards data
+    reward_stats = {
+        "avg": sum(results.reward) / len(results.reward),
+        "std": np.std(results.reward),
+        "trials": [],
+    }
     for i in range(r):
-        # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]
-        out = f"r{i + 1}: {trials}"
-        logger.info(out)
+        reward_stats["trials"].append(trials)
+
+    # Prepare metrics data
+    metrics_data = {}
     for k in results.metrics:
         v = results.metrics[k]
-        logger.info(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        metrics_data[k] = {"avg": sum(v) / len(v), "std": np.std(v), "trials": []}
         for i in range(r):
-            # rounded to 3 decimal places
             trials = [round(v[(i * n) + j], 3) for j in range(n)]
-            out = f"r{i + 1}: {trials}"
-            logger.info(out)
+            metrics_data[k]["trials"].append(trials)
+
+    # Structure the evaluation data
+    eval_data = {
+        "environment": env,
+        "model": model,
+        "provider": api_base_url,
+        "num_examples": n,
+        "rollouts_per_example": r,
+        "max_concurrent_requests": max_concurrent_requests,
+        "merged_sampling_args": merged_sampling_args,
+        "prompts": printable_prompts,
+        "completions": printable_completions,
+        "rewards": reward_stats,
+        "metrics": metrics_data,
+        "results": results,  # Keep original results object for dataset saving
+    }
 
     if save_dataset or save_to_hf_hub:
         ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
@@ -204,140 +216,395 @@ def eval_environment(
             dataset.push_to_hub(dataset_name)
             logger.info(f"Saved dataset to Hugging Face Hub: {dataset_name}")
 
+    return eval_data
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "env", type=str, default="gsm8k", help="Environment module name"
-    )
-    parser.add_argument(
+
+# Create Typer app
+app = typer.Typer()
+
+
+@app.command()
+def evaluate(
+    env: str = typer.Argument("gsm8k", help="Environment module name"),
+    env_args: str = typer.Option(
+        "{}",
         "--env-args",
         "-a",
-        type=json.loads,
-        default={},
         help='Environment module arguments as JSON object (e.g., \'{"key": "value", "num": 42}\')',
-    )
-    parser.add_argument(
+    ),
+    env_dir_path: str = typer.Option(
+        "./environments",
         "--env-dir-path",
         "-p",
-        type=str,
-        default="./environments",
         help="Path to environments directory",
-    )
-    parser.add_argument(
+    ),
+    endpoints_path: str = typer.Option(
+        "./configs/endpoints.py",
         "--endpoints-path",
         "-e",
-        type=str,
-        default="./configs/endpoints.py",
         help="Path to API endpoints registry",
-    )
-    parser.add_argument(
+    ),
+    model: str = typer.Option(
+        "gpt-4.1-mini",
         "--model",
         "-m",
-        type=str,
-        default="gpt-4.1-mini",
         help="Name of model to evaluate",
-    )
-    parser.add_argument(
+    ),
+    api_key_var: str = typer.Option(
+        "OPENAI_API_KEY",
         "--api-key-var",
         "-k",
-        type=str,
-        default="OPENAI_API_KEY",
         help="Environment variable name for API key",
-    )
-    parser.add_argument(
+    ),
+    api_base_url: str = typer.Option(
+        "https://api.openai.com/v1",
         "--api-base-url",
         "-b",
-        type=str,
-        default="https://api.openai.com/v1",
         help="Base URL for API",
-    )
-    parser.add_argument(
+    ),
+    num_examples: int = typer.Option(
+        5,
         "--num-examples",
         "-n",
-        type=int,
-        default=5,
         help="Number of examples to evaluate",
-    )
-    parser.add_argument(
+    ),
+    rollouts_per_example: int = typer.Option(
+        3,
         "--rollouts-per-example",
         "-r",
-        type=int,
-        default=3,
         help="Number of rollouts per example",
-    )
-    parser.add_argument(
-        "--max-concurrent",
+    ),
+    max_concurrent_requests: int = typer.Option(
+        32,
+        "--max-concurrent-requests",
         "-c",
-        type=int,
-        default=32,
         help="Maximum number of concurrent requests",
-    )
-    parser.add_argument(
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
         "--max-tokens",
         "-t",
-        type=int,
-        default=None,
         help="Maximum number of tokens to generate (unset to use model default)",
-    )
-    parser.add_argument(
-        "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
-    )
-    parser.add_argument(
+    ),
+    temperature: Optional[float] = typer.Option(
+        None,
+        "--temperature",
+        "-T",
+        help="Temperature for sampling",
+    ),
+    sampling_args: Optional[str] = typer.Option(
+        None,
         "--sampling-args",
         "-S",
-        type=json.loads,
-        default=None,
         help=(
             "Sampling arguments as JSON object. Keys here override --max-tokens/--temperature. "
             'Example: \'{"enable_thinking": false, "max_tokens": 256}\''
         ),
-    )
-    parser.add_argument(
-        "--verbose", "-v", default=False, action="store_true", help="Verbose output"
-    )
-    parser.add_argument(
+    ),
+    save_dataset: bool = typer.Option(
+        False,
         "--save-dataset",
         "-s",
-        default=False,
-        action="store_true",
         help="Save dataset to disk",
-    )
-    parser.add_argument(
+    ),
+    save_to_hf_hub: bool = typer.Option(
+        False,
         "--save-to-hf-hub",
         "-H",
-        default=False,
-        action="store_true",
         help="Save dataset to Hugging Face Hub",
-    )
-    parser.add_argument(
+    ),
+    hf_hub_dataset_name: str = typer.Option(
+        "",
         "--hf-hub-dataset-name",
         "-D",
-        type=str,
-        default="",
         help="Name of dataset to save to Hugging Face Hub",
-    )
-    args = parser.parse_args()
+    ),
+    no_display: bool = typer.Option(
+        False,
+        "--no-display",
+        help="Skip displaying results in Textual interface",
+    ),
+):
+    """
+    Evaluate a model using the specified environment and display results.
+    """
+    # Parse JSON arguments
+    try:
+        parsed_env_args = json.loads(env_args)
+    except json.JSONDecodeError as e:
+        typer.echo(f"Error parsing env-args JSON: {e}", err=True)
+        raise typer.Exit(1)
 
-    eval_environment(
-        env=args.env,
-        env_args=args.env_args,
-        env_dir_path=args.env_dir_path,
-        endpoints_path=args.endpoints_path,
-        model=args.model,
-        api_key_var=args.api_key_var,
-        api_base_url=args.api_base_url,
-        num_examples=args.num_examples,
-        rollouts_per_example=args.rollouts_per_example,
-        max_concurrent=args.max_concurrent,
-        max_tokens=args.max_tokens,
-        temperature=args.temperature,
-        sampling_args=args.sampling_args,
-        verbose=args.verbose,
-        save_dataset=args.save_dataset,
-        save_to_hf_hub=args.save_to_hf_hub,
-        hf_hub_dataset_name=args.hf_hub_dataset_name,
+    try:
+        parsed_sampling_args = json.loads(sampling_args) if sampling_args else None
+    except json.JSONDecodeError as e:
+        typer.echo(f"Error parsing sampling-args JSON: {e}", err=True)
+        raise typer.Exit(1)
+
+    # Run evaluation
+    eval_data = eval_environment(
+        env=env,
+        env_args=parsed_env_args,
+        env_dir_path=env_dir_path,
+        endpoints_path=endpoints_path,
+        model=model,
+        api_key_var=api_key_var,
+        api_base_url=api_base_url,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
+        max_concurrent_requests=max_concurrent_requests,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        sampling_args=parsed_sampling_args,
+        save_dataset=save_dataset,
+        save_to_hf_hub=save_to_hf_hub,
+        hf_hub_dataset_name=hf_hub_dataset_name,
     )
+
+    # Display results using Textual interface
+    if not no_display:
+        display_app = EvaluationResultsApp(eval_data)
+        display_app.run()
+    else:
+        typer.echo(
+            "Evaluation completed. Use --no-display=false to show results in Textual interface."
+        )
+
+
+# Textual app for displaying evaluation results
+class EvaluationResultsApp(App):
+    """Textual app for displaying evaluation results."""
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("left", "prev_example", "Previous example"),
+        ("h", "prev_example", "Previous example"),
+        ("right", "next_example", "Next example"),
+        ("l", "next_example", "Next example"),
+        ("home", "first_example", "First example"),
+        ("end", "last_example", "Last example"),
+    ]
+
+    CSS = """
+    Screen {
+        layout: vertical;
+        background: #1a1a1a;
+    }
+
+    Container {
+        layout: vertical;
+        height: 100%;
+    }
+
+    .header-panel {
+        height: auto;
+        min-height: 4;
+        max-height: 8;
+        border: solid #666;
+        padding: 1 2;
+        margin-bottom: 1;
+    }
+
+    .stats-panel {
+        height: auto;
+        min-height: 6;
+        max-height: 10;
+        border: solid #666;
+        padding: 1 2;
+        margin-bottom: 1;
+    }
+
+    .rollout-container {
+        height: 1fr;
+        layout: horizontal;
+    }
+
+    .column-panel {
+        width: 50%;
+        height: 100%;
+        layout: vertical;
+        border: solid #666;
+        padding: 1 2;
+    }
+
+    .column-header {
+        height: auto;
+        margin-bottom: 1;
+        text-align: center;
+        text-style: bold;
+        color: #00ff00;
+    }
+
+    VerticalScroll {
+        height: 1fr;
+        background: #2a2a2a;
+        padding: 0 1;
+    }
+
+    Static {
+        color: #ffffff;
+    }
+
+    Label {
+        color: #ffffff;
+    }
+
+    Footer {
+        background: #333;
+        color: #ccc;
+    }
+    """
+
+    def __init__(self, eval_data: Dict[str, Any]):
+        super().__init__()
+        self.eval_data = eval_data
+        self.current_example = 0
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            # Header with evaluation info
+            with Container(classes="header-panel"):
+                yield Label("🔬 Evaluation Results", classes="column-header")
+                yield Static(self._get_header_text(), id="header-info")
+
+            # Statistics panel
+            with Container(classes="stats-panel"):
+                yield Label("📊 Statistics", classes="column-header")
+                yield Static(self._get_stats_text())
+
+            # Example rollout display
+            with Horizontal(classes="rollout-container"):
+                with Container(classes="column-panel"):
+                    yield Label("📝 Prompt", classes="column-header")
+                    yield VerticalScroll(
+                        Static(self._get_current_prompt()),
+                        id="prompt-content",
+                    )
+
+                with Container(classes="column-panel"):
+                    yield Label("🤖 Completion", classes="column-header")
+                    yield VerticalScroll(
+                        Static(self._get_current_completion()),
+                        id="completion-content",
+                    )
+
+        yield Footer(show_command_palette=False)
+
+    def _get_header_text(self) -> str:
+        """Generate header information text."""
+        data = self.eval_data
+        total_examples = len(data["prompts"]) if data["prompts"] else 0
+        current_idx = self.current_example + 1 if total_examples > 0 else 0
+
+        # Prominent example indicator at the top
+        example_indicator = f"[bold bright_green]📋 Example {current_idx} of {total_examples}[/bold bright_green]"
+        if total_examples == 0:
+            example_indicator = "[dim]No examples available[/dim]"
+
+        return f"""{example_indicator}
+
+[b]Environment:[/b] {data["environment"]}
+[b]Model:[/b] {data["model"]}
+[b]Provider:[/b] {data["provider"]}
+[b]Rollouts/example:[/b] {data["rollouts_per_example"]} | [b]Max Concurrent:[/b] {data["max_concurrent_requests"]}"""
+
+    def _get_stats_text(self) -> str:
+        """Generate statistics text."""
+        data = self.eval_data
+        rewards = data["rewards"]
+
+        lines = [
+            f"[b]Rewards:[/b] Avg: {rewards['avg']:.3f} | Std: {rewards['std']:.3f}",
+        ]
+
+        # Add rollout trials
+        for i, trials in enumerate(rewards["trials"], 1):
+            lines.append(f"[b]Rollout {i}:[/b] {trials}")
+
+        # Add other metrics
+        for metric_name, metric_data in data["metrics"].items():
+            lines.append(
+                f"[b]{metric_name}:[/b] Avg: {metric_data['avg']:.3f} | Std: {metric_data['std']:.3f}"
+            )
+            for i, trials in enumerate(metric_data["trials"], 1):
+                lines.append(f"[b]{metric_name} R{i}:[/b] {trials}")
+
+        return "\n".join(lines)
+
+    def _get_current_prompt(self) -> str:
+        """Get the current example's prompt."""
+        if self.current_example < len(self.eval_data["prompts"]):
+            prompt = self.eval_data["prompts"][self.current_example]
+            return prompt
+        return "[dim]No prompt available[/dim]"
+
+    def _get_current_completion(self) -> str:
+        """Get the current example's completion."""
+        if self.current_example < len(self.eval_data["completions"]):
+            completion = self.eval_data["completions"][self.current_example]
+            return completion
+        return "[dim]No completion available[/dim]"
+
+    def _update_display(self) -> None:
+        """Update the display with current example."""
+        # Update prompt
+        prompt_scroll = self.query_one("#prompt-content", VerticalScroll)
+        prompt_scroll.query_one(Static).update(self._get_current_prompt())
+
+        # Update completion
+        completion_scroll = self.query_one("#completion-content", VerticalScroll)
+        completion_scroll.query_one(Static).update(self._get_current_completion())
+
+        # Update header with current example info
+        # Find the header static widget and update it
+        try:
+            header_widget = self.query_one("#header-info", Static)
+            header_widget.update(self._get_header_text())
+        except Exception:
+            pass  # Header might not be found, continue anyway
+
+        # Reset scroll positions
+        try:
+            prompt_scroll.scroll_y = 0
+            completion_scroll.scroll_y = 0
+        except Exception:
+            pass  # Scroll widgets might not be found, continue anyway
+
+    def action_prev_example(self) -> None:
+        """Navigate to previous example."""
+        if self.eval_data["prompts"]:
+            self.current_example = (self.current_example - 1) % len(
+                self.eval_data["prompts"]
+            )
+            self._update_display()
+
+    def action_next_example(self) -> None:
+        """Navigate to next example."""
+        if self.eval_data["prompts"]:
+            self.current_example = (self.current_example + 1) % len(
+                self.eval_data["prompts"]
+            )
+            self._update_display()
+
+    def action_first_example(self) -> None:
+        """Navigate to first example."""
+        if self.eval_data["prompts"]:
+            self.current_example = 0
+            self._update_display()
+
+    def action_last_example(self) -> None:
+        """Navigate to last example."""
+        if self.eval_data["prompts"]:
+            self.current_example = len(self.eval_data["prompts"]) - 1
+            self._update_display()
+
+    def action_quit(self) -> None:
+        """Quit the application."""
+        self.exit()
+
+
+def main():
+    app()
 
 
 if __name__ == "__main__":

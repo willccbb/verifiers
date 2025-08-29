@@ -33,6 +33,7 @@ dependencies = [
     "rich",
     "textual",
     "openai-agents>=0.0.7",
+    "typer>=0.16.1",
 ]
 
 [project.optional-dependencies]
