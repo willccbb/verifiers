@@ -363,7 +363,14 @@ class Environment(ABC):
             for col in inputs.column_names:
                 if col == "info":
                     # handle info column to ensure mutable dicts
-                    results_dict[col] = [dict(item) for item in inputs[col]]
+                    results[col] = []
+                    for item in inputs[col]:
+                        item_dict = dict(item)
+                        # Deserialize oai_tools if stored as JSON string
+                        if "oai_tools" in item_dict and isinstance(item_dict["oai_tools"], str):
+                            import json
+                            item_dict["oai_tools"] = json.loads(item_dict["oai_tools"])
+                        results[col].append(item_dict)
                 else:
                     results_dict[col] = deepcopy(inputs[col])
         else:
