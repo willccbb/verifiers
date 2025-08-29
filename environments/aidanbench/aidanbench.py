@@ -122,7 +122,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
     """
     Multi-turn Environment that replicates AidanBench’s generation loop:
     - Repeatedly ask for novel answers to the same question
-    - After each model response, compute coherence (o1-mini judge) and novelty (embeddings)
+    - After each model response, compute coherence (gpt-5-nano judge) and novelty (embeddings)
     - Stop when any threshold fails; reward = number of valid answers
     """
 
@@ -136,10 +136,10 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         reasoning_effort: Optional[str] = None,
         max_turns: int = 20,
         num_questions: int | None = None,
-        # Judge configuration
-        judge_model: str = "o1-mini",
-        judge_api_base_url: str = "https://openrouter.ai/api/v1",
-        judge_api_key_var: str = "OPEN_ROUTER_KEY",
+        # Judge configuration (default to OpenAI for consistency)
+        judge_model: str = "gpt-5-nano",
+        judge_api_base_url: str = "https://api.openai.com/v1",
+        judge_api_key_var: str = "OPENAI_API_KEY",
         # Embedding configuration
         embedding_model: str = "text-embedding-3-large",
         embedding_api_base_url: str = "https://api.openai.com/v1",
@@ -154,22 +154,16 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         }
         self.use_llm_similarity = use_llm_similarity
         self.reasoning_effort = reasoning_effort
-        # Judge client/config
+        # Judge client/config (lazy init)
         self.judge_model = judge_model
-        judge_key = os.getenv(judge_api_key_var, "")
-        if not judge_key:
-            raise ValueError(
-                f"Environment requires judge API key: set {judge_api_key_var} in your environment."
-            )
-        self.judge_client = AsyncOpenAI(api_key=judge_key, base_url=judge_api_base_url)
-        # Embedding client/config
+        self._judge_api_base_url = judge_api_base_url
+        self._judge_api_key_var = judge_api_key_var
+        self.judge_client: AsyncOpenAI | None = None
+        # Embedding client/config (lazy init)
         self.embedding_model = embedding_model
-        embed_key = os.getenv(embedding_api_key_var, "")
-        if not embed_key:
-            raise ValueError(
-                f"Environment requires embedding API key: set {embedding_api_key_var} in your environment."
-            )
-        self.embed_client = AsyncOpenAI(api_key=embed_key, base_url=embedding_api_base_url)
+        self._embedding_api_base_url = embedding_api_base_url
+        self._embedding_api_key_var = embedding_api_key_var
+        self.embed_client: AsyncOpenAI | None = None
 
         # Build dataset from (in priority): provided dataset > questions arg > questions_path > AidanBench local > fallback
         if dataset is None:
@@ -216,7 +210,8 @@ class AidanBenchEnv(vf.MultiTurnEnv):
                     return y
                 dataset = dataset.map(_map_row)
 
-        # Default rubric: count valid answers; also log average coherence/novelty as metrics
+        # Default rubric: count valid answers; track format + average coherence/novelty as metrics
+        parser = vf.XMLParser(["answer"], answer_field="answer")
         def aidanbench_score(state, **kwargs) -> float:
             answers = state.get("aidanbench", {}).get("answers", [])
             return float(len(answers))
@@ -234,13 +229,20 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             return float(sum(scores) / len(scores)) if scores else 0.0
 
         rubric = vf.Rubric(
-            funcs=[aidanbench_score, avg_coherence, avg_embedding_novelty, avg_llm_novelty],
-            weights=[1.0, 0.0, 0.0, 0.0],
+            funcs=[
+                aidanbench_score,
+                parser.get_format_reward_func(),  # track XML tag adherence (weight 0)
+                avg_coherence,
+                avg_embedding_novelty,
+                avg_llm_novelty,
+            ],
+            weights=[1.0, 0.0, 0.0, 0.0, 0.0],
         )
 
         super().__init__(
             dataset=dataset,
             rubric=rubric,
+            parser=parser,
             message_type="chat",
             max_turns=max_turns,
             **kwargs,
@@ -313,10 +315,10 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         # Record metrics for this attempt (accepted or not)
         passed = (
             coherence_score > self.thresholds["coherence_score"]
-            and embedding_novelty >= self.thresholds["embedding_dissimilarity_score"]
+            and embedding_novelty > self.thresholds["embedding_dissimilarity_score"]
             and (
                 (not self.use_llm_similarity)
-                or (llm_novelty >= self.thresholds["llm_dissimilarity_score"])
+                or (llm_novelty > self.thresholds["llm_dissimilarity_score"])
             )
         )
 
@@ -387,6 +389,17 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             "<coherence_score>75</coherence_score>\n\n"
             "Do not include any additional text in your response."
         )
+        # Lazy init judge client
+        if self.judge_client is None:
+            judge_key = os.getenv(self._judge_api_key_var, "")
+            if not judge_key:
+                raise ValueError(
+                    f"Missing judge API key. Set {self._judge_api_key_var} in your environment."
+                )
+            self.judge_client = AsyncOpenAI(
+                api_key=judge_key, base_url=self._judge_api_base_url
+            )
+
         resp = await self.judge_client.chat.completions.create(
             model=self.judge_model, messages=[{"role": "user", "content": prompt}]
         )
@@ -414,6 +427,17 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             "<similarity_score>75</similarity_score>\n\n"
             "Do not include any additional text in your response."
         )
+        # Lazy init judge client
+        if self.judge_client is None:
+            judge_key = os.getenv(self._judge_api_key_var, "")
+            if not judge_key:
+                raise ValueError(
+                    f"Missing judge API key. Set {self._judge_api_key_var} in your environment."
+                )
+            self.judge_client = AsyncOpenAI(
+                api_key=judge_key, base_url=self._judge_api_base_url
+            )
+
         resp = await self.judge_client.chat.completions.create(
             model=self.judge_model, messages=[{"role": "user", "content": prompt}]
         )
@@ -425,6 +449,17 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         return score / 100.0
 
     async def _embed(self, text: str) -> List[float]:
+        # Lazy init embed client
+        if self.embed_client is None:
+            embed_key = os.getenv(self._embedding_api_key_var, "")
+            if not embed_key:
+                raise ValueError(
+                    f"Missing embedding API key. Set {self._embedding_api_key_var} in your environment."
+                )
+            self.embed_client = AsyncOpenAI(
+                api_key=embed_key, base_url=self._embedding_api_base_url
+            )
+
         resp = await self.embed_client.embeddings.create(
             model=self.embedding_model, input=[text]
         )
