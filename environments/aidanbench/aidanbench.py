@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import asyncio
 import json
 from typing import List, Tuple, Optional
@@ -10,33 +9,77 @@ import verifiers as vf
 from datasets import Dataset
 from openai import AsyncOpenAI
 
-
-# Try to make the sibling AidanBench repo importable if present locally
-_THIS_DIR = os.path.dirname(__file__)
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
-_AIDANBENCH_PATH = os.path.join(_REPO_ROOT, "AidanBench")
-if os.path.isdir(_AIDANBENCH_PATH) and _REPO_ROOT not in sys.path:
-    sys.path.append(_REPO_ROOT)
-
+# Use the bundled question list; no external repo dependency
 try:
-    # Prefer our bundled canonical list
     from .question_list import questions as LOCAL_QUESTIONS
 except Exception:
     LOCAL_QUESTIONS = []  # type: ignore
 
-try:
-    # Fallback: use AidanBench's canonical question list if available locally
-    from AidanBench.benchmark.question_list import questions as AIDANBENCH_QUESTIONS
-except Exception:
-    AIDANBENCH_QUESTIONS = []  # type: ignore
-
-# Minimal fallback questions so the environment runs without the AidanBench repo
+# Fallback questions if the local list fails to import (full list)
 DEFAULT_QUESTIONS: List[str] = [
-    "What is a novel way to reduce urban traffic congestion without building new roads?",
-    "How might libraries reinvent themselves to become hubs of 21st-century innovation?",
-    "Design a creative public space that fosters spontaneous collaboration among strangers.",
-    "What new use case could transform grocery stores into digital-first experiences?",
-    "How could cities repurpose unused nighttime infrastructure for daytime community value?",
+    "Provide an explanation for Japan's Lost Decades.",
+    "What is a cause of World War 1?",
+    "Why might the United States government nationalize ASI development?",
+    "How might you use a brick and a blanket?",
+    "What architectural design features should be included in a tasteful home?",
+    "What's one way to use oregano?",
+    "How might we enable LLMs to spend more output tokens to get predictably better results?",
+    "Propose a solution to Los Angeles traffic.",
+    "What activities might I include at a party for firefighters?",
+    "Why did Rome fall?",
+    "How could we redesign the American education system to better prepare students for the 22nd century?",
+    "What might be an unexpected consequence of achieving nuclear fusion?",
+    "Describe a plausible alien life form that doesn't rely on carbon-based biology.",
+    "How could we modify the rules of chess to make it more exciting for spectators?",
+    "What would be the implications of a universal basic income on American society?",
+    "Propose an alternative to democracy for successfully and fairly governing a country.",
+    "How might we terraform Venus instead of Mars, and why?",
+    "Design an original sport that combines elements of three existing sports.",
+    "What could be a novel use for blockchain technology outside of cryptocurrency?",
+    "How might human evolution be affected by long term space colonization?",
+    "Invent a new musical instrument and describe how it would be played.",
+    "What might be an unexpected solution to reducing plastic waste in oceans?",
+    "How might we design a city that functions entirely underwater?",
+    "What societal changes might occur if humans could communicate with animals?",
+    "I have a fleet of 100 drones, how can I use them?",
+    "Describe a sustainable farming method that could be used in a floating city.",
+    "If all industrial buildings were required to be bioluminescent, what effects might this have?",
+    "Invent a device that translates human dreams into tangible visualizations.",
+    "How might daily life change if humans had the ability to breathe underwater?",
+    "Create a recipe for a smoothie to have first thing in the morning that will give me energy.",
+    "What new environmental challenges might arise if all vehicles were self-driving?",
+    "Design a fashion line that incorporates smart clothing technology.",
+    "Imagine a world where books are replaced by holographic storytelling; what impacts might this have?",
+    "What might be the implications of having robots as therapists?",
+    "Propose a system for energy-harvesting from natural disasters.",
+    "How might the education system be revolutionized by virtual reality classrooms?",
+    "What unique challenges might arise in a society where everyone lives to be 150 years old?",
+    "Describe a mobile app that encourages acts of kindness.",
+    "Give me a diet that a human should eat to best prepare them for a hypothetical hibernation.",
+    "Imagine a competition where contestants build habitats for animals; what might be included?",
+    "What might be the benefits of reintroducing dinosaurs into modern ecosystems?",
+    "Propose a mechanism for reducing food waste through technological innovation.",
+    "Design a city where all modes of transportation are vertically oriented.",
+    "What is a useless ingredient for a baker to have in their kitchen?",
+    "Imagine a civilization based entirely on underwater agriculture; what technology might be required?",
+    "How might public health improve if all houses had healing gardens?",
+    "Describe how to build a time travel machine assuming I can procure any required material.",
+    "Create a concept for a museum that showcases possible futures.",
+    "What would be the impact of a government mandating weekly mental health days?",
+    "Invent a game that teaches players about sustainable living.",
+    "How could we design a school that encourages lifelong learning from adults as well as children?",
+    "Describe a new form of professional sports that focuses on non-physical competition.",
+    "Devise a farming technique to harvest dinoflagellates and retain their bioluminescence.",
+    "How can a perfumer increase the sillage of their scent?",
+    "What can an artist who enjoys Basquiat’s art take inspiration from?",
+    "Provide a proof for the Pythagorean theorem.",
+    "A perfumer is creating a unique, unisex scent with benzoin and vanilla middle notes, what base and top notes should they add?",
+    "What is a non poisonous recipe nobody has prepared before?",
+    "Design an earring that would complement someone with a round face and small ears.",
+    "Devise a strategy for me to always find gems when I mine in Webkinz World’s mines.",
+    "What is a human value to align a large language model on?",
+    "Give me a proof to Euclid's theorem of the infinitude of primes.",
+    "Give a proof for the Cauchy-Schwarz Inequality.",
 ]
 
 
@@ -46,29 +89,16 @@ def _extract_tag(text: str, tag: str) -> str:
     return matches[-1].strip() if matches else text
 
 
-def _build_prompt(question: str, prev_answers: List[str], chain_of_thought: bool) -> str:
+def _build_prompt(
+    question: str,
+    prev_answers: List[str],
+    reasoning_effort: Optional[str] = None,
+) -> str:
     base_prompt = (
         "Answer the following question:.\n"
         "<question>" + question + "</question>\n"
         "Provide your answer in <answer></answer> XML tags.\n"
     )
-
-    if chain_of_thought:
-        base_prompt += (
-            "Let's approach this methodically:\n\n"
-            "1. First, carefully review any previous answers to avoid repetition:\n"
-            "- Analyze the core concepts and themes already covered\n"
-            "- Identify unexplored angles and perspectives\n\n"
-            "2. Brainstorm fresh approaches:\n"
-            "- Generate multiple unique possibilities\n"
-            "- Consider unconventional but valid perspectives\n"
-            "- Look for interesting connections or insights\n\n"
-            "3. Develop your chosen idea:\n"
-            "- Reason through the logic step-by-step\n"
-            "- Validate your reasoning\n\n"
-            "Show your complete thinking process in <thoughts></thoughts> XML tags.\n"
-            "When ready, provide your final response in <answer></answer> XML tags.\n"
-        )
 
     base_prompt += (
         "Your response should be one direct answer. Only provide one answer. "
@@ -103,7 +133,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         questions_path: Optional[str] = None,
         thresholds: dict | None = None,
         use_llm_similarity: bool = False,
-        chain_of_thought: bool = False,
+        reasoning_effort: Optional[str] = None,
         max_turns: int = 20,
         num_questions: int | None = None,
         # Judge configuration
@@ -123,7 +153,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             "llm_dissimilarity_score": 0.15,
         }
         self.use_llm_similarity = use_llm_similarity
-        self.chain_of_thought = chain_of_thought
+        self.reasoning_effort = reasoning_effort
         # Judge client/config
         self.judge_model = judge_model
         judge_key = os.getenv(judge_api_key_var, "")
@@ -163,8 +193,6 @@ class AidanBenchEnv(vf.MultiTurnEnv):
                     qlist = []
             elif LOCAL_QUESTIONS:
                 qlist = LOCAL_QUESTIONS
-            elif AIDANBENCH_QUESTIONS:
-                qlist = AIDANBENCH_QUESTIONS
             else:
                 qlist = DEFAULT_QUESTIONS
 
@@ -172,7 +200,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
                 qlist = qlist[: num_questions]
 
             def fmt_example(q: str):
-                prompt = [{"role": "user", "content": _build_prompt(q, [], self.chain_of_thought)}]
+                prompt = [{"role": "user", "content": _build_prompt(q, [], self.reasoning_effort)}]
                 return {"prompt": prompt, "answer": "", "info": {"question": q}, "task": "aidanbench"}
 
             data = [fmt_example(q) for q in qlist]
@@ -182,7 +210,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             if "prompt" not in dataset.column_names and "question" in dataset.column_names:
                 def _map_row(x):
                     q = x["question"]
-                    p = [{"role": "user", "content": _build_prompt(q, [], self.chain_of_thought)}]
+                    p = [{"role": "user", "content": _build_prompt(q, [], self.reasoning_effort)}]
                     y = dict(x)
                     y["prompt"] = p
                     return y
@@ -225,7 +253,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         few_shot: list[dict] | None = None,
     ) -> list[dict]:
         # Override to inject AidanBench base prompt structure for the first turn
-        return [{"role": "user", "content": _build_prompt(prompt_str, [], self.chain_of_thought)}]
+        return [{"role": "user", "content": _build_prompt(prompt_str, [], self.reasoning_effort)}]
 
     async def setup_state(self, state: vf.State, **kwargs) -> vf.State:
         # Initialize tracking for AidanBench metrics
@@ -316,7 +344,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         # Provide a new user prompt instructing the model to avoid previous answers
         question = state.get("info", {}).get("question", "")
         prev_answers: List[str] = state["aidanbench"]["answers"]
-        next_prompt = _build_prompt(question, prev_answers, self.chain_of_thought)
+        next_prompt = _build_prompt(question, prev_answers, self.reasoning_effort)
         return ([{"role": "user", "content": next_prompt}], state)
 
     # -----------------------
