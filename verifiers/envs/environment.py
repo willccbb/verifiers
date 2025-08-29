@@ -245,6 +245,7 @@ class Environment(ABC):
                 return response
         except Exception as e:
             self.logger.error(f"Error getting model response: {e} \n\nExiting...")
+            # Re-raise the exception so it can be properly handled upstream
             raise e
 
     @abstractmethod
@@ -397,31 +398,75 @@ class Environment(ABC):
             reward=[],
             metrics={},
         )
-        rollouts = await self.run_rollouts(
-            prompts=results.prompt,
-            answers=results.answer,
-            tasks=results.task,
-            infos=results.info,
-            client=client,
-            model=model,
-            sampling_args=gen_sampling_args,
-            max_concurrent=max_concurrent,
-            **kwargs,
-        )
-        results.completion = [rollout[0] for rollout in rollouts]
-        results.state = [rollout[1] for rollout in rollouts]
-        if score_rollouts:
-            rollout_scores = await self.rubric.score_rollouts(
+        
+        # Run rollouts with proper error handling
+        try:
+            rollouts = await self.run_rollouts(
                 prompts=results.prompt,
-                completions=results.completion,
                 answers=results.answer,
-                states=results.state,
                 tasks=results.task,
                 infos=results.info,
+                client=client,
+                model=model,
+                sampling_args=gen_sampling_args,
+                max_concurrent=max_concurrent,
+                **kwargs,
+            )
+        except Exception as e:
+            self.logger.error(f"Error during rollouts: {e}")
+            # Re-raise to let the calling function handle it appropriately
+            raise e
+            
+        results.completion = [rollout[0] for rollout in rollouts]
+        results.state = [rollout[1] for rollout in rollouts]
+        
+        # Filter out any completions that contain error messages
+        valid_indices = []
+        filtered_completions = []
+        filtered_states = []
+        
+        for i, (completion, state) in enumerate(zip(results.completion, results.state)):
+            # Check if completion contains error indicators
+            has_error = False
+            if isinstance(completion, list):  # Chat format
+                for msg in completion:
+                    if isinstance(msg.get("content", ""), str) and "[ERROR]" in msg.get("content", ""):
+                        has_error = True
+                        break
+            elif isinstance(completion, str) and "[ERROR]" in completion:  # Completion format
+                has_error = True
+                
+            if not has_error:
+                valid_indices.append(i)
+                filtered_completions.append(completion)
+                filtered_states.append(state)
+            else:
+                self.logger.warning(f"Skipping rollout {i} due to error in completion")
+        
+        # Only score valid rollouts
+        if score_rollouts and filtered_completions:
+            # Create filtered inputs for scoring
+            filtered_prompts = [results.prompt[i] for i in valid_indices]
+            filtered_answers = [results.answer[i] for i in valid_indices]
+            filtered_tasks = [results.task[i] for i in valid_indices]
+            filtered_infos = [results.info[i] for i in valid_indices]
+            
+            rollout_scores = await self.rubric.score_rollouts(
+                prompts=filtered_prompts,
+                completions=filtered_completions,
+                answers=filtered_answers,
+                states=filtered_states,
+                tasks=filtered_tasks,
+                infos=filtered_infos,
                 apply_weights=True,
             )
+            
+            # Reconstruct results with proper indexing
+            results.completion = filtered_completions
+            results.state = filtered_states
             results.reward = rollout_scores.reward
             results.metrics = rollout_scores.metrics
+            
         return results
 
     def generate(
