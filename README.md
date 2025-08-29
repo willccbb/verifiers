@@ -21,7 +21,7 @@ Full documentation is available [here](https://verifiers.readthedocs.io/en/lates
 We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv init # create a fresh project
+uv venv # create a fresh virtualenv
 source .venv/bin/activate
 ```
 
