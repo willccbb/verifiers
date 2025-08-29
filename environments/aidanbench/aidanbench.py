@@ -48,9 +48,14 @@ def _build_prompt(
             [f"<previous_answer id='{i+1}'>\n{ans}\n</previous_answer>" for i, ans in enumerate(prev_answers)]
         )
         base_prompt += (
-            "IMPORTANT: Provide an answer you *HAVE NOT* given previously.\n"
-            "Your previous answers are inside of <previous_answers></previous_answers> XML tags.\n"
-            "<previous_answers>\n" + prev_str + "\n</previous_answers>"
+            "\n\n=== CRITICAL CONSTRAINT ===\n"
+            "You MUST provide a COMPLETELY DIFFERENT answer from any you have given before.\n"
+            "DO NOT repeat, rephrase, or give semantically similar answers.\n"
+            "Think of a TOTALLY DIFFERENT approach, perspective, or solution.\n"
+            "Your answer must be NOVEL and DISTINCT from all previous responses.\n"
+            "\nYour previous answers that you MUST AVOID:\n"
+            "<previous_answers>\n" + prev_str + "\n</previous_answers>\n"
+            "\nREMEMBER: Your new answer must be completely different in meaning and content."
         )
 
     return base_prompt
@@ -60,7 +65,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
     """
     Multi-turn Environment that replicates AidanBench’s generation loop:
     - Repeatedly ask for novel answers to the same question
-    - After each model response, compute coherence (gpt-5-nano judge) and novelty (embeddings)
+    - After each model response, compute coherence (o1-mini judge) and novelty (embeddings)
     - Stop when any threshold fails; reward = number of valid answers
     """
 
@@ -74,8 +79,12 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         reasoning_effort: Optional[str] = None,
         max_turns: int = 20,
         num_questions: int | None = None,
+        reward_mode: str = "count",
+        debug_second: bool = False,
+        debug_print_answers: bool = False,
+        debug_print_prompts: bool = False,
         # Judge configuration (default to OpenAI for consistency)
-        judge_model: str = "gpt-5-nano",
+        judge_model: str = "o1-mini",
         judge_api_base_url: str = "https://api.openai.com/v1",
         judge_api_key_var: str = "OPENAI_API_KEY",
         # Embedding configuration
@@ -92,6 +101,10 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         }
         self.use_llm_similarity = use_llm_similarity
         self.reasoning_effort = reasoning_effort
+        self.debug_second = debug_second
+        self.debug_print_answers = debug_print_answers
+        self.debug_print_prompts = debug_print_prompts
+        self.debug_print_answers = debug_print_answers
         # Judge client/config (lazy init)
         self.judge_model = judge_model
         self._judge_api_base_url = judge_api_base_url
@@ -150,7 +163,7 @@ class AidanBenchEnv(vf.MultiTurnEnv):
                     return y
                 dataset = dataset.map(_map_row)
 
-        # Default rubric: count valid answers; track format + average coherence/novelty as metrics
+        # Default rubric: count valid answers; track format + average/sum coherence/novelty as metrics
         parser = vf.XMLParser(["answer"], answer_field="answer")
         def aidanbench_score(state, **kwargs) -> float:
             answers = state.get("aidanbench", {}).get("answers", [])
@@ -164,20 +177,27 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             scores = state.get("aidanbench", {}).get("embedding_novelty_scores", [])
             return float(sum(scores) / len(scores)) if scores else 0.0
 
+        def sum_embedding_novelty(state, **kwargs) -> float:
+            scores = state.get("aidanbench", {}).get("embedding_novelty_scores", [])
+            return float(sum(scores)) if scores else 0.0
+
         def avg_llm_novelty(state, **kwargs) -> float:
             scores = state.get("aidanbench", {}).get("llm_novelty_scores", [])
             return float(sum(scores) / len(scores)) if scores else 0.0
 
-        rubric = vf.Rubric(
-            funcs=[
-                aidanbench_score,
-                parser.get_format_reward_func(),  # track XML tag adherence (weight 0)
-                avg_coherence,
-                avg_embedding_novelty,
-                avg_llm_novelty,
-            ],
-            weights=[1.0, 0.0, 0.0, 0.0, 0.0],
-        )
+        funcs = [
+            aidanbench_score,
+            parser.get_format_reward_func(),  # track XML tag adherence (weight 0)
+            avg_coherence,
+            avg_embedding_novelty,
+            sum_embedding_novelty,
+            avg_llm_novelty,
+        ]
+        if reward_mode == "novelty_sum":
+            weights = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        else:
+            weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        rubric = vf.Rubric(funcs=funcs, weights=weights)
 
         super().__init__(
             dataset=dataset,
@@ -205,11 +225,29 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         state["aidanbench"].setdefault("embedding_novelty_scores", [])
         state["aidanbench"].setdefault("llm_novelty_scores", [])
         state["aidanbench"].setdefault("termination_reason", "")
+        # Debug initial prompt
+        if self.debug_print_prompts:
+            try:
+                msgs = state.get("prompt", [])
+                if isinstance(msgs, list):
+                    for m in msgs:
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            print(f"[AidanBench][prompt t=1]\n{m.get('content','')}")
+                            break
+            except Exception:
+                pass
         return state
 
     async def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
         # Wait until we have at least one model response
         if state["turn"] == 0:
+            return False
+
+        # Avoid re-evaluating the same assistant message across loop iterations.
+        # We evaluate the last assistant right after generation (when turn increments).
+        # At the beginning of the next loop, turn hasn't changed yet, so guard here.
+        last_eval_turn = state["aidanbench"].get("last_evaluated_turn", -1)
+        if last_eval_turn == state["turn"]:
             return False
 
         # Extract the last assistant answer
@@ -262,12 +300,28 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             )
         )
 
+        # Debug prints
+        if self.debug_second and len(prev_answers) == 1:
+            print(
+                f"[AidanBench][debug] Second answer -> C={coherence_score:.1f} (>{self.thresholds['coherence_score']}), "
+                f"N={embedding_novelty:.3f} (>{self.thresholds['embedding_dissimilarity_score']}) | Pass={passed}"
+            )
+        if self.debug_print_answers and len(prev_answers) == 0 and passed:
+            print(f"[AidanBench][answers] Q: {question}\n  1) {new_answer}")
+        if self.debug_print_answers and len(prev_answers) == 1:
+            first = prev_answers[0]
+            status = "ACCEPTED" if passed else "REJECTED"
+            print(f"[AidanBench][answers] Q: {question}\n  1) {first}\n  2) {new_answer}  <-- {status}")
+
         if passed:
             state["aidanbench"]["answers"].append(new_answer)
             state["aidanbench"]["coherence_scores"].append(coherence_score)
             state["aidanbench"]["embedding_novelty_scores"].append(embedding_novelty)
             if self.use_llm_similarity:
                 state["aidanbench"]["llm_novelty_scores"].append(llm_novelty)
+            print(f"[AidanBench][DEBUG] Answer ACCEPTED, continuing (turn={state.get('turn', 'unknown')}, total_answers={len(state['aidanbench']['answers'])})")
+            # Mark that we've evaluated the assistant message for this turn
+            state["aidanbench"]["last_evaluated_turn"] = state["turn"]
             return False
         else:
             reason = []
@@ -278,6 +332,8 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             if self.use_llm_similarity and llm_novelty < self.thresholds["llm_dissimilarity_score"]:
                 reason.append("low_llm_novelty")
             state["aidanbench"]["termination_reason"] = ",".join(reason) or "threshold"
+            # Mark that we've evaluated the assistant message for this turn
+            state["aidanbench"]["last_evaluated_turn"] = state["turn"]
             return True
 
     async def env_response(
@@ -287,6 +343,12 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         question = state.get("info", {}).get("question", "")
         prev_answers: List[str] = state["aidanbench"]["answers"]
         next_prompt = _build_prompt(question, prev_answers, self.reasoning_effort)
+        print(f"[AidanBench][DEBUG] env_response called, turn={state.get('turn', 'unknown')}, prev_answers={len(prev_answers)}")
+        if self.debug_print_prompts:
+            try:
+                print(f"[AidanBench][prompt t={state['turn']+1}]\n{next_prompt}")
+            except Exception:
+                pass
         return ([{"role": "user", "content": next_prompt}], state)
 
     # -----------------------

@@ -40,6 +40,7 @@ uv run vf-eval aidanbench -m gpt-4.1-mini -n 2 -r 2 \
 - `questions` (list[str]): custom questions.
 - `questions_path` (str): JSON list or text file (one per line).
 - `num_questions` (int): truncate to N.
+- `reward_mode` (str): `"count"` (default) or `"novelty_sum"` (sum of embedding novelty over accepted answers).
 - `judge_model` (str): default `"o1-mini"`.
 - `judge_api_base_url` (str): default `"https://api.openai.com/v1"`.
 - `judge_api_key_var` (str): default `"OPENAI_API_KEY"`.
@@ -54,11 +55,14 @@ uv run vf-eval aidanbench -m gpt-4.1-mini -n 2 -r 2 \
 - `format_reward`: adherence to `<answer>...</answer>` tag (tracked, weight 0).
 - `avg_coherence`: mean judge score over accepted answers.
 - `avg_embedding_novelty`: mean embedding novelty (1 - max cosine sim) over accepted answers.
+- `sum_embedding_novelty`: sum of embedding novelty over accepted answers (used as reward when `reward_mode="novelty_sum"`).
 - `avg_llm_novelty`: mean LLM similarity novelty when enabled.
 
 ### Notes
 - Thresholds match AidanBench: terminate when `C <= 15` or `N <= 0.15` (strict `>` pass checks).
-- `vf-eval` prints averages; to mirror AidanBench’s total score, sum the per‑example rewards across prompts.
+- `vf-eval` prints averages; to mirror AidanBench’s total score:
+  - If `reward_mode="count"`: sum per-example rewards (valid answers count).
+  - If `reward_mode="novelty_sum"`: sum per-example rewards which equal novelty sums.
 
 ## Evaluation Reports
 
