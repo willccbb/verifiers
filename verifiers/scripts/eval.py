@@ -2,6 +2,7 @@ import argparse
 import importlib
 import importlib.util
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -34,6 +35,9 @@ def eval_environment(
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
 ):
+    # Setup logger for this function
+    logger = logging.getLogger(__name__)
+    
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():
@@ -42,27 +46,39 @@ def eval_environment(
             endpoints_file = endpoints_path_obj
 
         if endpoints_file.exists():
+            logger.info(f"Loading endpoint registry from {endpoints_file}")
             spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
             assert spec and spec.loader
             endpoints_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(endpoints_module)
             ENDPOINTS = endpoints_module.ENDPOINTS
+            logger.info(f"Successfully loaded {len(ENDPOINTS)} endpoints from registry")
         else:
             raise ImportError(f"endpoints.py not found at {endpoints_file}")
-    except (ImportError, AttributeError):
-        print(
-            f"No local endpoint registry found at {endpoints_path}. \
-Please specify the model name (-m), API host base URL (-b), and API key variable name (-k)."
+    except (ImportError, AttributeError) as e:
+        logger.warning(
+            f"No local endpoint registry found at {endpoints_path}. "
+            f"Please specify the model name (-m), API host base URL (-b), and API key variable name (-k). "
+            f"Error details: {str(e)}"
         )
+        logger.info("Using default empty endpoints registry")
         ENDPOINTS = {}
 
     if model in ENDPOINTS:
         api_key_var = ENDPOINTS[model]["key"]
         api_base_url = ENDPOINTS[model]["url"]
         model = ENDPOINTS[model]["model"]
+        logger.info(f"Using endpoint configuration for model '{model}' from registry")
+    else:
+        logger.info(f"Model '{model}' not found in endpoint registry, using command-line arguments")
 
-    client = OpenAI(api_key=os.getenv(api_key_var, "EMPTY"), base_url=api_base_url)
+    api_key_value = os.getenv(api_key_var, "EMPTY")
+    client = OpenAI(api_key=api_key_value, base_url=api_base_url)
+    logger.info(f"Initialized OpenAI client with base_url: {api_base_url}")
+    
+    logger.info(f"Loading environment: {env}")
     vf_env = vf.load_environment(env_id=env, **env_args)
+    logger.info(f"Successfully loaded environment: {env}")
     # Merge sampling args with precedence to JSON payload over explicit flags
     merged_sampling_args: dict = {}
     if sampling_args is not None:
@@ -71,6 +87,10 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         merged_sampling_args["max_tokens"] = max_tokens
     if temperature is not None and "temperature" not in merged_sampling_args:
         merged_sampling_args["temperature"] = temperature
+    
+    logger.info(f"Starting evaluation with model: {model}")
+    logger.info(f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent_requests={max_concurrent_requests}")
+    
     results = vf_env.evaluate(
         client=client,
         model=model,
@@ -79,21 +99,22 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         rollouts_per_example=rollouts_per_example,
         max_concurrent_requests=max_concurrent_requests,
     )
-    print("--- Evaluation ---")
-    print(f"Environment: {env}")
-    print(f"Model: {model}")
-    print(f"Provider: {api_base_url}")
-    print(f"Examples: {num_examples}")
-    print(f"Rollouts per example: {rollouts_per_example}")
-    print("--- Example ---")
+    logger.info("Evaluation completed successfully")
+    logger.info("--- Evaluation ---")
+    logger.info(f"Environment: {env}")
+    logger.info(f"Model: {model}")
+    logger.info(f"Provider: {api_base_url}")
+    logger.info(f"Examples: {num_examples}")
+    logger.info(f"Rollouts per example: {rollouts_per_example}")
+    logger.info("--- Example ---")
     printable_prompts = [messages_to_printable(p) for p in results.prompt]
     printable_completions = [messages_to_printable(c) for c in results.completion]
     vf.print_prompt_completions_sample(
         printable_prompts, printable_completions, results.reward, step=0
     )
-    print("--- All ---")
-    print("Rewards:")
-    print(
+    logger.info("--- All ---")
+    logger.info("Rewards:")
+    logger.info(
         f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
     )
     n = num_examples
@@ -105,15 +126,15 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]
         out = f"r{i + 1}: {trials}"
-        print(out)
+        logger.info(out)
     for k in results.metrics:
         v = results.metrics[k]
-        print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        logger.info(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
         for i in range(r):
             # rounded to 3 decimal places
             trials = [round(v[(i * n) + j], 3) for j in range(n)]
             out = f"r{i + 1}: {trials}"
-            print(out)
+            logger.info(out)
 
     if save_dataset or save_to_hf_hub:
         ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
@@ -164,7 +185,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             with open(results_path / "metadata.json", "w") as f:
                 json.dump(metadata, f)
 
-            print(f"Saved dataset to {results_path}")
+            logger.info(f"Saved dataset to {results_path}")
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
                 dataset_name = (
@@ -173,7 +194,7 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             else:
                 dataset_name = hf_hub_dataset_name
             dataset.push_to_hub(dataset_name)
-            print(f"Saved dataset to Hugging Face Hub: {dataset_name}")
+            logger.info(f"Saved dataset to Hugging Face Hub: {dataset_name}")
 
 
 def main():
@@ -289,6 +310,13 @@ def main():
         help="Name of dataset to save to Hugging Face Hub",
     )
     args = parser.parse_args()
+
+    # Setup logging based on verbose flag
+    log_level = "DEBUG" if args.verbose else "INFO"
+    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logger = logging.getLogger(__name__)
+    logger.info("Starting vf-eval with arguments")
+    logger.debug(f"Parsed arguments: {vars(args)}")
 
     eval_environment(
         env=args.env,
