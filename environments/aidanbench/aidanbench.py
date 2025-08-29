@@ -80,9 +80,6 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         max_turns: int = 20,
         num_questions: int | None = None,
         reward_mode: str = "count",
-        debug_second: bool = False,
-        debug_print_answers: bool = False,
-        debug_print_prompts: bool = False,
         # Judge configuration (default to OpenAI for consistency)
         judge_model: str = "o1-mini",
         judge_api_base_url: str = "https://api.openai.com/v1",
@@ -101,10 +98,6 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         }
         self.use_llm_similarity = use_llm_similarity
         self.reasoning_effort = reasoning_effort
-        self.debug_second = debug_second
-        self.debug_print_answers = debug_print_answers
-        self.debug_print_prompts = debug_print_prompts
-        self.debug_print_answers = debug_print_answers
         # Judge client/config (lazy init)
         self.judge_model = judge_model
         self._judge_api_base_url = judge_api_base_url
@@ -225,17 +218,6 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         state["aidanbench"].setdefault("embedding_novelty_scores", [])
         state["aidanbench"].setdefault("llm_novelty_scores", [])
         state["aidanbench"].setdefault("termination_reason", "")
-        # Debug initial prompt
-        if self.debug_print_prompts:
-            try:
-                msgs = state.get("prompt", [])
-                if isinstance(msgs, list):
-                    for m in msgs:
-                        if isinstance(m, dict) and m.get("role") == "user":
-                            print(f"[AidanBench][prompt t=1]\n{m.get('content','')}")
-                            break
-            except Exception:
-                pass
         return state
 
     async def is_completed(self, messages: vf.Messages, state: vf.State, **kwargs) -> bool:
@@ -300,26 +282,12 @@ class AidanBenchEnv(vf.MultiTurnEnv):
             )
         )
 
-        # Debug prints
-        if self.debug_second and len(prev_answers) == 1:
-            print(
-                f"[AidanBench][debug] Second answer -> C={coherence_score:.1f} (>{self.thresholds['coherence_score']}), "
-                f"N={embedding_novelty:.3f} (>{self.thresholds['embedding_dissimilarity_score']}) | Pass={passed}"
-            )
-        if self.debug_print_answers and len(prev_answers) == 0 and passed:
-            print(f"[AidanBench][answers] Q: {question}\n  1) {new_answer}")
-        if self.debug_print_answers and len(prev_answers) == 1:
-            first = prev_answers[0]
-            status = "ACCEPTED" if passed else "REJECTED"
-            print(f"[AidanBench][answers] Q: {question}\n  1) {first}\n  2) {new_answer}  <-- {status}")
-
         if passed:
             state["aidanbench"]["answers"].append(new_answer)
             state["aidanbench"]["coherence_scores"].append(coherence_score)
             state["aidanbench"]["embedding_novelty_scores"].append(embedding_novelty)
             if self.use_llm_similarity:
                 state["aidanbench"]["llm_novelty_scores"].append(llm_novelty)
-            print(f"[AidanBench][DEBUG] Answer ACCEPTED, continuing (turn={state.get('turn', 'unknown')}, total_answers={len(state['aidanbench']['answers'])})")
             # Mark that we've evaluated the assistant message for this turn
             state["aidanbench"]["last_evaluated_turn"] = state["turn"]
             return False
@@ -343,12 +311,6 @@ class AidanBenchEnv(vf.MultiTurnEnv):
         question = state.get("info", {}).get("question", "")
         prev_answers: List[str] = state["aidanbench"]["answers"]
         next_prompt = _build_prompt(question, prev_answers, self.reasoning_effort)
-        print(f"[AidanBench][DEBUG] env_response called, turn={state.get('turn', 'unknown')}, prev_answers={len(prev_answers)}")
-        if self.debug_print_prompts:
-            try:
-                print(f"[AidanBench][prompt t={state['turn']+1}]\n{next_prompt}")
-            except Exception:
-                pass
         return ([{"role": "user", "content": next_prompt}], state)
 
     # -----------------------
