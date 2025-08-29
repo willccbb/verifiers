@@ -371,7 +371,12 @@ class Environment(ABC):
         if "prompt" not in results_dict:
             raise ValueError("prompt column not found in inputs")
         if "answer" not in results_dict and "info" not in results_dict:
-            raise ValueError("answer or info column must be found in inputs")
+            self.logger.warning(
+                "Neither 'answer' nor 'info' column found in inputs. "
+                "Some environments can evaluate using only prompt/completion/state, "
+                "but reward functions requiring ground truth data may return 0.0. "
+                "Proceeding with empty values."
+            )
         if "answer" not in results_dict:
             results_dict["answer"] = [""] * len(results_dict["prompt"])
         if "task" not in results_dict:
