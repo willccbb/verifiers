@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from rich.markup import escape
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -126,6 +127,11 @@ def load_run_results(run: RunInfo) -> List[Dict[str, Any]]:
 # ----------------------------
 
 
+def safe_escape(text: str) -> str:
+    """Safely escape rich markup in user content."""
+    return escape(text) if text else ""
+
+
 def format_prompt_or_completion(prompt_or_completion) -> str:
     """Format completion for display."""
     if isinstance(prompt_or_completion, list):
@@ -136,11 +142,11 @@ def format_prompt_or_completion(prompt_or_completion) -> str:
             content = str(msg.get("content", ""))
             # Assistant in white, all others in grey
             if role == "assistant":
-                lines.append(f"[b]{role}:[/b] {content}")
+                lines.append(f"[b]{safe_escape(role)}:[/b] {safe_escape(content)}")
             elif role == "tool":
-                lines.append(f"[dim][b]tool result:[/b] {content}[/dim]")
+                lines.append(f"[dim][b]tool result:[/b] {safe_escape(content)}[/dim]")
             else:
-                lines.append(f"[dim][b]{role}:[/b] {content}[/dim]")
+                lines.append(f"[dim][b]{safe_escape(role)}:[/b] {safe_escape(content)}[/dim]")
             if "tool_calls" in msg and msg["tool_calls"]:
                 tool_calls_data = msg["tool_calls"]
                 if isinstance(tool_calls_data, list) and len(tool_calls_data) > 0 and isinstance(tool_calls_data[0], str):
@@ -155,13 +161,15 @@ def format_prompt_or_completion(prompt_or_completion) -> str:
                 
                 for tool_call in tool_calls_data:
                     if isinstance(tool_call, dict) and 'function' in tool_call:
+                        function_name = safe_escape(str(tool_call['function']['name']))
+                        function_args = safe_escape(str(tool_call['function']['arguments']))
                         lines.append(
-                            f"[b]tool call:[/b] {tool_call['function']['name']}\n{tool_call['function']['arguments']}"
+                            f"[b]tool call:[/b] {function_name}\n{function_args}"
                         )
                     elif isinstance(tool_call, str):
-                        lines.append(f"[b]tool call:[/b] {tool_call}")
+                        lines.append(f"[b]tool call:[/b] {safe_escape(tool_call)}")
         return "\n\n".join(lines)
-    return str(prompt_or_completion)
+    return safe_escape(str(prompt_or_completion))
 
 
 # ----------------------------
@@ -215,7 +223,7 @@ class SelectEnvScreen(Screen):
             total_runs = sum(len(runs) for runs in models.values())
             option_list.add_option(
                 Option(
-                    f"{env_id} - Models: {len(models)}, Runs: {total_runs}", id=env_id
+                    f"{safe_escape(env_id)} - Models: {len(models)}, Runs: {total_runs}", id=env_id
                 )
             )
 
@@ -254,7 +262,7 @@ class SelectModelScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
+                Label(f"[b]Environment:[/b] {safe_escape(self.env_id)}", classes="title"),
                 Label("Select Model", classes="subtitle"),
                 OptionList(id="model-list"),
             )
@@ -265,7 +273,7 @@ class SelectModelScreen(Screen):
 
         for model in self.models:
             runs = self.index[self.env_id][model]
-            option_list.add_option(Option(f"{model} - Runs: {len(runs)}", id=model))
+            option_list.add_option(Option(f"{safe_escape(model)} - Runs: {len(runs)}", id=model))
 
         option_list.focus()
 
@@ -312,8 +320,8 @@ class SelectRunScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
-                Label(f"[b]Model:[/b] {self.model}", classes="subtitle"),
+                Label(f"[b]Environment:[/b] {safe_escape(self.env_id)}", classes="title"),
+                Label(f"[b]Model:[/b] {safe_escape(self.model)}", classes="subtitle"),
                 Label("Select Run", classes="subtitle"),
                 OptionList(id="run-list"),
             )
@@ -332,7 +340,7 @@ class SelectRunScreen(Screen):
                 reward_str = f"Reward: {reward}"
 
             option_list.add_option(
-                Option(f"{run.run_id} - {datetime_str} | {reward_str}", id=str(i))
+                Option(f"{safe_escape(run.run_id)} - {safe_escape(datetime_str)} | {safe_escape(reward_str)}", id=str(i))
             )
 
         option_list.focus()
@@ -415,23 +423,23 @@ class ViewRunScreen(Screen):
 
         # Create three columns of information
         col1 = [
-            f"[b]Environment:[/b] {self.run.env_id}",
-            f"[b]Model:[/b] {self.run.model}",
-            f"[b]Run ID:[/b] {self.run.run_id}",
-            f"[b]Date:[/b] {meta.get('date', '')} {meta.get('time', '')}",
+            f"[b]Environment:[/b] {safe_escape(self.run.env_id)}",
+            f"[b]Model:[/b] {safe_escape(self.run.model)}",
+            f"[b]Run ID:[/b] {safe_escape(self.run.run_id)}",
+            f"[b]Date:[/b] {safe_escape(meta.get('date', ''))} {safe_escape(meta.get('time', ''))}",
         ]
 
         col2 = [
             f"[b]Record:[/b] {self.current_record_idx + 1}/{len(self.records)}",
-            f"[b]Examples:[/b] {meta.get('num_examples', '')}",
-            f"[b]Rollouts/ex:[/b] {meta.get('rollouts_per_example', '')}",
+            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples', '')))}",
+            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example', '')))}",
             "",  # Empty for alignment
         ]
 
         col3 = [
-            f"[b]Avg reward:[/b] {avg_reward_str}",
-            f"[b]Max tokens:[/b] {meta.get('max_tokens', '')}",
-            f"[b]Temperature:[/b] {meta.get('temperature', '')}",
+            f"[b]Avg reward:[/b] {safe_escape(avg_reward_str)}",
+            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens', '')))}",
+            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature', '')))}",
             "",  # Empty for alignment
         ]
 
@@ -481,16 +489,16 @@ class ViewRunScreen(Screen):
                 reward_str = f"{reward:.3f}"
             else:
                 reward_str = str(reward)
-            details_lines.append(f"[b]Reward:[/b] {reward_str}")
+            details_lines.append(f"[b]Reward:[/b] {safe_escape(reward_str)}")
         answer = record.get("answer", None)
         if answer not in (None, ""):
-            details_lines.append(f"[b]Answer:[/b] {answer}")
+            details_lines.append(f"[b]Answer:[/b] {safe_escape(str(answer))}")
         info = record.get("info", None)
         if info not in (None, {}):
-            details_lines.append(f"[b]Info:[/b] {str(info)}")
+            details_lines.append(f"[b]Info:[/b] {safe_escape(str(info))}")
         task = record.get("task", None)
         if task not in (None, ""):
-            details_lines.append(f"[b]Task:[/b] {task}")
+            details_lines.append(f"[b]Task:[/b] {safe_escape(str(task))}")
 
         details_widget = self.query_one("#details", Static)
         details_widget.update(
