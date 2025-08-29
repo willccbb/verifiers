@@ -62,7 +62,7 @@ uv run vf-eval aidanbench -m gpt-4.1-mini -n 2 -r 2 \
 - Thresholds match AidanBench: terminate when `C <= 15` or `N <= 0.15` (strict `>` pass checks).
 - `vf-eval` prints averages; to mirror AidanBench’s total score:
   - If `reward_mode="count"`: sum per-example rewards (valid answers count).
-  - If `reward_mode="novelty_sum"`: sum per-example rewards which equal novelty sums.
+  - If `reward_mode="novelty_sum"`: sum per-example rewards which equal novelty  sums.
 
 ## Evaluation Reports
 
