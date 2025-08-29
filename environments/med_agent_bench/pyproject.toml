@@ -1,0 +1,17 @@
+[project]
+name = "med-agent-bench"
+description = "Your environment description here"
+tags = ["placeholder-tag", "train", "eval"]
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "datasets",
+    "verifiers>=0.1.2.post1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["med_agent_bench.py"]
