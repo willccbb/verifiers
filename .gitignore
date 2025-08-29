@@ -2,7 +2,6 @@
 .venv/
 venv/
 env/
-verifiers_env/
 .env
 .env.local
 uv.lock
