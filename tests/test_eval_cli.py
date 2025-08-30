@@ -65,7 +65,6 @@ def test_cli_sampling_args_precedence_over_flags(monkeypatch):
             "max_tokens": 77,
             "temperature": 0.1,
         },
-        verbose=False,
         save_dataset=False,
         save_to_hf_hub=False,
         hf_hub_dataset_name="",
@@ -112,7 +111,6 @@ def test_cli_sampling_args_fill_from_flags_when_missing(monkeypatch):
         sampling_args={
             "enable_thinking": True,
         },
-        verbose=False,
         save_dataset=False,
         save_to_hf_hub=False,
         hf_hub_dataset_name="",
