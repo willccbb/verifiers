@@ -56,6 +56,7 @@ class Environment(ABC):
         max_workers: int = 512,
         **kwargs,
     ):
+        self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
         self.client = client
         self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
@@ -64,6 +65,10 @@ class Environment(ABC):
         self.few_shot = few_shot
         self.parser = parser or Parser()
         self.rubric = rubric or Rubric()
+        if self.parser.__class__ != self.rubric.parser.__class__:
+            self.logger.warning(
+                "The parser and rubric parser are different. This may cause unexpected behavior."
+            )
 
         if self.message_type == "chat":
             if dataset is not None:
@@ -98,7 +103,6 @@ class Environment(ABC):
                     self.sampling_args[key] = value
 
         self.max_workers = max_workers
-        self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
         for key, value in kwargs.items():
             setattr(self, key, value)
 
