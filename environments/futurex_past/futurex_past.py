@@ -93,6 +93,9 @@ def load_environment(
 
     # Preserve original columns so Environment.format_dataset retains 'answer' and 'info'.
     dataset = dataset.map(to_qa)  # type: ignore
+    # Ensure chat formatting runs by removing any pre-existing 'prompt' string column
+    if "prompt" in dataset.column_names:
+        dataset = dataset.remove_columns(["prompt"])  # type: ignore
 
     # Split into train/eval deterministically
     ds = dataset.shuffle(seed=42)  # type: ignore
