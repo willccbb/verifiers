@@ -32,6 +32,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "rich",
     "textual",
+    "typer>=0.16.1",
 ]
 
 [project.optional-dependencies]

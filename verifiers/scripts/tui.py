@@ -143,8 +143,13 @@ def format_prompt_or_completion(prompt_or_completion) -> str:
                 lines.append(f"[dim][b]{role}:[/b] {content}[/dim]")
             if "tool_calls" in msg and msg["tool_calls"]:
                 tool_calls_data = msg["tool_calls"]
-                if isinstance(tool_calls_data, list) and len(tool_calls_data) > 0 and isinstance(tool_calls_data[0], str):
+                if (
+                    isinstance(tool_calls_data, list)
+                    and len(tool_calls_data) > 0
+                    and isinstance(tool_calls_data[0], str)
+                ):
                     import json
+
                     parsed_tool_calls = []
                     for tc_str in tool_calls_data:
                         try:
@@ -152,9 +157,9 @@ def format_prompt_or_completion(prompt_or_completion) -> str:
                         except (json.JSONDecodeError, TypeError):
                             parsed_tool_calls.append(tc_str)
                     tool_calls_data = parsed_tool_calls
-                
+
                 for tool_call in tool_calls_data:
-                    if isinstance(tool_call, dict) and 'function' in tool_call:
+                    if isinstance(tool_call, dict) and "function" in tool_call:
                         lines.append(
                             f"[b]tool call:[/b] {tool_call['function']['name']}\n{tool_call['function']['arguments']}"
                         )
@@ -369,10 +374,10 @@ class ViewRunScreen(Screen):
         Binding("right,l", "next_record", "Next"),
     ]
 
-    def __init__(self, run: RunInfo):
+    def __init__(self, run: RunInfo | None, records: List[Dict[str, Any]] = None):
         super().__init__()
         self.run = run
-        self.records = load_run_results(run)
+        self.records = records if records is not None else load_run_results(run)
         self.current_record_idx = 0
 
     def compose(self) -> ComposeResult:
@@ -430,8 +435,8 @@ class ViewRunScreen(Screen):
 
         col3 = [
             f"[b]Avg reward:[/b] {avg_reward_str}",
-            f"[b]Max tokens:[/b] {meta.get('max_tokens', '')}",
-            f"[b]Temperature:[/b] {meta.get('temperature', '')}",
+            f"[b]Max tokens:[/b] {meta.get('max_tokens', meta.get('sampling_args', {}).get('max_tokens', ''))}",
+            f"[b]Temperature:[/b] {meta.get('temperature', meta.get('sampling_args', {}).get('temperature', ''))}",
             "",  # Empty for alignment
         ]
 
@@ -663,12 +668,16 @@ class VerifiersTUI(App):
     """
 
     def __init__(
-        self, env_dir_path: str = "./environments", outputs_dir_path: str = "./outputs"
+        self,
+        env_dir_path: str = "./environments",
+        outputs_dir_path: str = "./outputs",
+        mount_select_env_screen: bool = True,
     ):
         super().__init__()
         self.env_dir_path = env_dir_path
         self.outputs_dir_path = outputs_dir_path
         self.index = discover_results(env_dir_path, outputs_dir_path)
+        self.mount_select_env_screen = mount_select_env_screen
 
     def on_mount(self) -> None:
         # Register both custom themes
@@ -676,7 +685,8 @@ class VerifiersTUI(App):
         self.register_theme(self.WHITE_WARM_THEME)
         # Start with dark theme
         self.theme = "black-warm"
-        self.push_screen(SelectEnvScreen(self.index))
+        if self.mount_select_env_screen:
+            self.push_screen(SelectEnvScreen(self.index))
 
     async def action_quit(self) -> None:
         """Quit the application."""

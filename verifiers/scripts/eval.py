@@ -1,4 +1,3 @@
-import argparse
 import importlib
 import importlib.util
 import json
@@ -6,12 +5,15 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
+import typer
 from datasets import Dataset
 from openai import OpenAI
 
 import verifiers as vf
+from verifiers.scripts.tui import RunInfo, VerifiersTUI, ViewRunScreen
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
 
@@ -29,11 +31,10 @@ def eval_environment(
     max_tokens: int | None,
     temperature: float | None,
     sampling_args: dict | None,
-    verbose: bool,
     save_dataset: bool,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
-):
+) -> Dict[str, Any]:
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():
@@ -79,75 +80,69 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
         rollouts_per_example=rollouts_per_example,
         max_concurrent_requests=max_concurrent_requests,
     )
-    print("--- Evaluation ---")
-    print(f"Environment: {env}")
-    print(f"Model: {model}")
-    print(f"Provider: {api_base_url}")
-    print(f"Examples: {num_examples}")
-    print(f"Rollouts per example: {rollouts_per_example}")
-    print("--- Example ---")
+
+    # Prepare evaluation results data
     printable_prompts = [messages_to_printable(p) for p in results.prompt]
     printable_completions = [messages_to_printable(c) for c in results.completion]
-    vf.print_prompt_completions_sample(
-        printable_prompts, printable_completions, results.reward, step=0
-    )
-    print("--- All ---")
-    print("Rewards:")
-    print(
-        f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
-    )
+
+    # Calculate statistics
     n = num_examples
     r = rollouts_per_example
-
     if n < 0:
         n = len(results.reward) // r
+
+    # Prepare rewards data
+    reward_stats = {
+        "avg": sum(results.reward) / len(results.reward),
+        "std": np.std(results.reward),
+        "trials": [],
+    }
     for i in range(r):
-        # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]
-        out = f"r{i + 1}: {trials}"
-        print(out)
+        reward_stats["trials"].append(trials)
+
+    # Prepare metrics data
+    metrics_data = {}
     for k in results.metrics:
         v = results.metrics[k]
-        print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        metrics_data[k] = {"avg": sum(v) / len(v), "std": np.std(v), "trials": []}
         for i in range(r):
-            # rounded to 3 decimal places
             trials = [round(v[(i * n) + j], 3) for j in range(n)]
-            out = f"r{i + 1}: {trials}"
-            print(out)
+            metrics_data[k]["trials"].append(trials)
+
+    ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
+    rewards = results.reward
+    tasks = results.task
+    data_dict = {
+        "id": ids,
+        "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
+        "completion": [sanitize_tool_calls(c) for c in printable_completions],
+        "task": tasks,
+    }
+    if results.info[0] != {}:
+        data_dict["info"] = results.info
+    if results.answer[0] != "":
+        data_dict["answer"] = results.answer
+    data_dict["reward"] = rewards
+    for k in results.metrics:
+        v = results.metrics[k]
+        data_dict[k] = v
+
+    dataset = Dataset.from_dict(data_dict)
+    metadata = {
+        "env": env,
+        "model": model,
+        "num_examples": n,
+        "rollouts_per_example": rollouts_per_example,
+        "sampling_args": merged_sampling_args,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "avg_reward": sum(results.reward) / len(results.reward),
+    }
+    for k in results.metrics:
+        metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
 
     if save_dataset or save_to_hf_hub:
-        ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
-        rewards = results.reward
-        tasks = results.task
-        data_dict = {
-            "id": ids,
-            "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
-            "completion": [sanitize_tool_calls(c) for c in printable_completions],
-            "task": tasks,
-        }
-        if results.info[0] != {}:
-            data_dict["info"] = results.info
-        if results.answer[0] != "":
-            data_dict["answer"] = results.answer
-        data_dict["reward"] = rewards
-        for k in results.metrics:
-            v = results.metrics[k]
-            data_dict[k] = v
-
-        dataset = Dataset.from_dict(data_dict)
-        metadata = {
-            "env": env,
-            "model": model,
-            "num_examples": n,
-            "rollouts_per_example": rollouts_per_example,
-            "sampling_args": merged_sampling_args,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "avg_reward": sum(results.reward) / len(results.reward),
-        }
-        for k in results.metrics:
-            metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
-
         uuid_str = str(uuid.uuid4())[:8]
         env_model_str = f"{env}--{model.replace('/', '--')}"
         if save_dataset:
@@ -175,140 +170,210 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             dataset.push_to_hub(dataset_name)
             print(f"Saved dataset to Hugging Face Hub: {dataset_name}")
 
+    return dataset, metadata
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "env", type=str, default="gsm8k", help="Environment module name"
-    )
-    parser.add_argument(
+
+# Create Typer app
+app = typer.Typer()
+
+
+@app.command()
+def evaluate(
+    env: str = typer.Argument("gsm8k", help="Environment module name"),
+    env_args: str = typer.Option(
+        "{}",
         "--env-args",
         "-a",
-        type=json.loads,
-        default={},
         help='Environment module arguments as JSON object (e.g., \'{"key": "value", "num": 42}\')',
-    )
-    parser.add_argument(
+    ),
+    env_dir_path: str = typer.Option(
+        "./environments",
         "--env-dir-path",
         "-p",
-        type=str,
-        default="./environments",
         help="Path to environments directory",
-    )
-    parser.add_argument(
+    ),
+    endpoints_path: str = typer.Option(
+        "./configs/endpoints.py",
         "--endpoints-path",
         "-e",
-        type=str,
-        default="./configs/endpoints.py",
         help="Path to API endpoints registry",
-    )
-    parser.add_argument(
+    ),
+    model: str = typer.Option(
+        "gpt-4.1-mini",
         "--model",
         "-m",
-        type=str,
-        default="gpt-4.1-mini",
         help="Name of model to evaluate",
-    )
-    parser.add_argument(
+    ),
+    api_key_var: str = typer.Option(
+        "OPENAI_API_KEY",
         "--api-key-var",
         "-k",
-        type=str,
-        default="OPENAI_API_KEY",
         help="Environment variable name for API key",
-    )
-    parser.add_argument(
+    ),
+    api_base_url: str = typer.Option(
+        "https://api.openai.com/v1",
         "--api-base-url",
         "-b",
-        type=str,
-        default="https://api.openai.com/v1",
         help="Base URL for API",
-    )
-    parser.add_argument(
+    ),
+    num_examples: int = typer.Option(
+        5,
         "--num-examples",
         "-n",
-        type=int,
-        default=5,
         help="Number of examples to evaluate",
-    )
-    parser.add_argument(
+    ),
+    rollouts_per_example: int = typer.Option(
+        3,
         "--rollouts-per-example",
         "-r",
-        type=int,
-        default=3,
         help="Number of rollouts per example",
-    )
-    parser.add_argument(
+    ),
+    max_concurrent_requests: int = typer.Option(
+        32,
         "--max-concurrent-requests",
         "-c",
-        type=int,
-        default=32,
         help="Maximum number of concurrent requests",
-    )
-    parser.add_argument(
+    ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
         "--max-tokens",
         "-t",
-        type=int,
-        default=None,
         help="Maximum number of tokens to generate (unset to use model default)",
-    )
-    parser.add_argument(
-        "--temperature", "-T", type=float, default=None, help="Temperature for sampling"
-    )
-    parser.add_argument(
+    ),
+    temperature: Optional[float] = typer.Option(
+        None,
+        "--temperature",
+        "-T",
+        help="Temperature for sampling",
+    ),
+    sampling_args: Optional[str] = typer.Option(
+        None,
         "--sampling-args",
         "-S",
-        type=json.loads,
-        default=None,
         help=(
             "Sampling arguments as JSON object. Keys here override --max-tokens/--temperature. "
             'Example: \'{"enable_thinking": false, "max_tokens": 256}\''
         ),
-    )
-    parser.add_argument(
-        "--verbose", "-v", default=False, action="store_true", help="Verbose output"
-    )
-    parser.add_argument(
+    ),
+    save_dataset: bool = typer.Option(
+        False,
         "--save-dataset",
         "-s",
-        default=False,
-        action="store_true",
         help="Save dataset to disk",
-    )
-    parser.add_argument(
+    ),
+    save_to_hf_hub: bool = typer.Option(
+        False,
         "--save-to-hf-hub",
         "-H",
-        default=False,
-        action="store_true",
         help="Save dataset to Hugging Face Hub",
-    )
-    parser.add_argument(
+    ),
+    hf_hub_dataset_name: str = typer.Option(
+        "",
         "--hf-hub-dataset-name",
         "-D",
-        type=str,
-        default="",
         help="Name of dataset to save to Hugging Face Hub",
-    )
-    args = parser.parse_args()
+    ),
+    no_display: bool = typer.Option(
+        False,
+        "--no-display",
+        help="Skip displaying results in Textual interface",
+    ),
+):
+    """
+    Evaluate a model using the specified environment and display results.
+    """
+    # Parse JSON arguments
+    try:
+        parsed_env_args = json.loads(env_args)
+    except json.JSONDecodeError as e:
+        typer.echo(f"Error parsing env-args JSON: {e}", err=True)
+        raise typer.Exit(1)
 
-    eval_environment(
-        env=args.env,
-        env_args=args.env_args,
-        env_dir_path=args.env_dir_path,
-        endpoints_path=args.endpoints_path,
-        model=args.model,
-        api_key_var=args.api_key_var,
-        api_base_url=args.api_base_url,
-        num_examples=args.num_examples,
-        rollouts_per_example=args.rollouts_per_example,
-        max_concurrent_requests=args.max_concurrent_requests,
-        max_tokens=args.max_tokens,
-        temperature=args.temperature,
-        sampling_args=args.sampling_args,
-        verbose=args.verbose,
-        save_dataset=args.save_dataset,
-        save_to_hf_hub=args.save_to_hf_hub,
-        hf_hub_dataset_name=args.hf_hub_dataset_name,
+    try:
+        parsed_sampling_args = json.loads(sampling_args) if sampling_args else None
+    except json.JSONDecodeError as e:
+        typer.echo(f"Error parsing sampling-args JSON: {e}", err=True)
+        raise typer.Exit(1)
+
+    # Run evaluation
+    dataset, metadata = eval_environment(
+        env=env,
+        env_args=parsed_env_args,
+        env_dir_path=env_dir_path,
+        endpoints_path=endpoints_path,
+        model=model,
+        api_key_var=api_key_var,
+        api_base_url=api_base_url,
+        num_examples=num_examples,
+        rollouts_per_example=rollouts_per_example,
+        max_concurrent_requests=max_concurrent_requests,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        sampling_args=parsed_sampling_args,
+        save_dataset=save_dataset,
+        save_to_hf_hub=save_to_hf_hub,
+        hf_hub_dataset_name=hf_hub_dataset_name,
     )
+
+    # Display results using Textual interface if requested
+    if not no_display:
+        launch_tui(dataset, metadata, env, model)
+    else:
+        typer.echo(
+            "Evaluation completed. Use --no-display=false to show results in Textual interface."
+        )
+
+
+class DirectViewTUI(VerifiersTUI):
+    """TUI that goes directly to scripts/tui.py:ViewRunScreen without showing the main menu."""
+
+    def __init__(self, view_screen):
+        super().__init__("./environments", "./outputs", False)
+        self.view_screen = view_screen
+
+    def on_mount(self) -> None:
+        # Register both custom themes
+        self.register_theme(self.BLACK_WARM_THEME)
+        self.register_theme(self.WHITE_WARM_THEME)
+        # Start with dark theme
+        self.theme = "black-warm"
+        # Skip the main menu and go directly to ViewRunScreen
+        self.push_screen(self.view_screen)
+
+
+def launch_tui(dataset, metadata, env, model):
+    """Launch TUI with the evaluation results."""
+    import asyncio
+
+    async def run_tui():
+        if dataset and metadata:
+            # Convert dataset to list of dictionaries for ViewRunScreen
+            records = [row for row in dataset]
+
+            # Create a minimal RunInfo object with just the metadata (no file operations)
+            run_info = RunInfo(
+                env_id=env,
+                model=model,
+                run_id=f"run-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}",
+                path=Path("./"),
+                metadata=metadata,
+            )
+
+            # Create ViewRunScreen with the data
+            view_screen = ViewRunScreen(run_info, records)
+
+            # Create the direct TUI app that bypasses the main menu
+            tui_app = DirectViewTUI(view_screen)
+
+            # Run the TUI
+            await tui_app.run_async()
+
+    # Run the async TUI function
+    asyncio.run(run_tui())
+
+
+def main():
+    app()
 
 
 if __name__ == "__main__":
