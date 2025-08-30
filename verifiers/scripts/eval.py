@@ -11,13 +11,10 @@ import numpy as np
 import typer
 from datasets import Dataset
 from openai import OpenAI
-from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
-from textual.widgets import Footer, Label, Static
 
 import verifiers as vf
-from verifiers.utils.message_utils import sanitize_tool_calls
-from verifiers.scripts.tui import format_prompt_or_completion
+from verifiers.scripts.tui import RunInfo, VerifiersTUI, ViewRunScreen
+from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
 
 def eval_environment(
@@ -112,8 +109,8 @@ def eval_environment(
     )
 
     # Prepare evaluation results data
-    printable_prompts = [format_prompt_or_completion(p) for p in results.prompt]
-    printable_completions = [format_prompt_or_completion(c) for c in results.completion]
+    printable_prompts = [messages_to_printable(p) for p in results.prompt]
+    printable_completions = [messages_to_printable(c) for c in results.completion]
 
     # Calculate statistics
     n = num_examples
@@ -140,55 +137,39 @@ def eval_environment(
             trials = [round(v[(i * n) + j], 3) for j in range(n)]
             metrics_data[k]["trials"].append(trials)
 
-    # Structure the evaluation data
-    eval_data = {
-        "environment": env,
-        "model": model,
-        "provider": api_base_url,
-        "num_examples": n,
-        "rollouts_per_example": r,
-        "max_concurrent_requests": max_concurrent_requests,
-        "merged_sampling_args": merged_sampling_args,
-        "prompts": printable_prompts,
-        "completions": printable_completions,
-        "rewards": reward_stats,
-        "metrics": metrics_data,
-        "results": results,  # Keep original results object for dataset saving
+    ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
+    rewards = results.reward
+    tasks = results.task
+    data_dict = {
+        "id": ids,
+        "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
+        "completion": [sanitize_tool_calls(c) for c in printable_completions],
+        "task": tasks,
     }
+    if results.info[0] != {}:
+        data_dict["info"] = results.info
+    if results.answer[0] != "":
+        data_dict["answer"] = results.answer
+    data_dict["reward"] = rewards
+    for k in results.metrics:
+        v = results.metrics[k]
+        data_dict[k] = v
+
+    dataset = Dataset.from_dict(data_dict)
+    metadata = {
+        "env": env,
+        "model": model,
+        "num_examples": n,
+        "rollouts_per_example": rollouts_per_example,
+        "sampling_args": merged_sampling_args,
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "avg_reward": sum(results.reward) / len(results.reward),
+    }
+    for k in results.metrics:
+        metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
 
     if save_dataset or save_to_hf_hub:
-        ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
-        rewards = results.reward
-        tasks = results.task
-        data_dict = {
-            "id": ids,
-            "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
-            "completion": [sanitize_tool_calls(c) for c in printable_completions],
-            "task": tasks,
-        }
-        if results.info[0] != {}:
-            data_dict["info"] = results.info
-        if results.answer[0] != "":
-            data_dict["answer"] = results.answer
-        data_dict["reward"] = rewards
-        for k in results.metrics:
-            v = results.metrics[k]
-            data_dict[k] = v
-
-        dataset = Dataset.from_dict(data_dict)
-        metadata = {
-            "env": env,
-            "model": model,
-            "num_examples": n,
-            "rollouts_per_example": rollouts_per_example,
-            "sampling_args": merged_sampling_args,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "avg_reward": sum(results.reward) / len(results.reward),
-        }
-        for k in results.metrics:
-            metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
-
         uuid_str = str(uuid.uuid4())[:8]
         env_model_str = f"{env}--{model.replace('/', '--')}"
         if save_dataset:
@@ -216,7 +197,7 @@ def eval_environment(
             dataset.push_to_hub(dataset_name)
             logger.info(f"Saved dataset to Hugging Face Hub: {dataset_name}")
 
-    return eval_data
+    return dataset, metadata
 
 
 # Create Typer app
@@ -342,7 +323,7 @@ def evaluate(
         raise typer.Exit(1)
 
     # Run evaluation
-    eval_data = eval_environment(
+    dataset, metadata = eval_environment(
         env=env,
         env_args=parsed_env_args,
         env_dir_path=env_dir_path,
@@ -361,246 +342,61 @@ def evaluate(
         hf_hub_dataset_name=hf_hub_dataset_name,
     )
 
-    # Display results using Textual interface
+    # Display results using Textual interface if requested
     if not no_display:
-        display_app = EvaluationResultsApp(eval_data)
-        display_app.run()
+        launch_tui(dataset, metadata, env, model)
     else:
         typer.echo(
             "Evaluation completed. Use --no-display=false to show results in Textual interface."
         )
 
 
-# Textual app for displaying evaluation results
-class EvaluationResultsApp(App):
-    """Textual app for displaying evaluation results."""
+class DirectViewTUI(VerifiersTUI):
+    """TUI that goes directly to scripts/tui.py:ViewRunScreen without showing the main menu."""
 
-    BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("left", "prev_example", "Previous example"),
-        ("h", "prev_example", "Previous example"),
-        ("right", "next_example", "Next example"),
-        ("l", "next_example", "Next example"),
-        ("home", "first_example", "First example"),
-        ("end", "last_example", "Last example"),
-    ]
+    def __init__(self, view_screen):
+        super().__init__("./environments", "./outputs", False)
+        self.view_screen = view_screen
 
-    CSS = """
-    Screen {
-        layout: vertical;
-        background: #1a1a1a;
-    }
+    def on_mount(self) -> None:
+        # Register both custom themes
+        self.register_theme(self.BLACK_WARM_THEME)
+        self.register_theme(self.WHITE_WARM_THEME)
+        # Start with dark theme
+        self.theme = "black-warm"
+        # Skip the main menu and go directly to ViewRunScreen
+        self.push_screen(self.view_screen)
 
-    Container {
-        layout: vertical;
-        height: 100%;
-    }
 
-    .header-panel {
-        height: auto;
-        min-height: 4;
-        max-height: 8;
-        border: solid #666;
-        padding: 1 2;
-        margin-bottom: 1;
-    }
+def launch_tui(dataset, metadata, env, model):
+    """Launch TUI with the evaluation results."""
+    import asyncio
 
-    .stats-panel {
-        height: auto;
-        min-height: 6;
-        max-height: 10;
-        border: solid #666;
-        padding: 1 2;
-        margin-bottom: 1;
-    }
+    async def run_tui():
+        if dataset and metadata:
+            # Convert dataset to list of dictionaries for ViewRunScreen
+            records = [row for row in dataset]
 
-    .rollout-container {
-        height: 1fr;
-        layout: horizontal;
-    }
-
-    .column-panel {
-        width: 50%;
-        height: 100%;
-        layout: vertical;
-        border: solid #666;
-        padding: 1 2;
-    }
-
-    .column-header {
-        height: auto;
-        margin-bottom: 1;
-        text-align: center;
-        text-style: bold;
-        color: #00ff00;
-    }
-
-    VerticalScroll {
-        height: 1fr;
-        background: #2a2a2a;
-        padding: 0 1;
-    }
-
-    Static {
-        color: #ffffff;
-    }
-
-    Label {
-        color: #ffffff;
-    }
-
-    Footer {
-        background: #333;
-        color: #ccc;
-    }
-    """
-
-    def __init__(self, eval_data: Dict[str, Any]):
-        super().__init__()
-        self.eval_data = eval_data
-        self.current_example = 0
-
-    def compose(self) -> ComposeResult:
-        with Container():
-            # Header with evaluation info
-            with Container(classes="header-panel"):
-                yield Label("🔬 Evaluation Results", classes="column-header")
-                yield Static(self._get_header_text(), id="header-info")
-
-            # Statistics panel
-            with Container(classes="stats-panel"):
-                yield Label("📊 Statistics", classes="column-header")
-                yield Static(self._get_stats_text())
-
-            # Example rollout display
-            with Horizontal(classes="rollout-container"):
-                with Container(classes="column-panel"):
-                    yield Label("📝 Prompt", classes="column-header")
-                    yield VerticalScroll(
-                        Static(self._get_current_prompt()),
-                        id="prompt-content",
-                    )
-
-                with Container(classes="column-panel"):
-                    yield Label("🤖 Completion", classes="column-header")
-                    yield VerticalScroll(
-                        Static(self._get_current_completion()),
-                        id="completion-content",
-                    )
-
-        yield Footer(show_command_palette=False)
-
-    def _get_header_text(self) -> str:
-        """Generate header information text."""
-        data = self.eval_data
-        total_examples = len(data["prompts"]) if data["prompts"] else 0
-        current_idx = self.current_example + 1 if total_examples > 0 else 0
-
-        # Prominent example indicator at the top
-        example_indicator = f"[bold bright_green]📋 Example {current_idx} of {total_examples}[/bold bright_green]"
-        if total_examples == 0:
-            example_indicator = "[dim]No examples available[/dim]"
-
-        return f"""{example_indicator}
-
-[b]Environment:[/b] {data["environment"]}
-[b]Model:[/b] {data["model"]}
-[b]Provider:[/b] {data["provider"]}
-[b]Rollouts/example:[/b] {data["rollouts_per_example"]} | [b]Max Concurrent:[/b] {data["max_concurrent_requests"]}"""
-
-    def _get_stats_text(self) -> str:
-        """Generate statistics text."""
-        data = self.eval_data
-        rewards = data["rewards"]
-
-        lines = [
-            f"[b]Rewards:[/b] Avg: {rewards['avg']:.3f} | Std: {rewards['std']:.3f}",
-        ]
-
-        # Add rollout trials
-        for i, trials in enumerate(rewards["trials"], 1):
-            lines.append(f"[b]Rollout {i}:[/b] {trials}")
-
-        # Add other metrics
-        for metric_name, metric_data in data["metrics"].items():
-            lines.append(
-                f"[b]{metric_name}:[/b] Avg: {metric_data['avg']:.3f} | Std: {metric_data['std']:.3f}"
+            # Create a minimal RunInfo object with just the metadata (no file operations)
+            run_info = RunInfo(
+                env_id=env,
+                model=model,
+                run_id=f"run-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}",
+                path=Path("./"),
+                metadata=metadata,
             )
-            for i, trials in enumerate(metric_data["trials"], 1):
-                lines.append(f"[b]{metric_name} R{i}:[/b] {trials}")
 
-        return "\n".join(lines)
+            # Create ViewRunScreen with the data
+            view_screen = ViewRunScreen(run_info, records)
 
-    def _get_current_prompt(self) -> str:
-        """Get the current example's prompt."""
-        if self.current_example < len(self.eval_data["prompts"]):
-            prompt = self.eval_data["prompts"][self.current_example]
-            return prompt
-        return "[dim]No prompt available[/dim]"
+            # Create the direct TUI app that bypasses the main menu
+            tui_app = DirectViewTUI(view_screen)
 
-    def _get_current_completion(self) -> str:
-        """Get the current example's completion."""
-        if self.current_example < len(self.eval_data["completions"]):
-            completion = self.eval_data["completions"][self.current_example]
-            return completion
-        return "[dim]No completion available[/dim]"
+            # Run the TUI
+            await tui_app.run_async()
 
-    def _update_display(self) -> None:
-        """Update the display with current example."""
-        # Update prompt
-        prompt_scroll = self.query_one("#prompt-content", VerticalScroll)
-        prompt_scroll.query_one(Static).update(self._get_current_prompt())
-
-        # Update completion
-        completion_scroll = self.query_one("#completion-content", VerticalScroll)
-        completion_scroll.query_one(Static).update(self._get_current_completion())
-
-        # Update header with current example info
-        # Find the header static widget and update it
-        try:
-            header_widget = self.query_one("#header-info", Static)
-            header_widget.update(self._get_header_text())
-        except Exception:
-            pass  # Header might not be found, continue anyway
-
-        # Reset scroll positions
-        try:
-            prompt_scroll.scroll_y = 0
-            completion_scroll.scroll_y = 0
-        except Exception:
-            pass  # Scroll widgets might not be found, continue anyway
-
-    def action_prev_example(self) -> None:
-        """Navigate to previous example."""
-        if self.eval_data["prompts"]:
-            self.current_example = (self.current_example - 1) % len(
-                self.eval_data["prompts"]
-            )
-            self._update_display()
-
-    def action_next_example(self) -> None:
-        """Navigate to next example."""
-        if self.eval_data["prompts"]:
-            self.current_example = (self.current_example + 1) % len(
-                self.eval_data["prompts"]
-            )
-            self._update_display()
-
-    def action_first_example(self) -> None:
-        """Navigate to first example."""
-        if self.eval_data["prompts"]:
-            self.current_example = 0
-            self._update_display()
-
-    def action_last_example(self) -> None:
-        """Navigate to last example."""
-        if self.eval_data["prompts"]:
-            self.current_example = len(self.eval_data["prompts"]) - 1
-            self._update_display()
-
-    def action_quit(self) -> None:
-        """Quit the application."""
-        self.exit()
+    # Run the async TUI function
+    asyncio.run(run_tui())
 
 
 def main():
