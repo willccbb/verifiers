@@ -14,9 +14,7 @@ import importlib.util
 
 
 def _load_env_module():
-    module_path = os.path.join(
-        os.path.dirname(__file__), "..", "environments", "futurex_past", "futurex_past.py"
-    )
+    module_path = os.path.join(os.path.dirname(__file__), "..", "futurex_past.py")
     module_path = os.path.abspath(module_path)
     spec = importlib.util.spec_from_file_location("futurex_past", module_path)
     assert spec and spec.loader
