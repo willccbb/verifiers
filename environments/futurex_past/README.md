@@ -96,3 +96,21 @@ uv run vf-eval futurex-past \
 | ------ | ------- |
 | `reward` | 1.0 if parsed `<answer>` exactly equals ground truth (with optional normalization) |
 | `format_reward` | Adherence to the expected XML format |
+
+### MCQ Handling
+- If `info.options` is present for an example, the reward accepts either:
+  - The option text (exact match after optional normalization), or
+  - A label identifying the option by index: `A`/`B`/`C`/… or `1`/`2`/`3`/… (1-indexed)
+- Label ↔ text matching works both ways:
+  - Predicted `A` matches the text of the first option if the gold `answer` is that text.
+  - Predicted text of an option matches a gold `answer` that is a label like `B`.
+
+## Evaluation Reports
+
+Notes:
+- Reports are written under `./environments/futurex_past/reports/` and auto-embedded below.
+
+<!-- Do not edit below this line. Content is auto-generated. -->
+<!-- vf:begin:reports -->
+<p><a href="reports/vf-futurex-past--v0.1.0--model=dry-run--n=0--r=0--args=noargs.html" target="_blank">Open dry-run report (placeholder)</a></p>
+<!-- vf:end:reports -->

@@ -83,9 +83,16 @@ def load_environment(
     def to_qa(row):
         question = row.get("question") or row.get("prompt") or ""
         answer = row.get("answer") or ""
-        return {"question": question, "answer": answer}
+        info = {}
+        opts = row.get("options")
+        if _is_mcq(opts):
+            info["options"] = list(opts)
+        if row.get("level") is not None:
+            info["level"] = int(row.get("level"))
+        return {"question": question, "answer": answer, "info": info}
 
-    dataset = dataset.map(to_qa, remove_columns=[c for c in dataset.column_names if c not in ("question", "answer")])  # type: ignore
+    # Preserve original columns so Environment.format_dataset retains 'answer' and 'info'.
+    dataset = dataset.map(to_qa)  # type: ignore
 
     # Split into train/eval deterministically
     ds = dataset.shuffle(seed=42)  # type: ignore
@@ -112,12 +119,63 @@ def load_environment(
         parser = vf.XMLParser(fields=["answer"], answer_field="answer")
     sys_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
-    # Reward: exact match with optional normalization
-    def exact_match_reward_func(parser, completion, answer, **kwargs) -> float:
+    # Helper: map common MCQ labels to indices
+    def _label_to_index(label: str, num_options: int) -> int | None:
+        if not label:
+            return None
+        s = label.strip().upper()
+        # trim wrapping like (A), A., A), etc.
+        if len(s) > 2:
+            # remove common decorations
+            for ch in ["(", ")", ".", ":", ";", "]", "["]:
+                s = s.replace(ch, "")
+            s = s.replace("OPTION ", "").replace("CHOICE ", "").strip()
+        # alpha label
+        if len(s) >= 1 and "A" <= s[0] <= "Z":
+            idx = ord(s[0]) - ord("A")
+            return idx if 0 <= idx < num_options else None
+        # numeric label (1-indexed)
+        if s.isdigit():
+            val = int(s)
+            if 1 <= val <= num_options:
+                return val - 1
+        return None
+
+    # Reward: exact match with optional normalization and MCQ label support
+    def exact_match_reward_func(parser, completion, answer, state=None, info=None, **kwargs) -> float:
         pred = parser.parse_answer(completion) or ""
         pred_n = _normalize(pred, lowercase_compare, strip_whitespace_compare)
         ans_n = _normalize(answer, lowercase_compare, strip_whitespace_compare)
-        return 1.0 if pred_n == ans_n else 0.0
+
+        if pred_n == ans_n:
+            return 1.0
+
+        # If options are available in info/state, accept label-vs-text matches
+        opts = None
+        if info and isinstance(info, dict):
+            opts = info.get("options")
+        if not opts and state and isinstance(state, dict) and isinstance(state.get("info"), dict):
+            opts = state["info"].get("options")
+        if _is_mcq(opts):
+            try:
+                # normalize options for comparison
+                norm_opts = [
+                    _normalize(str(o), lowercase_compare, strip_whitespace_compare)
+                    for o in opts
+                ]
+                # case 1: pred is a label, answer is option text
+                li = _label_to_index(pred, len(norm_opts))
+                if li is not None and 0 <= li < len(norm_opts):
+                    if norm_opts[li] == ans_n:
+                        return 1.0
+                # case 2: answer is a label, pred is option text
+                li = _label_to_index(answer, len(norm_opts))
+                if li is not None and 0 <= li < len(norm_opts):
+                    if norm_opts[li] == pred_n:
+                        return 1.0
+            except Exception:
+                pass
+        return 0.0
 
     rubric = vf.Rubric(parser=parser)
     rubric.add_reward_func(exact_match_reward_func, weight=1.0)
@@ -131,4 +189,3 @@ def load_environment(
         rubric=rubric,
     )
     return vf_env
-
