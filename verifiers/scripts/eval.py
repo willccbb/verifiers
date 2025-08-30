@@ -116,7 +116,8 @@ Please specify the model name (-m), API host base URL (-b), and API key variable
             print(out)
 
     if save_dataset or save_to_hf_hub:
-        ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
+        total = len(results.reward)
+        ids = [i // rollouts_per_example for i in range(total)]
         rewards = results.reward
         tasks = results.task
         data_dict = {
