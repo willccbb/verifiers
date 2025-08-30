@@ -452,11 +452,11 @@ class ViewRunScreen(Screen):
             ("", ""),
         ]
 
-        col3_items = [
-            ("Avg reward: ", avg_reward_str),
-            ("Max tokens: ", str(meta.get("max_tokens", ""))),
-            ("Temperature: ", str(meta.get("temperature", ""))),
-            ("", ""),
+        col3 = [
+            f"[b]Avg reward:[/b] {avg_reward_str}",
+            f"[b]Max tokens:[/b] {meta.get('max_tokens', meta.get('sampling_args', {}).get('max_tokens', ''))}",
+            f"[b]Temperature:[/b] {meta.get('temperature', meta.get('sampling_args', {}).get('temperature', ''))}",
+            "",  # Empty for alignment
         ]
 
         def build_padded(label: str, value: str, width: int) -> Text:
