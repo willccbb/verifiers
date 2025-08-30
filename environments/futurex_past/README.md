@@ -79,6 +79,35 @@ uv run vf-eval futurex-past \
   -a '{"data_dir": "../futurex-ai/Futurex-Past/data", "filter_levels": [1,2], "mcq_only": true}'
 ```
 
+### Run Eval (OpenAI)
+- Set your API key and install the env if needed:
+
+```bash
+export OPENAI_API_KEY=sk-...
+uv run vf-install futurex-past -p ./environments
+```
+
+- Run a small eval (n=5, r=1) against OpenAI `gpt-4.1-mini`:
+
+```bash
+uv run vf-eval futurex-past \
+  -m gpt-4.1-mini -n 5 -r 1 -t 512 -T 0.7 \
+  -a '{"data_dir":"../futurex-ai/Futurex-Past/data","num_eval_examples":5}'
+```
+
+- Optional (explicit provider flags):
+
+```bash
+uv run vf-eval futurex-past \
+  -m gpt-4.1-mini -b https://api.openai.com/v1 -k OPENAI_API_KEY \
+  -n 5 -r 1 -t 512 -T 0.7 \
+  -a '{"data_dir":"../futurex-ai/Futurex-Past/data","num_eval_examples":5}'
+```
+
+Notes:
+- The HTML report is written under `./environments/futurex_past/reports/`.
+- To surface a new report below, add an `<a href="reports/<filename>.html">` link inside the reports block.
+
 ### Environment Arguments
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
@@ -113,4 +142,7 @@ Notes:
 <!-- Do not edit below this line. Content is auto-generated. -->
 <!-- vf:begin:reports -->
 <p><a href="reports/vf-futurex-past--v0.1.0--model=dry-run--n=0--r=0--args=noargs.html" target="_blank">Open dry-run report (placeholder)</a></p>
+<!-- To link a real report, replace the placeholder above with the generated filename. Example:
+<p><a href="reports/vf-futurex-past--v0.1.0--model=gpt-4.1-mini--n=5--r=1--args=noargs.html" target="_blank">Open full report</a></p>
+-->
 <!-- vf:end:reports -->
