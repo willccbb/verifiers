@@ -233,6 +233,8 @@ RL is notoriously sensitive to implementation details. Here's practical guidance
 
 ### Common Issues
 
+**Non-Increasing Chat Templates:** The Qwen3 and DeepSeek-R1 model series both remove `<think>` sections from messages when processing inputs, which violates the increasing context requirement for multi-turn GRPO-style training. We provide versions of many of these models with modified chat templates [here](https://huggingface.co/collections/willcb/qwen3-68434f4883925bfdb4570ee5).
+
 **OOM during generation:**
 - Reduce `num_generations` or `per_device_train_batch_size`
 - Use LoRA instead of full finetuning

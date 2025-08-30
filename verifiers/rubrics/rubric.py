@@ -48,6 +48,10 @@ class Rubric:
         if not self.reward_weights:
             self.reward_weights = [1.0] * len(self.reward_funcs)
         self.parallelize_scoring = parallelize_scoring
+        # class objects for reward functions
+        self.class_objects = {}
+        if self.parser:
+            self.class_objects["parser"] = self.parser
 
     def get_reward_func_names(self) -> list[str]:
         return [func.__name__ for func in self.reward_funcs]
@@ -65,7 +69,6 @@ class Rubric:
     async def call_reward_func(
         self,
         func: RewardFunc,
-        parser: Parser,
         prompt: Messages,
         completion: Messages,
         answer: str,
@@ -87,7 +90,6 @@ class Rubric:
         sig = inspect.signature(func)
 
         common = dict(
-            parser=parser,
             prompt=prompt,
             completion=completion,
             answer=answer,
@@ -95,6 +97,7 @@ class Rubric:
             task=task,
             info=info,
         )
+        common.update(self.class_objects)
         merged = {**common, **kwargs}
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
             try:
@@ -128,7 +131,7 @@ class Rubric:
             score_tasks = [
                 self.call_reward_func(
                     func=func,
-                    parser=self.parser,
+                    # **self.class_objects,
                     prompt=prompt,
                     completion=completion,
                     answer=answer,
@@ -145,7 +148,7 @@ class Rubric:
             for func in self.get_reward_funcs():
                 score = await self.call_reward_func(
                     func=func,
-                    parser=self.parser,
+                    # **self.class_objects,
                     prompt=prompt,
                     completion=completion,
                     answer=answer,

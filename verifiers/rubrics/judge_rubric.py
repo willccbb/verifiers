@@ -46,6 +46,14 @@ class JudgeRubric(Rubric):
         self.judge_model = judge_model
         self.judge_prompt = judge_prompt
         self.judge_sampling_args = judge_sampling_args or {}
+        self.class_objects = {
+            "parser": self.parser,
+            "judge": self.judge,
+            "judge_client": self.judge_client,
+            "judge_model": self.judge_model,
+            "judge_prompt": self.judge_prompt,
+            "judge_sampling_args": self.judge_sampling_args,
+        }
 
     async def judge(
         self,

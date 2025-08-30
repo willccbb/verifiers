@@ -142,10 +142,24 @@ def format_prompt_or_completion(prompt_or_completion) -> str:
             else:
                 lines.append(f"[dim][b]{role}:[/b] {content}[/dim]")
             if "tool_calls" in msg and msg["tool_calls"]:
-                for tool_call in msg["tool_calls"]:
-                    lines.append(
-                        f"[b]tool call:[/b] {tool_call['function']['name']}\n{tool_call['function']['arguments']}"
-                    )
+                tool_calls_data = msg["tool_calls"]
+                if isinstance(tool_calls_data, list) and len(tool_calls_data) > 0 and isinstance(tool_calls_data[0], str):
+                    import json
+                    parsed_tool_calls = []
+                    for tc_str in tool_calls_data:
+                        try:
+                            parsed_tool_calls.append(json.loads(tc_str))
+                        except (json.JSONDecodeError, TypeError):
+                            parsed_tool_calls.append(tc_str)
+                    tool_calls_data = parsed_tool_calls
+                
+                for tool_call in tool_calls_data:
+                    if isinstance(tool_call, dict) and 'function' in tool_call:
+                        lines.append(
+                            f"[b]tool call:[/b] {tool_call['function']['name']}\n{tool_call['function']['arguments']}"
+                        )
+                    elif isinstance(tool_call, str):
+                        lines.append(f"[b]tool call:[/b] {tool_call}")
         return "\n\n".join(lines)
     return str(prompt_or_completion)
 

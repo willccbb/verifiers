@@ -524,16 +524,18 @@ class Environment(ABC):
         if push_to_hub and hub_name is None:
             raise ValueError("hub_name must be provided if push_to_hub is True")
 
-        cols = ["prompt", "completion", "answer", "info", "task", "reward"]
+        cols = ["prompt", "completion", "answer", "task", "reward"]
 
         results_dict = {
             "prompt": results.prompt,
             "completion": [],
             "answer": results.answer,
-            "info": results.info,
             "task": results.task,
             "reward": results.reward,
         }
+        if results.info[0] != {}:
+            results_dict["info"] = results.info
+            cols.append("info")
         for i in range(len(results.completion)):
             results_dict["completion"].append(
                 sanitize_tool_calls(results.completion[i])

@@ -1,11 +1,11 @@
 [project]
 name = "mmmu"
-description = "Your environment description here"
-tags = ["placeholder-tag", "train", "eval"]
+description = "Multimodal benchmark environment"
+tags = ["multimodal", "eval"]
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "verifiers>=0.1.2.post1",
+    "verifiers>=0.1.3",
     "pillow>=11.3.0",
     "datasets"
 ]
