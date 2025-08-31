@@ -131,7 +131,6 @@ class Rubric:
             score_tasks = [
                 self.call_reward_func(
                     func=func,
-                    # **self.class_objects,
                     prompt=prompt,
                     completion=completion,
                     answer=answer,
@@ -148,7 +147,6 @@ class Rubric:
             for func in self.get_reward_funcs():
                 score = await self.call_reward_func(
                     func=func,
-                    # **self.class_objects,
                     prompt=prompt,
                     completion=completion,
                     answer=answer,
