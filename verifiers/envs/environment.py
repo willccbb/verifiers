@@ -88,7 +88,7 @@ class Environment(ABC):
                 raise ValueError(
                     'The fields "system_prompt" and "few_shot" are not supported for completion tasks.'
                     'Please use message_type="chat" instead, or pre-format your dataset '
-                    'to contain "prompt" and "answer" columns.'
+                    'to contain a "prompt" column.'
                 )
             self.dataset = dataset
             self.eval_dataset = eval_dataset
@@ -374,8 +374,6 @@ class Environment(ABC):
             results_dict = {col: deepcopy(inputs[col]) for col in inputs}
         if "prompt" not in results_dict:
             raise ValueError("prompt column not found in inputs")
-        if "answer" not in results_dict and "info" not in results_dict:
-            raise ValueError("answer or info column must be found in inputs")
         if "answer" not in results_dict:
             results_dict["answer"] = [""] * len(results_dict["prompt"])
         if "task" not in results_dict:
