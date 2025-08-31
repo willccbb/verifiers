@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Textual-based TUI for viewing verifiers eval results.
 """
@@ -9,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from rich.markup import escape
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -19,6 +17,8 @@ from textual.theme import Theme
 from textual.widgets import Footer, Label, OptionList, Static
 from textual.widgets._option_list import Option
 
+from rich.text import Text
+from rich.markup import escape as safe_escape
 
 # ----------------------------
 # Discovery and data loading
@@ -127,49 +127,55 @@ def load_run_results(run: RunInfo) -> List[Dict[str, Any]]:
 # ----------------------------
 
 
-def safe_escape(text: str) -> str:
-    """Safely escape rich markup in user content."""
-    return escape(text) if text else ""
-
-
-def format_prompt_or_completion(prompt_or_completion) -> str:
+def format_prompt_or_completion(prompt_or_completion) -> Text:
     """Format completion for display."""
+    out = Text()
     if isinstance(prompt_or_completion, list):
-        lines = []
         for msg in prompt_or_completion:
-            assert isinstance(msg, dict)
+            if not isinstance(msg, dict):
+                out.append(str(msg))
+                out.append("\n\n")
+                continue
             role = msg.get("role", "")
             content = str(msg.get("content", ""))
-            # Assistant in white, all others in grey
+            # Style by role
             if role == "assistant":
-                lines.append(f"[b]{safe_escape(role)}:[/b] {safe_escape(content)}")
+                out.append(f"{role}: ", style="bold")
+                out.append(content)
             elif role == "tool":
-                lines.append(f"[dim][b]tool result:[/b] {safe_escape(content)}[/dim]")
+                out.append("tool result: ", style="bold dim")
+                out.append(content)
             else:
-                lines.append(f"[dim][b]{safe_escape(role)}:[/b] {safe_escape(content)}[/dim]")
-            if "tool_calls" in msg and msg["tool_calls"]:
-                tool_calls_data = msg["tool_calls"]
-                if isinstance(tool_calls_data, list) and len(tool_calls_data) > 0 and isinstance(tool_calls_data[0], str):
-                    import json
-                    parsed_tool_calls = []
+                out.append(f"{role}: ", style="bold dim")
+                out.append(content)
+            out.append("\n")
+            # Tool calls
+            tool_calls_data = msg.get("tool_calls", [])
+            if isinstance(tool_calls_data, list) and tool_calls_data:
+                if isinstance(tool_calls_data[0], str):
+                    parsed = []
                     for tc_str in tool_calls_data:
                         try:
-                            parsed_tool_calls.append(json.loads(tc_str))
-                        except (json.JSONDecodeError, TypeError):
-                            parsed_tool_calls.append(tc_str)
-                    tool_calls_data = parsed_tool_calls
-                
-                for tool_call in tool_calls_data:
-                    if isinstance(tool_call, dict) and 'function' in tool_call:
-                        function_name = safe_escape(str(tool_call['function']['name']))
-                        function_args = safe_escape(str(tool_call['function']['arguments']))
-                        lines.append(
-                            f"[b]tool call:[/b] {function_name}\n{function_args}"
-                        )
-                    elif isinstance(tool_call, str):
-                        lines.append(f"[b]tool call:[/b] {safe_escape(tool_call)}")
-        return "\n\n".join(lines)
-    return safe_escape(str(prompt_or_completion))
+                            parsed.append(json.loads(tc_str))
+                        except Exception:
+                            parsed.append(tc_str)
+                    tool_calls_data = parsed
+
+                for tc in tool_calls_data:
+                    out.append("tool call: ", style="bold")
+                    if isinstance(tc, dict) and "function" in tc:
+                        fn = tc["function"]
+                        out.append(f"{fn.get('name','')}\n")
+                        out.append(str(fn.get("arguments", "")))
+                    else:
+                        out.append(str(tc))
+                    out.append("\n")
+            out.append("\n")
+        return out
+    out.append(str(prompt_or_completion))
+    return out
+
+
 
 
 # ----------------------------
@@ -215,7 +221,7 @@ class SelectEnvScreen(Screen):
         option_list = self.query_one("#env-list", OptionList)
 
         if not self.env_ids:
-            option_list.add_option("No completed evals found")
+            option_list.add_option(Option("No completed evals found", id="__none__", disabled=True))
             return
 
         for env_id in self.env_ids:
@@ -223,7 +229,7 @@ class SelectEnvScreen(Screen):
             total_runs = sum(len(runs) for runs in models.values())
             option_list.add_option(
                 Option(
-                    f"{safe_escape(env_id)} - Models: {len(models)}, Runs: {total_runs}", id=env_id
+                    f"{env_id} - Models: {len(models)}, Runs: {total_runs}", id=env_id
                 )
             )
 
@@ -262,7 +268,7 @@ class SelectModelScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {safe_escape(self.env_id)}", classes="title"),
+                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
                 Label("Select Model", classes="subtitle"),
                 OptionList(id="model-list"),
             )
@@ -273,7 +279,7 @@ class SelectModelScreen(Screen):
 
         for model in self.models:
             runs = self.index[self.env_id][model]
-            option_list.add_option(Option(f"{safe_escape(model)} - Runs: {len(runs)}", id=model))
+            option_list.add_option(Option(f"{model} - Runs: {len(runs)}", id=model))
 
         option_list.focus()
 
@@ -320,8 +326,8 @@ class SelectRunScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {safe_escape(self.env_id)}", classes="title"),
-                Label(f"[b]Model:[/b] {safe_escape(self.model)}", classes="subtitle"),
+                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
+                Label(f"[b]Model:[/b] {self.model}", classes="subtitle"),
                 Label("Select Run", classes="subtitle"),
                 OptionList(id="run-list"),
             )
@@ -340,7 +346,7 @@ class SelectRunScreen(Screen):
                 reward_str = f"Reward: {reward}"
 
             option_list.add_option(
-                Option(f"{safe_escape(run.run_id)} - {safe_escape(datetime_str)} | {safe_escape(reward_str)}", id=str(i))
+                Option(f"{run.run_id} - {datetime_str} | {reward_str}", id=str(i))
             )
 
         option_list.focus()
@@ -408,57 +414,46 @@ class ViewRunScreen(Screen):
                     )
 
             # Details section (horizontal scroll)
-            yield Panel(Static("", id="details"), classes="details-panel")
+            yield Panel(Static("", id="details", markup=False), classes="details-panel")
 
         yield Footer()
 
     def _get_metadata_text(self) -> str:
-        """Generate metadata text in columns."""
         meta = self.run.metadata
         avg_reward = meta.get("avg_reward", "")
         if isinstance(avg_reward, (int, float)):
             avg_reward_str = f"{avg_reward:.3f}"
         else:
             avg_reward_str = str(avg_reward) if avg_reward else "N/A"
-
+        
         # Create three columns of information
         col1 = [
             f"[b]Environment:[/b] {safe_escape(self.run.env_id)}",
             f"[b]Model:[/b] {safe_escape(self.run.model)}",
             f"[b]Run ID:[/b] {safe_escape(self.run.run_id)}",
-            f"[b]Date:[/b] {safe_escape(meta.get('date', ''))} {safe_escape(meta.get('time', ''))}",
+            f"[b]Date:[/b] {safe_escape(meta.get('date',''))} {safe_escape(meta.get('time',''))}",
         ]
 
         col2 = [
             f"[b]Record:[/b] {self.current_record_idx + 1}/{len(self.records)}",
-            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples', '')))}",
-            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example', '')))}",
-            "",  # Empty for alignment
+            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples','')))}",
+            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example','')))}",
+            "",
         ]
 
         col3 = [
             f"[b]Avg reward:[/b] {safe_escape(avg_reward_str)}",
-            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens', '')))}",
-            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature', '')))}",
-            "",  # Empty for alignment
+            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens','')))}",
+            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature','')))}",
+            "",
         ]
-
         # Format as columns with consistent spacing
         lines = []
         for i in range(max(len(col1), len(col2), len(col3))):
-            parts = []
-            if i < len(col1):
-                parts.append(f"{col1[i]:<45}")
-            else:
-                parts.append(" " * 45)
-            if i < len(col2):
-                parts.append(f"{col2[i]:<35}")
-            else:
-                parts.append(" " * 35)
-            if i < len(col3):
-                parts.append(col3[i] if i < len(col3) else "")
-            lines.append("".join(parts).rstrip())
-
+            left = col1[i] if i < len(col1) else ""
+            mid  = col2[i] if i < len(col2) else ""
+            right= col3[i] if i < len(col3) else ""
+            lines.append(f"{left:<45}{mid:<35}{right}")
         return "\n".join(lines)
 
     def on_mount(self) -> None:
@@ -482,31 +477,26 @@ class ViewRunScreen(Screen):
         completion_widget.update(format_prompt_or_completion(completion))
 
         # Update details
-        details_lines = []
+        details_lines = Text()
         reward = record.get("reward", None)
         if reward is not None:
-            if isinstance(reward, (int, float)):
-                reward_str = f"{reward:.3f}"
-            else:
-                reward_str = str(reward)
-            details_lines.append(f"[b]Reward:[/b] {safe_escape(reward_str)}")
+            reward_str = f"{reward:.3f}" if isinstance(reward, (int, float)) else str(reward)
+            details_lines.append("Reward: ", style="bold"); details_lines.append(f"{reward_str}\n")
+
         answer = record.get("answer", None)
         if answer not in (None, ""):
-            details_lines.append(f"[b]Answer:[/b] {safe_escape(str(answer))}")
+            details_lines.append("Answer: ", style="bold"); details_lines.append(str(answer)); details_lines.append("\n")
+
         info = record.get("info", None)
         if info not in (None, {}):
-            details_lines.append(f"[b]Info:[/b] {safe_escape(str(info))}")
+            details_lines.append(f"Info: {safe_escape(str(info))}")
+
         task = record.get("task", None)
         if task not in (None, ""):
-            details_lines.append(f"[b]Task:[/b] {safe_escape(str(task))}")
+            details_lines.append("Task: ", style="bold"); details_lines.append(str(task))
 
         details_widget = self.query_one("#details", Static)
-        details_widget.update(
-            "\n".join(details_lines)
-            if details_lines
-            else "[dim]No additional details[/dim]"
-        )
-
+        details_widget.update(details_lines if details_lines.plain.strip() else Text("No additional details", style="dim"))
         # Update metadata with current record index
         metadata_widget = self.query_one("#metadata", Static)
         metadata_widget.update(self._get_metadata_text())
@@ -705,6 +695,7 @@ def main() -> None:
     outputs_dir = os.environ.get("VF_OUTPUTS_DIR", "./outputs")
     app = VerifiersTUI(env_dir, outputs_dir)
     app.run()
+
 
 
 if __name__ == "__main__":
