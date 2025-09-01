@@ -140,7 +140,7 @@ def format_prompt_or_completion(prompt_or_completion) -> Text:
             content = str(msg.get("content", ""))
             # Style by role
             if role == "assistant":
-                out.append(f"{role}: ", style="bold")
+                out.append("assistant: ", style="bold")
                 out.append(content)
             elif role == "tool":
                 out.append("tool result: ", style="bold dim")
@@ -162,10 +162,11 @@ def format_prompt_or_completion(prompt_or_completion) -> Text:
                     tool_calls_data = parsed
 
                 for tc in tool_calls_data:
-                    out.append("tool call: ", style="bold")
+                    out.append("\ntool call: ", style="bold")
                     if isinstance(tc, dict) and "function" in tc:
                         fn = tc["function"]
-                        out.append(f"{fn.get('name', '')}\n")
+                        out.append(str(fn.get("name", "")))
+                        out.append("\n")
                         out.append(str(fn.get("arguments", "")))
                     else:
                         out.append(str(tc))
@@ -210,7 +211,7 @@ class SelectEnvScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label("Select Environment", classes="title"),
+                Label(Text("Select Environment", style="bold"), classes="title"),
                 OptionList(id="env-list"),
             )
         yield Footer()
@@ -229,7 +230,8 @@ class SelectEnvScreen(Screen):
             total_runs = sum(len(runs) for runs in models.values())
             option_list.add_option(
                 Option(
-                    f"{env_id} - Models: {len(models)}, Runs: {total_runs}", id=env_id
+                    f"{safe_escape(env_id)} - Models: {len(models)}, Runs: {total_runs}",
+                    id=env_id,
                 )
             )
 
@@ -268,8 +270,8 @@ class SelectModelScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
-                Label("Select Model", classes="subtitle"),
+                Label(Text.assemble(("Environment: ", "bold"), str(self.env_id))),
+                Label(Text("Select Model")),
                 OptionList(id="model-list"),
             )
         yield Footer()
@@ -279,7 +281,9 @@ class SelectModelScreen(Screen):
 
         for model in self.models:
             runs = self.index[self.env_id][model]
-            option_list.add_option(Option(f"{model} - Runs: {len(runs)}", id=model))
+            option_list.add_option(
+                Option(f"{safe_escape(model)} - Runs: {len(runs)}", id=model)
+            )
 
         option_list.focus()
 
@@ -326,9 +330,9 @@ class SelectRunScreen(Screen):
     def compose(self) -> ComposeResult:
         with Container():
             yield Panel(
-                Label(f"[b]Environment:[/b] {self.env_id}", classes="title"),
-                Label(f"[b]Model:[/b] {self.model}", classes="subtitle"),
-                Label("Select Run", classes="subtitle"),
+                Label(Text.assemble(("Environment: ", "bold"), str(self.env_id))),
+                Label(Text.assemble(("Model: ", "bold"), str(self.model))),
+                Label(Text("Select Run")),
                 OptionList(id="run-list"),
             )
         yield Footer()
@@ -346,7 +350,10 @@ class SelectRunScreen(Screen):
                 reward_str = f"Reward: {reward}"
 
             option_list.add_option(
-                Option(f"{run.run_id} - {datetime_str} | {reward_str}", id=str(i))
+                Option(
+                    f"{safe_escape(run.run_id)} - {safe_escape(datetime_str)} | {safe_escape(reward_str)}",
+                    id=str(i),
+                )
             )
 
         option_list.focus()
@@ -393,23 +400,25 @@ class ViewRunScreen(Screen):
         with Container():
             # Metadata section
             yield Panel(
-                Static(self._get_metadata_text(), id="metadata"),
+                Static(self._get_metadata_text(), id="metadata", markup=False),
                 classes="metadata-panel",
             )
 
             # Rollout section with two columns
             with Horizontal(classes="rollout-container"):
                 with Panel(classes="column-panel"):
-                    yield Label("Prompt", classes="column-header")
+                    yield Label(Text("Prompt", style="bold"), classes="column-header")
                     yield VerticalScroll(
-                        Static("", id="prompt-content"),
+                        Static("", id="prompt-content", markup=False),
                         id="prompt-scroll",
                     )
 
                 with Panel(classes="column-panel"):
-                    yield Label("Completion", classes="column-header")
+                    yield Label(
+                        Text("Completion", style="bold"), classes="column-header"
+                    )
                     yield VerticalScroll(
-                        Static("", id="completion-content"),
+                        Static("", id="completion-content", markup=False),
                         id="completion-scroll",
                     )
 
@@ -418,43 +427,68 @@ class ViewRunScreen(Screen):
 
         yield Footer()
 
-    def _get_metadata_text(self) -> str:
+    def _get_metadata_text(self) -> Text:
         meta = self.run.metadata
         avg_reward = meta.get("avg_reward", "")
         if isinstance(avg_reward, (int, float)):
             avg_reward_str = f"{avg_reward:.3f}"
         else:
             avg_reward_str = str(avg_reward) if avg_reward else "N/A"
-
-        # Create three columns of information
-        col1 = [
-            f"[b]Environment:[/b] {safe_escape(self.run.env_id)}",
-            f"[b]Model:[/b] {safe_escape(self.run.model)}",
-            f"[b]Run ID:[/b] {safe_escape(self.run.run_id)}",
-            f"[b]Date:[/b] {safe_escape(meta.get('date', ''))} {safe_escape(meta.get('time', ''))}",
+        # Create three columns of information without markup, with styled labels
+        col1_items = [
+            ("Environment: ", str(self.run.env_id)),
+            ("Model: ", str(self.run.model)),
+            ("Run ID: ", str(self.run.run_id)),
+            (
+                "Date: ",
+                f"{str(meta.get('date', ''))} {str(meta.get('time', ''))}".strip(),
+            ),
         ]
 
-        col2 = [
-            f"[b]Record:[/b] {self.current_record_idx + 1}/{len(self.records)}",
-            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples', '')))}",
-            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example', '')))}",
-            "",
+        col2_items = [
+            ("Record: ", f"{self.current_record_idx + 1}/{len(self.records)}"),
+            ("Examples: ", str(meta.get("num_examples", ""))),
+            ("Rollouts/ex: ", str(meta.get("rollouts_per_example", ""))),
+            ("", ""),
         ]
 
-        col3 = [
-            f"[b]Avg reward:[/b] {safe_escape(avg_reward_str)}",
-            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens', '')))}",
-            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature', '')))}",
-            "",
+        col3_items = [
+            ("Avg reward: ", avg_reward_str),
+            ("Max tokens: ", str(meta.get("max_tokens", ""))),
+            ("Temperature: ", str(meta.get("temperature", ""))),
+            ("", ""),
         ]
-        # Format as columns with consistent spacing
-        lines = []
-        for i in range(max(len(col1), len(col2), len(col3))):
-            left = col1[i] if i < len(col1) else ""
-            mid = col2[i] if i < len(col2) else ""
-            right = col3[i] if i < len(col3) else ""
-            lines.append(f"{left:<45}{mid:<35}{right}")
-        return "\n".join(lines)
+
+        def build_padded(label: str, value: str, width: int) -> Text:
+            combined = f"{label}{value}"
+            pad_len = max(0, width - len(combined))
+            t = Text()
+            if label:
+                t.append(label, style="bold")
+            if value:
+                t.append(value)
+            if pad_len:
+                t.append(" " * pad_len)
+            return t
+
+        lines: List[Text] = []
+        num_rows = max(len(col1_items), len(col2_items), len(col3_items))
+        for i in range(num_rows):
+            left_label, left_value = col1_items[i] if i < len(col1_items) else ("", "")
+            mid_label, mid_value = col2_items[i] if i < len(col2_items) else ("", "")
+            right_label, right_value = (
+                col3_items[i] if i < len(col3_items) else ("", "")
+            )
+
+            row = Text()
+            row += build_padded(left_label, left_value, 45)
+            row += build_padded(mid_label, mid_value, 35)
+            if right_label or right_value:
+                row.append(right_label, style="bold")
+                row.append(right_value)
+            lines.append(row)
+
+        return Text("\n").join(lines)
 
     def on_mount(self) -> None:
         self.update_display()
@@ -494,7 +528,11 @@ class ViewRunScreen(Screen):
 
         info = record.get("info", None)
         if info not in (None, {}):
-            details_lines.append(f"Info: {safe_escape(str(info))}")
+            details_lines.append("Info: ", style="bold")
+            try:
+                details_lines.append(json.dumps(info, ensure_ascii=False, indent=2))
+            except Exception:
+                details_lines.append(str(info))
 
         task = record.get("task", None)
         if task not in (None, ""):
