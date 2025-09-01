@@ -5,7 +5,10 @@ from verifiers.types import ChatCompletionToolParam
 
 
 def convert_func_to_oai_tool(func: Any) -> ChatCompletionToolParam:
-    """Get the JSON schema for the OAI tools."""
+    """Convert *func* to an OpenAI function-calling tool schema.
+    The returned mapping matches the structure expected in the `tools` list
+    of the OpenAI ChatCompletion API.
+    """
     function_schema_obj = function_schema(func)
     return {
         "type": "function",
