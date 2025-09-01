@@ -1,4 +1,4 @@
-__version__ = "0.1.3"
+__version__ = "0.1.3.0"
 
 import importlib
 import logging
@@ -116,6 +116,7 @@ def __getattr__(name: str):
 
 
 if TYPE_CHECKING:
+    from .rubrics.math_rubric import MathRubric  # noqa: F401
     from .trainers import (  # noqa: F401
         GRPOConfig,
         GRPOTrainer,
@@ -127,4 +128,3 @@ if TYPE_CHECKING:
         get_model_and_tokenizer,
         get_tokenizer,
     )
-    from .rubrics.math_rubric import MathRubric  # noqa: F401
