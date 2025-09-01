@@ -313,7 +313,8 @@ def main():
 
     # Setup logging based on verbose flag
     log_level = "DEBUG" if args.verbose else "INFO"
-    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    verifiers_logger = logging.getLogger("verifiers")
+    verifiers_logger.setLevel(log_level)
     logger = logging.getLogger(__name__)
     logger.info("Starting vf-eval with arguments")
     logger.debug(f"Parsed arguments: {vars(args)}")
