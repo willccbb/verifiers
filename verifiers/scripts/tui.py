@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from rich.markup import escape as safe_escape
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -17,8 +19,6 @@ from textual.theme import Theme
 from textual.widgets import Footer, Label, OptionList, Static
 from textual.widgets._option_list import Option
 
-from rich.text import Text
-from rich.markup import escape as safe_escape
 
 # ----------------------------
 # Discovery and data loading
@@ -165,7 +165,7 @@ def format_prompt_or_completion(prompt_or_completion) -> Text:
                     out.append("tool call: ", style="bold")
                     if isinstance(tc, dict) and "function" in tc:
                         fn = tc["function"]
-                        out.append(f"{fn.get('name','')}\n")
+                        out.append(f"{fn.get('name', '')}\n")
                         out.append(str(fn.get("arguments", "")))
                     else:
                         out.append(str(tc))
@@ -174,8 +174,6 @@ def format_prompt_or_completion(prompt_or_completion) -> Text:
         return out
     out.append(str(prompt_or_completion))
     return out
-
-
 
 
 # ----------------------------
@@ -221,7 +219,9 @@ class SelectEnvScreen(Screen):
         option_list = self.query_one("#env-list", OptionList)
 
         if not self.env_ids:
-            option_list.add_option(Option("No completed evals found", id="__none__", disabled=True))
+            option_list.add_option(
+                Option("No completed evals found", id="__none__", disabled=True)
+            )
             return
 
         for env_id in self.env_ids:
@@ -425,34 +425,34 @@ class ViewRunScreen(Screen):
             avg_reward_str = f"{avg_reward:.3f}"
         else:
             avg_reward_str = str(avg_reward) if avg_reward else "N/A"
-        
+
         # Create three columns of information
         col1 = [
             f"[b]Environment:[/b] {safe_escape(self.run.env_id)}",
             f"[b]Model:[/b] {safe_escape(self.run.model)}",
             f"[b]Run ID:[/b] {safe_escape(self.run.run_id)}",
-            f"[b]Date:[/b] {safe_escape(meta.get('date',''))} {safe_escape(meta.get('time',''))}",
+            f"[b]Date:[/b] {safe_escape(meta.get('date', ''))} {safe_escape(meta.get('time', ''))}",
         ]
 
         col2 = [
             f"[b]Record:[/b] {self.current_record_idx + 1}/{len(self.records)}",
-            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples','')))}",
-            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example','')))}",
+            f"[b]Examples:[/b] {safe_escape(str(meta.get('num_examples', '')))}",
+            f"[b]Rollouts/ex:[/b] {safe_escape(str(meta.get('rollouts_per_example', '')))}",
             "",
         ]
 
         col3 = [
             f"[b]Avg reward:[/b] {safe_escape(avg_reward_str)}",
-            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens','')))}",
-            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature','')))}",
+            f"[b]Max tokens:[/b] {safe_escape(str(meta.get('max_tokens', '')))}",
+            f"[b]Temperature:[/b] {safe_escape(str(meta.get('temperature', '')))}",
             "",
         ]
         # Format as columns with consistent spacing
         lines = []
         for i in range(max(len(col1), len(col2), len(col3))):
             left = col1[i] if i < len(col1) else ""
-            mid  = col2[i] if i < len(col2) else ""
-            right= col3[i] if i < len(col3) else ""
+            mid = col2[i] if i < len(col2) else ""
+            right = col3[i] if i < len(col3) else ""
             lines.append(f"{left:<45}{mid:<35}{right}")
         return "\n".join(lines)
 
@@ -480,12 +480,17 @@ class ViewRunScreen(Screen):
         details_lines = Text()
         reward = record.get("reward", None)
         if reward is not None:
-            reward_str = f"{reward:.3f}" if isinstance(reward, (int, float)) else str(reward)
-            details_lines.append("Reward: ", style="bold"); details_lines.append(f"{reward_str}\n")
+            reward_str = (
+                f"{reward:.3f}" if isinstance(reward, (int, float)) else str(reward)
+            )
+            details_lines.append("Reward: ", style="bold")
+            details_lines.append(f"{reward_str}\n")
 
         answer = record.get("answer", None)
         if answer not in (None, ""):
-            details_lines.append("Answer: ", style="bold"); details_lines.append(str(answer)); details_lines.append("\n")
+            details_lines.append("Answer: ", style="bold")
+            details_lines.append(str(answer))
+            details_lines.append("\n")
 
         info = record.get("info", None)
         if info not in (None, {}):
@@ -493,10 +498,15 @@ class ViewRunScreen(Screen):
 
         task = record.get("task", None)
         if task not in (None, ""):
-            details_lines.append("Task: ", style="bold"); details_lines.append(str(task))
+            details_lines.append("Task: ", style="bold")
+            details_lines.append(str(task))
 
         details_widget = self.query_one("#details", Static)
-        details_widget.update(details_lines if details_lines.plain.strip() else Text("No additional details", style="dim"))
+        details_widget.update(
+            details_lines
+            if details_lines.plain.strip()
+            else Text("No additional details", style="dim")
+        )
         # Update metadata with current record index
         metadata_widget = self.query_one("#metadata", Static)
         metadata_widget.update(self._get_metadata_text())
@@ -695,7 +705,6 @@ def main() -> None:
     outputs_dir = os.environ.get("VF_OUTPUTS_DIR", "./outputs")
     app = VerifiersTUI(env_dir, outputs_dir)
     app.run()
-
 
 
 if __name__ == "__main__":
