@@ -248,7 +248,18 @@ class Environment(ABC):
                 )
                 return response
         except Exception as e:
-            self.logger.error(f"Error getting model response: {e} \n\nExiting...")
+            error_msg = f"Error getting model response: {e}"
+            # Check if this is a timeout error and provide specific guidance
+            if "timeout" in str(e).lower():
+                error_msg += (
+                    ". Consider reducing max_concurrent, increasing timeout values, "
+                    "or checking your model server health. "
+                    "Try reducing max_concurrent parameter, increasing async_generation_timeout in GRPOConfig, "
+                    "verifying vLLM server is running and responsive, considering reducing max_tokens or using a smaller model, "
+                    "and increasing system limits with 'ulimit -n 4096'."
+                )
+            self.logger.error(f"{error_msg} \n\nExiting...")
+            # Re-raise the exception so it can be properly handled upstream
             raise e
 
     @abstractmethod
@@ -406,19 +417,29 @@ class Environment(ABC):
             reward=[],
             metrics={},
         )
-        rollouts = await self.run_rollouts(
-            prompts=results.prompt,
-            answers=results.answer,
-            tasks=results.task,
-            infos=results.info,
-            client=client,
-            model=model,
-            sampling_args=gen_sampling_args,
-            max_concurrent=max_concurrent,
-            **kwargs,
-        )
+        
+        # Run rollouts with proper error handling
+        try:
+            rollouts = await self.run_rollouts(
+                prompts=results.prompt,
+                answers=results.answer,
+                tasks=results.task,
+                infos=results.info,
+                client=client,
+                model=model,
+                sampling_args=gen_sampling_args,
+                max_concurrent=max_concurrent,
+                **kwargs,
+            )
+        except Exception as e:
+            self.logger.error(f"Error during rollouts: {e}")
+            # Re-raise to let the calling function handle it appropriately
+            raise e
+            
         results.completion = [rollout[0] for rollout in rollouts]
         results.state = [rollout[1] for rollout in rollouts]
+        
+        # Score rollouts if requested
         if score_rollouts:
             rollout_scores = await self.rubric.score_rollouts(
                 prompts=results.prompt,
@@ -429,8 +450,10 @@ class Environment(ABC):
                 infos=results.info,
                 apply_weights=True,
             )
+            
             results.reward = rollout_scores.reward
             results.metrics = rollout_scores.metrics
+            
         return results
 
     def generate(
