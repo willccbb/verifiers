@@ -1,0 +1,96 @@
+name: Luanti Environment Smoke Test
+
+on:
+  push:
+    paths:
+      - 'environments/luanti/**'
+  pull_request:
+    paths:
+      - 'environments/luanti/**'
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e environments/luanti
+    
+    - name: Run smoke test
+      run: |
+        python - <<'PY'
+        import sys
+        sys.path.append('environments/luanti')
+        from luanti import load_environment, extract_lua_code, luanti_reward_func
+        
+        # Test environment loading
+        print("Testing environment loading...")
+        env = load_environment(use_sample_data=True)
+        print(f"✓ Environment loaded with {len(env.get_tasks())} tasks")
+        
+        # Test code extraction
+        print("\nTesting code extraction...")
+        test_response = """Here's the code:
+        
+        ```lua
+        minetest.register_node('mymod:glowing_stone', {
+            description = 'Glowing Stone',
+            tiles = {'stone.png'},
+            light_source = 14,
+            groups = {cracky=3}
+        })
+        ```
+        """
+        extracted = extract_lua_code(test_response)
+        assert 'minetest.register_node' in extracted
+        assert 'light_source = 14' in extracted
+        print("✓ Code extraction working")
+        
+        # Test reward function
+        print("\nTesting reward function...")
+        test_task = {
+            "instruction": "Create a node with light level 14",
+            "any_of": ["light_source", "minetest.register_node"]
+        }
+        
+        good_completion = "minetest.register_node('test', {light_source = 14, description = 'Test'})"
+        bad_completion = "print('hello world')"
+        
+        good_score = luanti_reward_func(None, good_completion, test_task)
+        bad_score = luanti_reward_func(None, bad_completion, test_task)
+        
+        assert good_score > 0.5, f"Good completion scored too low: {good_score}"
+        assert bad_score < 0.5, f"Bad completion scored too high: {bad_score}"
+        print(f"✓ Reward function working (good: {good_score:.2f}, bad: {bad_score:.2f})")
+        
+        # Test environment evaluation
+        print("\nTesting environment evaluation...")
+        tasks = env.get_tasks()
+        if tasks:
+            task = tasks[0]
+            result = env.evaluate_response(task, good_completion)
+            assert 'score' in result
+            assert result['score'] > 0
+            print(f"✓ Environment evaluation working (score: {result['score']:.2f})")
+        
+        print("\n🎉 All smoke tests passed!")
+        print("Environment is ready for use with verifiers framework")
+        PY
+    
+    - name: Test basic integration
+      run: |
+        python -c "
+        import sys; sys.path.append('environments/luanti')
+        from luanti import load_environment
+        env = load_environment(use_sample_data=True)
+        print(f'Environment ready: {env.__class__.__name__} with {len(env.get_tasks())} tasks')
+        "
