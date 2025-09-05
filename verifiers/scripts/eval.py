@@ -15,6 +15,9 @@ from openai import OpenAI
 import verifiers as vf
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
+# Setup logger for eval script
+logger = logging.getLogger(__name__)
+
 
 def eval_environment(
     env: str,
@@ -35,9 +38,7 @@ def eval_environment(
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
 ):
-    # Setup logger for this function
-    logger = logging.getLogger(__name__)
-
+    logger.setLevel("DEBUG" if verbose else "INFO")
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():
@@ -314,15 +315,6 @@ def main():
         help="Name of dataset to save to Hugging Face Hub",
     )
     args = parser.parse_args()
-
-    # Setup logging based on verbose flag
-    log_level = "DEBUG" if args.verbose else "INFO"
-    logging.basicConfig(
-        level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    logger = logging.getLogger(__name__)
-    logger.info("Starting vf-eval with arguments")
-    logger.debug(f"Parsed arguments: {vars(args)}")
 
     eval_environment(
         env=args.env,
