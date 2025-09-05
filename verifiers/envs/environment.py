@@ -430,6 +430,7 @@ class Environment(ABC):
                 states=results.state,
                 tasks=results.task,
                 infos=results.info,
+                max_concurrent=max_concurrent,
                 apply_weights=True,
             )
             results.reward = rollout_scores.reward
