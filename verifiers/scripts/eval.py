@@ -97,7 +97,7 @@ def eval_environment(
         sampling_args=merged_sampling_args,
         num_examples=num_examples,
         rollouts_per_example=rollouts_per_example,
-        max_concurrent_requests=max_concurrent_requests,
+        max_concurrent=max_concurrent_requests,
     )
     logger.info("Evaluation completed successfully")
     logger.info("--- Evaluation ---")
