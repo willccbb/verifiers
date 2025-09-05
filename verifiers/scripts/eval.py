@@ -26,7 +26,7 @@ def eval_environment(
     api_base_url: str,
     num_examples: int,
     rollouts_per_example: int,
-    max_concurrent_requests: int,
+    max_concurrent: int,
     max_tokens: int | None,
     temperature: float | None,
     sampling_args: dict | None,
@@ -37,7 +37,7 @@ def eval_environment(
 ):
     # Setup logger for this function
     logger = logging.getLogger(__name__)
-    
+
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():
@@ -70,12 +70,14 @@ def eval_environment(
         model = ENDPOINTS[model]["model"]
         logger.info(f"Using endpoint configuration for model '{model}' from registry")
     else:
-        logger.info(f"Model '{model}' not found in endpoint registry, using command-line arguments")
+        logger.info(
+            f"Model '{model}' not found in endpoint registry, using command-line arguments"
+        )
 
     api_key_value = os.getenv(api_key_var, "EMPTY")
     client = OpenAI(api_key=api_key_value, base_url=api_base_url)
     logger.info(f"Initialized OpenAI client with base_url: {api_base_url}")
-    
+
     logger.info(f"Loading environment: {env}")
     vf_env = vf.load_environment(env_id=env, **env_args)
     logger.info(f"Successfully loaded environment: {env}")
@@ -87,17 +89,19 @@ def eval_environment(
         merged_sampling_args["max_tokens"] = max_tokens
     if temperature is not None and "temperature" not in merged_sampling_args:
         merged_sampling_args["temperature"] = temperature
-    
+
     logger.info(f"Starting evaluation with model: {model}")
-    logger.info(f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent_requests={max_concurrent_requests}")
-    
+    logger.info(
+        f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent={max_concurrent}"
+    )
+
     results = vf_env.evaluate(
         client=client,
         model=model,
         sampling_args=merged_sampling_args,
         num_examples=num_examples,
         rollouts_per_example=rollouts_per_example,
-        max_concurrent=max_concurrent_requests,
+        max_concurrent=max_concurrent,
     )
     logger.info("Evaluation completed successfully")
     logger.info("--- Evaluation ---")
@@ -259,7 +263,7 @@ def main():
         help="Number of rollouts per example",
     )
     parser.add_argument(
-        "--max-concurrent-requests",
+        "--max-concurrent",
         "-c",
         type=int,
         default=32,
@@ -313,7 +317,9 @@ def main():
 
     # Setup logging based on verbose flag
     log_level = "DEBUG" if args.verbose else "INFO"
-    logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     logger = logging.getLogger(__name__)
     logger.info("Starting vf-eval with arguments")
     logger.debug(f"Parsed arguments: {vars(args)}")
@@ -328,7 +334,7 @@ def main():
         api_base_url=args.api_base_url,
         num_examples=args.num_examples,
         rollouts_per_example=args.rollouts_per_example,
-        max_concurrent_requests=args.max_concurrent_requests,
+        max_concurrent=args.max_concurrent,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         sampling_args=args.sampling_args,
