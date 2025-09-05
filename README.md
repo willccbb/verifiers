@@ -272,9 +272,7 @@ If you use this code in your research, please cite:
 }
 ```
 
-
 ## Roadmap
-- A community Environments hub for crowdsourcing, sharing, and discovering new RL environments built with `verifiers`
 - Default patterns for hosted resources such as code sandboxes, auxiliary models, and MCP servers
 - Multimodal input support
 - Non-increasing token sequences via REINFORCE
