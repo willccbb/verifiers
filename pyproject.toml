@@ -68,6 +68,9 @@ dev = [
     "nest-asyncio>=1.6.0",
     "ipykernel",
     "ipywidgets",
+    "sphinx",
+    "myst-parser",
+    "furo"
 ]
 
 docs = [
