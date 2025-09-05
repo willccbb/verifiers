@@ -367,7 +367,10 @@ class Environment(ABC):
             for col in inputs.column_names:
                 if col == "info":
                     # handle info column to ensure mutable dicts
-                    results_dict[col] = [dict(item) for item in inputs[col]]
+                    if isinstance(inputs[col][0], str):
+                        results_dict[col] = [json.loads(item) for item in inputs[col]]
+                    else:
+                        results_dict[col] = [dict(item) for item in inputs[col]]
                 else:
                     results_dict[col] = deepcopy(inputs[col])
         else:
