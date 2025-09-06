@@ -149,7 +149,7 @@ def init_environment(
     # create environment file if it doesn't exist
     environment_file = environment_dir / f"{env_id_underscore}.py"
     if not environment_file.exists():
-        environment_file.write_text(ENVIRONMENT_TEMPLATE.format(env_id=env_id_dash))
+        environment_file.write_text(ENVIRONMENT_TEMPLATE)
     else:
         print(
             f"{env_id_underscore}.py already exists at {environment_file}, skipping..."
