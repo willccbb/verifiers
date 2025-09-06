@@ -6,7 +6,7 @@ import verifiers as vf
 README_TEMPLATE = """\
 # {env_id_dash}
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
+> Replace the placeholders below, then remove this callout.
 
 ### Overview
 - **Environment ID**: `{env_id_dash}`
