@@ -1,16 +1,19 @@
 import asyncio
 import json
 import logging
-import os
 import concurrent.futures
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from datasets import Dataset
+from prime_cli.api.sandbox import AsyncSandboxClient, CreateSandboxRequest
 
 import verifiers as vf
 from verifiers.utils.data_utils import load_example_dataset
 
 
 class PrimeSandboxManager:
-    """Manages Prime Intellect sandboxes for MCP server execution."""
+    """Manages Prime Intellect sandboxes using the Prime API client."""
     
     def __init__(self, 
                  image: str = "node:22-bullseye",
@@ -22,95 +25,44 @@ class PrimeSandboxManager:
         self.cpu_cores = cpu_cores
         self.memory_gb = memory_gb
         self.disk_size_gb = disk_size_gb
-        
-        # Set API key if provided
-        if api_key:
-            os.environ['PRIME_API_KEY'] = api_key
+        self.api_key = api_key or os.getenv('PRIME_API_KEY')
+        self.sandbox_client = AsyncSandboxClient(api_key=self.api_key)
         
         self.sandbox_id: Optional[str] = None
+        self.sandbox = None
         self.logger = logging.getLogger(f"verifiers.envs.MCPToolEnv.SandboxManager")
     
     async def _wait_for_sandbox_ready(self, max_wait_seconds: int = 60):
-        """Wait for sandbox to be in RUNNING state using prime package."""
+        """Wait for sandbox to be ready."""
         if not self.sandbox_id:
             return
         
         self.logger.info(f"Waiting for sandbox {self.sandbox_id} to be ready...")
         
-        for attempt in range(max_wait_seconds):
-            try:
-                # Use prime package for status check
-                result = await asyncio.create_subprocess_exec(
-                    "prime", "sandbox", "get", self.sandbox_id,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await result.communicate()
-                
-                if result.returncode == 0:
-                    output = stdout.decode().strip()
-                    if "RUNNING" in output:
-                        self.logger.info(f"Sandbox ready after {attempt + 1}s")
-                        return
-                
-                await asyncio.sleep(1)
-                
-            except Exception as e:
-                self.logger.debug(f"Error checking sandbox status: {e}")
-                await asyncio.sleep(1)
-        
-        self.logger.warning(f"Sandbox may not be ready after {max_wait_seconds}s")
+        try:
+            await self.sandbox_client.wait_for_creation(self.sandbox_id, max_attempts=max_wait_seconds)
+            self.logger.info("Sandbox ready")
+        except Exception as e:
+            self.logger.warning(f"Sandbox may not be ready: {e}")
     
     async def create_sandbox(self) -> str:
-        """Create a new Prime sandbox and return its ID."""
+        """Create a new Prime sandbox."""
         try:
-            cmd = ["prime", "sandbox", "create", self.image, "--yes"]
-            
-            if self.cpu_cores > 1:
-                cmd.extend(["--cpu-cores", str(self.cpu_cores)])
-            if self.memory_gb > 1:
-                cmd.extend(["--memory-gb", str(self.memory_gb)])
-            if self.disk_size_gb > 1:
-                cmd.extend(["--disk-size-gb", str(self.disk_size_gb)])
-            
             self.logger.info(f"Creating sandbox with {self.image}")
             
-            result = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            request = CreateSandboxRequest(
+                name=f"mcp-{int(asyncio.get_event_loop().time())}",
+                docker_image=self.image,
+                cpu_cores=self.cpu_cores,
+                memory_gb=self.memory_gb,
+                disk_size_gb=self.disk_size_gb,
+                start_command="tail -f /dev/null"
             )
-            stdout, stderr = await result.communicate()
             
-            if result.returncode != 0:
-                error_msg = stderr.decode().strip()
-                if "quota" in error_msg.lower() or "limit" in error_msg.lower():
-                    raise RuntimeError(f"Prime API quota/limit exceeded: {error_msg}")
-                elif "unauthorized" in error_msg.lower():
-                    raise RuntimeError(f"Prime API authentication failed: {error_msg}")
-                else:
-                    raise RuntimeError(f"Failed to create sandbox: {error_msg}")
-            
-            output = stdout.decode().strip()
-            lines = [line.strip() for line in output.split('\n') if line.strip()]
-            
-            for line in lines:
-                if "Successfully created sandbox" in line:
-                    parts = line.split("Successfully created sandbox")
-                    if len(parts) > 1:
-                        self.sandbox_id = parts[1].strip()
-                        break
-            
-            if not self.sandbox_id:
-                for line in lines:
-                    if len(line) > 15 and line.replace('-', '').replace('_', '').isalnum():
-                        self.sandbox_id = line
-                        break
-            
-            if not self.sandbox_id:
-                raise RuntimeError(f"Could not extract sandbox ID: {output}")
-            
+            self.sandbox = await self.sandbox_client.create(request)
+            self.sandbox_id = self.sandbox.id
             self.logger.info(f"Created sandbox: {self.sandbox_id}")
+            
             await self._wait_for_sandbox_ready()
             return self.sandbox_id
             
@@ -119,42 +71,32 @@ class PrimeSandboxManager:
             raise
     
     async def run_command(self, command: str) -> Tuple[int, str, str]:
-        """Execute a command in the sandbox."""
+        """Execute a command in the sandbox using API client."""
         if not self.sandbox_id:
             raise RuntimeError("No sandbox available")
         
         try:
-            result = await asyncio.create_subprocess_exec(
-                "prime", "sandbox", "run", self.sandbox_id, command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            result = await self.sandbox_client.execute_command(
+                sandbox_id=self.sandbox_id,
+                command=command
             )
-            stdout, stderr = await result.communicate()
-            return result.returncode, stdout.decode(), stderr.decode()
+            
+            return result.exit_code, result.stdout, result.stderr
             
         except Exception as e:
             self.logger.error(f"Error running command: {e}")
             raise
     
     async def cleanup(self):
-        """Delete the sandbox."""
+        """Delete the sandbox using API client."""
         if not self.sandbox_id:
             return
         
         try:
-            result = await asyncio.create_subprocess_exec(
-                "prime", "sandbox", "delete", self.sandbox_id, "--yes",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            _, stderr = await result.communicate()
-            
-            if result.returncode == 0:
-                self.logger.info(f"Deleted sandbox: {self.sandbox_id}")
-            else:
-                self.logger.error(f"Failed to delete sandbox: {stderr.decode()}")
-            
+            await self.sandbox_client.delete(self.sandbox_id)
+            self.logger.info(f"Deleted sandbox: {self.sandbox_id}")
             self.sandbox_id = None
+            self.sandbox = None
             
         except Exception as e:
             self.logger.error(f"Error deleting sandbox: {e}")
@@ -296,14 +238,8 @@ class MCPServerManager:
     
     async def shutdown_servers(self):
         """Shutdown all MCP servers."""
-        for server_name in self.servers:
-            try:
-                kill_cmd = f"pkill -f '{' '.join(self.servers[server_name]['command'])}'"
-                await self.sandbox_manager.run_command(kill_cmd)
-                self.logger.info(f"Shutdown MCP server: {server_name}")
-            except Exception as e:
-                self.logger.error(f"Error shutting down server {server_name}: {e}")
-        
+        # Servers will be automatically terminated when sandbox is deleted
+        self.logger.info(f"Shutting down {len(self.servers)} MCP servers")
         self.servers.clear()
 
 
