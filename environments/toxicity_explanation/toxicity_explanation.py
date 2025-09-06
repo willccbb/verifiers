@@ -79,7 +79,7 @@ Respond in the following format:
 
     judge_prompt = """Evaluate this toxicity classification task.
 
-Text to analyze: {question}
+Text to analyze: {quest
 
 Expected classification: {answer}
 
