@@ -6,7 +6,7 @@ import verifiers as vf
 README_TEMPLATE = """\
 # {env_id_dash}
 
-> Replace the placeholders below, then remove this callout. Keep the Evaluation Reports section at the bottom intact so reports can auto-render.
+> Replace the placeholders below, then remove this callout.
 
 ### Overview
 - **Environment ID**: `{env_id_dash}`
@@ -74,9 +74,12 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+"""
 
-[tool.hatch.build]
-include = ["{{env_file}}.py"]
+INIT_TEMPLATE = """\
+from .{env_id} import load_environment
+
+__all__ = ["load_environment"]
 """
 
 ENVIRONMENT_TEMPLATE = """\
@@ -132,10 +135,21 @@ def init_environment(
     else:
         print(f"pyproject.toml already exists at {pyproject_file}, skipping...")
 
+    # create environment directory if it doesn't exist
+    environment_dir = local_dir / env_id_underscore
+    environment_dir.mkdir(parents=True, exist_ok=True)
+
+    # create init file if it doesn't exist
+    init_file = environment_dir / "__init__.py"
+    if not init_file.exists():
+        init_file.write_text(INIT_TEMPLATE.format(env_id=env_id_underscore))
+    else:
+        print(f"__init__.py already exists at {init_file}, skipping...")
+
     # create environment file if it doesn't exist
-    environment_file = local_dir / f"{env_id_underscore}.py"
+    environment_file = environment_dir / f"{env_id_underscore}.py"
     if not environment_file.exists():
-        environment_file.write_text(ENVIRONMENT_TEMPLATE.format(env_id=env_id_dash))
+        environment_file.write_text(ENVIRONMENT_TEMPLATE)
     else:
         print(
             f"{env_id_underscore}.py already exists at {environment_file}, skipping..."
