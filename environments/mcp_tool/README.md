@@ -2,8 +2,8 @@
 
 ### Overview
 - **Environment ID**: `mcp-tool`
-- **Short description**: Multi-turn tool environment that spawns MCP servers in Prime Intellect sandboxes and exposes them as tools to models
-- **Tags**: mcp, tools, multi-turn, sandbox, prime
+- **Short description**: Universal multi-turn tool environment that spawns any MCP servers in Prime Intellect sandboxes and exposes them as tools to models
+- **Tags**: mcp, tools, multi-turn, sandbox, prime, universal
 
 ### Datasets
 - **Primary dataset(s)**: Configurable via `dataset_name` parameter (defaults to GSM8K)
@@ -16,8 +16,8 @@
 - **Rubric overview**: `ToolRubric` for MCP tool execution success and format adherence
 
 ### Quickstart
-Run an evaluation with filesystem MCP server:
 
+**Filesystem MCP Server:**
 ```bash
 uv run vf-eval mcp-tool -a '{
   "mcp_launch_commands": [
@@ -31,11 +31,44 @@ uv run vf-eval mcp-tool -a '{
 }'
 ```
 
-Configure model and sampling:
+**Memory MCP Server:**
+```bash
+uv run vf-eval mcp-tool -a '{
+  "mcp_launch_commands": [
+    {
+      "name": "memory", 
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"]
+    }
+  ],
+  "num_examples": 10
+}'
+```
 
+**Multiple MCP Servers:**
+```bash
+uv run vf-eval mcp-tool -a '{
+  "mcp_launch_commands": [
+    {
+      "name": "filesystem",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    {
+      "name": "memory",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"]
+    },
+    {
+      "name": "git",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-git", "--repository", "/tmp/repo"]
+    }
+  ],
+  "num_examples": 10
+}'
+```
+
+**Custom Configuration:**
 ```bash
 uv run vf-eval mcp-tool \
-  -m gpt-4.1-mini \
+  -m gpt-4o-mini \
   -n 20 -r 3 -t 1024 -T 0.7 \
   -a '{
     "mcp_launch_commands": [
@@ -50,9 +83,13 @@ uv run vf-eval mcp-tool \
 ```
 
 Notes:
+- **Universal MCP Support**: Works with any MCP server that follows the Model Context Protocol
 - Requires Prime CLI configuration: `prime config set-api-key`
 - Uses Node.js sandbox image for npx/npm support
 - MCP servers run in isolated Prime Intellect sandboxes
+- Automatic tool discovery via MCP protocol
+- Dynamic tool schema generation from MCP server metadata
+- See [Prime Sandboxes documentation](https://docs.primeintellect.ai/sandboxes) for details
 - Automatic cleanup prevents resource leaks
 
 ### Environment Arguments
@@ -77,6 +114,24 @@ Each MCP server configuration:
 }
 ```
 
+### Supported MCP Servers
+The environment supports **any MCP server** that follows the Model Context Protocol. Popular servers include:
+
+| Server | Package | Description |
+|--------|---------|-------------|
+| **Filesystem** | `@modelcontextprotocol/server-filesystem` | File system operations (read, write, list) |
+| **Memory** | `@modelcontextprotocol/server-memory` | Persistent memory storage and retrieval |
+| **Git** | `@modelcontextprotocol/server-git` | Git repository operations |
+| **GitHub** | `@modelcontextprotocol/server-github` | GitHub API integration |
+| **Slack** | `@modelcontextprotocol/server-slack` | Slack messaging and channel management |
+| **Postgres** | `@modelcontextprotocol/server-postgres` | PostgreSQL database operations |
+| **SQLite** | `@modelcontextprotocol/server-sqlite` | SQLite database operations |
+| **Puppeteer** | `@modelcontextprotocol/server-puppeteer` | Web scraping and automation |
+| **Google Drive** | `@modelcontextprotocol/server-gdrive` | Google Drive file operations |
+| **Brave Search** | `@modelcontextprotocol/server-brave-search` | Web search capabilities |
+
+**Custom Servers**: You can also use any custom MCP server by providing the appropriate command and setup instructions.
+
 ### Metrics
 | Metric | Meaning |
 | ------ | ------- |
@@ -86,14 +141,7 @@ Each MCP server configuration:
 ### Prerequisites
 1. **Prime CLI**: `pip install prime>=0.3.26` and `prime config set-api-key`
 2. **API Access**: Valid Prime Intellect API credentials
-
-### Pricing
-Prime Sandbox usage (per hour while running):
-- **CPU**: $0.05 per core/hour
-- **Memory**: $0.01 per GB/hour  
-- **Disk**: $0.001 per GB/hour
-
-Example: 1 core, 2GB RAM, 10GB disk = $0.08/hour
+3. **Sandbox Access**: See [Prime Sandboxes documentation](https://docs.primeintellect.ai/sandboxes) for setup and pricing
 
 ## Evaluation Reports
 
