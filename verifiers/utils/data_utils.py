@@ -31,9 +31,9 @@ def extract_boxed_answer(text: str, find_last: bool = False) -> str:
 
     # Find \boxed{
     if find_last:
-        boxed_start = text.find("\\boxed{")
-    else:
         boxed_start = text.rfind("\\boxed{")
+    else:
+        boxed_start = text.find("\\boxed{")
     if boxed_start == -1:
         return text
     # Find the content between the braces
