@@ -95,7 +95,10 @@ def load_environment(**kwargs) -> vf.Environment:
 
 
 def init_environment(
-    env: str, path: str = "./environments", rewrite_readme: bool = False
+    env: str,
+    path: str = "./environments",
+    rewrite_readme: bool = False,
+    multi_file: bool = False,
 ) -> Path:
     """
     Initialize a new verifiers environment.
@@ -136,15 +139,16 @@ def init_environment(
         print(f"pyproject.toml already exists at {pyproject_file}, skipping...")
 
     # create environment directory if it doesn't exist
-    environment_dir = local_dir / env_id_underscore
+    environment_dir = local_dir / env_id_underscore if multi_file else local_dir
     environment_dir.mkdir(parents=True, exist_ok=True)
 
     # create init file if it doesn't exist
-    init_file = environment_dir / "__init__.py"
-    if not init_file.exists():
-        init_file.write_text(INIT_TEMPLATE.format(env_id=env_id_underscore))
-    else:
-        print(f"__init__.py already exists at {init_file}, skipping...")
+    if multi_file:
+        init_file = environment_dir / "__init__.py"
+        if not init_file.exists():
+            init_file.write_text(INIT_TEMPLATE.format(env_id=env_id_underscore))
+        else:
+            print(f"__init__.py already exists at {init_file}, skipping...")
 
     # create environment file if it doesn't exist
     environment_file = environment_dir / f"{env_id_underscore}.py"
@@ -163,7 +167,7 @@ def main():
     parser.add_argument(
         "env",
         type=str,
-        help=("The environment id to init"),
+        help="The environment id to init",
     )
     parser.add_argument(
         "--path",
@@ -178,9 +182,20 @@ def main():
         default=False,
         help="Rewrite README.md even if it already exists",
     )
+    parser.add_argument(
+        "--multi-file",
+        action="store_true",
+        default=False,
+        help="Create multi-file package structure instead of single file",
+    )
     args = parser.parse_args()
 
-    init_environment(args.env, args.path, rewrite_readme=args.rewrite_readme)
+    init_environment(
+        args.env,
+        args.path,
+        rewrite_readme=args.rewrite_readme,
+        multi_file=args.multi_file,
+    )
 
 
 if __name__ == "__main__":
