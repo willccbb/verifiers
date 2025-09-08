@@ -1342,6 +1342,18 @@ class GRPOTrainer(Trainer):
         metrics["eval_reward"] = rewards.mean().item()
         metrics["eval_reward_std"] = rewards.std().item()
 
+        # Group rewards by unique subset keys for more detailed analysis
+        # This allows calculating averages for different groups without multiple evaluations
+        grouping_keys = ["task"]  # Can be extended to include other keys like difficulty, category, etc.
+        
+        for grouping_key in grouping_keys:
+            if hasattr(eval_results, grouping_key) and getattr(eval_results, grouping_key):
+                key_values = getattr(eval_results, grouping_key)
+                grouped_metrics = self._compute_grouped_metrics(
+                    key_values, eval_results.reward, eval_results.metrics
+                )
+                metrics.update(grouped_metrics)
+
         # Log individual reward function scores
         non_reward_metric_keys = [
             "reward",
@@ -1437,6 +1449,51 @@ class GRPOTrainer(Trainer):
         self.log(metrics)
 
         # Return metrics dict to match base class signature
+        return metrics
+
+    def _compute_grouped_metrics(self, grouping_values, rewards, all_metrics):
+        """
+        Compute grouped metrics by unique subset keys.
+        
+        Args:
+            grouping_values: List of values to group by (e.g., task names, difficulty levels)
+            rewards: List of reward values
+            all_metrics: Dictionary of all metric values
+            
+        Returns:
+            Dictionary of grouped metrics
+        """
+        metrics = {}
+        
+        # Create groups based on unique values
+        groups = {}
+        for i, group_key in enumerate(grouping_values):
+            if group_key not in groups:
+                groups[group_key] = {"indices": [], "rewards": []}
+            groups[group_key]["indices"].append(i)
+            groups[group_key]["rewards"].append(rewards[i])
+        
+        # Compute metrics for each group
+        for group_key, group_data in groups.items():
+            group_rewards = torch.tensor(group_data["rewards"])
+            metrics[f"eval_reward_{group_key}"] = group_rewards.mean().item()
+            metrics[f"eval_reward_std_{group_key}"] = group_rewards.std().item()
+            
+            # Compute grouped metrics for each metric type
+            for metric_key, metric_values in all_metrics.items():
+                if metric_key in ["reward", "prompt", "completion", "info", "answer", "state", "task"]:
+                    continue  # Skip non-reward metrics or metadata
+                    
+                group_metric_values = [metric_values[i] for i in group_data["indices"]]
+                if isinstance(group_metric_values, list):
+                    metrics[f"eval_rewards/{metric_key}_{group_key}"] = float(np.mean(group_metric_values))
+                else:
+                    try:
+                        tensor_values = torch.tensor(group_metric_values)
+                        metrics[f"eval_rewards/{metric_key}_{group_key}"] = tensor_values.mean().item()
+                    except Exception:
+                        continue
+                        
         return metrics
 
     def log(self, logs: dict[str, float], start_time: float | None = None) -> None:
