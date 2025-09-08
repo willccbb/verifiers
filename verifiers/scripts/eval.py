@@ -4,6 +4,7 @@ import importlib.util
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -96,6 +97,9 @@ def eval_environment(
         f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent={max_concurrent}"
     )
 
+    # Track evaluation runtime
+    eval_start_time = time.time()
+    
     results = vf_env.evaluate(
         client=client,
         model=model,
@@ -104,7 +108,10 @@ def eval_environment(
         rollouts_per_example=rollouts_per_example,
         max_concurrent=max_concurrent,
     )
-    logger.info("Evaluation completed successfully")
+    
+    eval_end_time = time.time()
+    eval_runtime_seconds = eval_end_time - eval_start_time
+    logger.info(f"Evaluation completed successfully in {eval_runtime_seconds:.2f} seconds")
     logger.info("--- Evaluation ---")
     logger.info(f"Environment: {env}")
     logger.info(f"Model: {model}")
@@ -160,6 +167,59 @@ def eval_environment(
             v = results.metrics[k]
             data_dict[k] = v
 
+        parsed_answers = []
+        rubric_metadata = []
+        
+        for i, (completion, state) in enumerate(zip(results.completion, results.state)):
+            try:
+                parsed_answer = vf_env.parser.parse_answer(completion) if vf_env.parser else None
+                parsed_answers.append(parsed_answer)
+            except Exception as e:
+                logger.warning(f"Failed to parse answer for rollout {i}: {e}")
+                parsed_answers.append(None)
+            
+            metadata = {}
+            
+            if "judge_response" in state:
+                metadata["judge_response"] = state["judge_response"]
+            
+            if "responses" in state:
+                try:
+                    responses = state["responses"]
+                    if responses:
+                        if hasattr(responses[0], 'choices'):
+                            response_texts = []
+                            for resp in responses:
+                                if hasattr(resp, 'choices') and resp.choices:
+                                    if hasattr(resp.choices[0], 'message'):
+                                        response_texts.append(resp.choices[0].message.content)
+                                    elif hasattr(resp.choices[0], 'text'):
+                                        response_texts.append(resp.choices[0].text)
+                            metadata["model_responses"] = response_texts
+                        else:
+                            metadata["model_responses"] = responses
+                except Exception as e:
+                    logger.warning(f"Failed to extract model responses for rollout {i}: {e}")
+            
+            if "tool_calls" in state:
+                metadata["tool_calls"] = state["tool_calls"]
+            
+            for key, value in state.items():
+                if key not in ["responses", "judge_response", "tool_calls"] and key not in metadata:
+                    try:
+                        json.dumps(value)
+                        metadata[key] = value
+                    except (TypeError, ValueError):
+                        logger.debug(f"Skipping non-serializable state field '{key}' for rollout {i}")
+            
+            rubric_metadata.append(metadata)
+        
+        if any(pa is not None for pa in parsed_answers):
+            data_dict["parsed_answer"] = parsed_answers
+        
+        if any(meta for meta in rubric_metadata):
+            data_dict["state_metadata"] = rubric_metadata
+
         dataset = Dataset.from_dict(data_dict)
         metadata = {
             "env": env,
@@ -170,6 +230,8 @@ def eval_environment(
             "date": datetime.now().strftime("%Y-%m-%d"),
             "time": datetime.now().strftime("%H:%M:%S"),
             "avg_reward": sum(results.reward) / len(results.reward),
+            "eval_runtime_seconds": eval_runtime_seconds,
+            "total_rollouts": len(results.reward),
         }
         for k in results.metrics:
             metadata[f"avg_{k}"] = sum(results.metrics[k]) / len(results.metrics[k])
@@ -191,6 +253,7 @@ def eval_environment(
                 json.dump(metadata, f)
 
             logger.info(f"Saved dataset to {results_path}")
+            logger.info(f"Enhanced metadata saved including runtime ({eval_runtime_seconds:.2f}s) and state information")
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
                 dataset_name = (
