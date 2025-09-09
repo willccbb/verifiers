@@ -165,6 +165,8 @@ class Environment(ABC):
         if seed is not None:
             self.dataset = self.dataset.shuffle(seed=seed)
         if n > 0:
+            # Cap n to the length of the dataset to prevent IndexError
+            n = min(n, len(self.dataset))
             return self.dataset.select(range(n))
         return self.dataset
 
@@ -177,6 +179,8 @@ class Environment(ABC):
         if seed is not None:
             self.eval_dataset = self.eval_dataset.shuffle(seed=seed)
         if n > 0:
+            # Cap n to the length of the dataset to prevent IndexError
+            n = min(n, len(self.eval_dataset))
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
