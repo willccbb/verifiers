@@ -64,12 +64,11 @@ def print_prompt_completions_sample(
         name = _attr_or_key(src, "name", "") or ""
         args = _attr_or_key(src, "arguments", {}) or {}
 
-        if isinstance(args, str):
+        if not isinstance(args, str):
             try:
-                # Keep original behavior: best-effort parse if it's a JSON string
-                args = json.loads(args)
+                args = json.dumps(args)
             except Exception:
-                pass
+                args = str(args)
         return {"name": name, "args": args}
 
     def _format_messages(messages) -> Text:
