@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 
 
 def setup_client(
-    base_url: str,
+    api_base_url: str,
     api_key_var: str,
     timeout: float = 600.0,  # OAI default, larger value recommened for evals
     max_connections: int = 1000,  # OAI default, larger value recommened for evals
@@ -26,7 +26,7 @@ def setup_client(
     # Setup client
     http_client = AsyncClient(limits=limits, timeout=timeout)
     client = AsyncOpenAI(
-        base_url=base_url,
+        base_url=api_base_url,
         api_key=os.getenv(api_key_var, "EMPTY"),
         max_retries=max_retries,
         http_client=http_client,
