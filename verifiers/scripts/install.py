@@ -1,5 +1,6 @@
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 """
@@ -24,12 +25,16 @@ def install_environment(env: str, path: str, from_repo: bool, branch: str):
                 "uv",
                 "pip",
                 "install",
+                "--python",
+                sys.executable,
                 f"{env_name} @ git+https://github.com/willccbb/verifiers.git@{branch}#subdirectory=environments/{env_folder}",
             ]
         )
     else:
         env_path = Path(path) / env_folder
-        subprocess.run(["uv", "pip", "install", "-e", env_path])
+        subprocess.run(
+            ["uv", "pip", "install", "--python", sys.executable, "-e", env_path]
+        )
 
 
 def main():

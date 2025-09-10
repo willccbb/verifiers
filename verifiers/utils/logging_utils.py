@@ -59,12 +59,18 @@ def print_prompt_completions_sample(
             style = "bright_cyan" if role == "assistant" else "bright_magenta"
             out.append(f"{role}: ", style="bold")
             out.append(content, style=style)
-            if "tool_calls" in msg:
-                for tool_call in msg["tool_calls"]:
-                    name = getattr(tool_call.function, "name", "")
-                    args = getattr(tool_call.function, "arguments", {})
-                    tool_call_str = json.dumps({"name": name, "args": args}, indent=2)
-                    out.append(f"\n\n[tool call]\n{tool_call_str}", style=style)
+            tool_calls = msg.get("tool_calls") or []  # treat None as empty list
+
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                if not isinstance(fn, dict):
+                    fn = {}
+                name = fn.get("name", "")
+                args = fn.get("arguments", {})
+                tool_call_str = json.dumps(
+                    {"name": name, "args": args}, indent=2, ensure_ascii=False
+                )
+                out.append(f"\n\n[tool call]\n{tool_call_str}", style=style)
         return out
 
     console = Console()
