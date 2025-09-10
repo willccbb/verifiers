@@ -3,7 +3,6 @@ import importlib
 import importlib.util
 import json
 import logging
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -78,7 +77,7 @@ def eval_environment(
     # Setup eval client with high limits, effectively preventing any API timeout errors
     client = setup_client(
         api_base_url,
-        os.getenv(api_key_var, "EMPTY"),
+        api_key_var,
         timeout=36000.0,  # 10h
         max_connections=28000,  # Number of available ports
         max_keepalive_connections=28000,  # Number of available ports
