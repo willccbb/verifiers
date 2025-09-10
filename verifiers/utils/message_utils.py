@@ -46,6 +46,10 @@ def cleanup_message(message: ChatMessage) -> ChatMessage:
     new_message["role"] = message["role"]
     if "tool_calls" in message:
         new_message["tool_calls"] = message["tool_calls"]
+
+    if "tool_call_id" in message:
+        new_message["tool_call_id"] = message["tool_call_id"]
+
     new_message["content"] = []
     content = message.get("content")
     if content is None:
