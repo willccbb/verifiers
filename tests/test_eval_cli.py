@@ -44,7 +44,7 @@ def test_cli_sampling_args_precedence_over_flags(monkeypatch):
             self.api_key = api_key
             self.base_url = base_url
 
-    monkeypatch.setattr(vf_eval, "OpenAI", DummyOpenAI)
+    monkeypatch.setattr(vf_eval, "setup_client", lambda *args, **kwargs: DummyOpenAI())
 
     # Run evaluation with JSON sampling args overriding flags
     vf_eval.eval_environment(
@@ -93,7 +93,7 @@ def test_cli_sampling_args_fill_from_flags_when_missing(monkeypatch):
             self.api_key = api_key
             self.base_url = base_url
 
-    monkeypatch.setattr(vf_eval, "OpenAI", DummyOpenAI)
+    monkeypatch.setattr(vf_eval, "setup_client", lambda *args, **kwargs: DummyOpenAI())
 
     # Run evaluation with JSON lacking max_tokens/temperature
     vf_eval.eval_environment(
