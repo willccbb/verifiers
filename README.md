@@ -20,8 +20,10 @@ Full documentation is available [here](https://verifiers.readthedocs.io/en/lates
 
 We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
 ```bash
+# install uv (first time only)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-uv init # create a fresh project
+# create a fresh project -- 3.11 + 3.12 supported
+uv init && uv venv --python 3.12 
 source .venv/bin/activate
 ```
 
@@ -46,7 +48,14 @@ To install `verifiers` from source for core library development, do:
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
+
+# for CPU-only dev:
+uv sync --extra dev
+
+# or, for trainer dev:
 uv sync --all-extras && uv pip install flash-attn --no-build-isolation
+
+# install pre-commit hooks
 uv run pre-commit install
 ```
 
