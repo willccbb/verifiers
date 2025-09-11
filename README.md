@@ -82,7 +82,7 @@ To run a quick evaluation of your Environment with an API-based model, do:
 vf-eval vf-environment-name # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
-The core elements of Environments in are:
+The core elements of Environments are:
 - Datasets: a Hugging Face `Dataset` with a `prompt` column for inputs, and optionally `answer (str)` or `info (dict)` columns for evaluation (both can be omitted for environments that evaluate based solely on completion quality)
 - Rollout logic: interactions between models and the environment (e.g. `env_response` + `is_completed` for any `MultiTurnEnv`)
 - Rubrics: an encapsulation for one or more reward functions
