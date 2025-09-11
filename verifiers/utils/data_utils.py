@@ -17,7 +17,7 @@ BOXED_SYSTEM_PROMPT = (
 ###############
 
 
-def extract_boxed_answer(text: str, find_last: bool = False) -> str:
+def extract_boxed_answer(text: str) -> str:
     def find_matching_brace(s: str, start: int) -> int:
         count = 1
         i = start
@@ -29,11 +29,8 @@ def extract_boxed_answer(text: str, find_last: bool = False) -> str:
             i += 1
         return i - 1 if count == 0 else -1
 
-    # Find \boxed{
-    if find_last:
-        boxed_start = text.rfind("\\boxed{")
-    else:
-        boxed_start = text.find("\\boxed{")
+    # Find last \boxed{
+    boxed_start = text.rfind("\\boxed{")
     if boxed_start == -1:
         return text
     # Find the content between the braces
