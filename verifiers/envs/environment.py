@@ -227,6 +227,23 @@ class Environment(ABC):
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
+                # --- detect audio parts and force text-only modality if caller didn't set one ---
+                has_audio = False
+                try:
+                    for m in prompt:
+                        c = m.get("content")  # type: ignore[assignment]
+                        if isinstance(c, list):
+                            for p in c:
+                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
+                                    has_audio = True
+                                    break
+                        if has_audio:
+                            break
+                except Exception:
+                    has_audio = False
+                if has_audio and "modalities" not in clean_sampling_args:
+                    clean_sampling_args = {**clean_sampling_args, "modalities": ["text"]}
+
                 if oai_tools:
                     response = await client.chat.completions.create(
                         model=model,
