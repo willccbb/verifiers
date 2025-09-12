@@ -4,6 +4,18 @@
   <h1>Verifiers</h1>
 </p>
 
+<p align="center">
+  <a href="https://github.com/willccbb/verifiers/actions/workflows/style.yml">
+    <img src="https://github.com/willccbb/verifiers/actions/workflows/style.yml/badge.svg" alt="Style" />
+  </a>
+  <a href="https://github.com/willccbb/verifiers/actions/workflows/test.yml">
+    <img src="https://github.com/willccbb/verifiers/actions/workflows/test.yml/badge.svg" alt="Test" />
+  </a>
+  <a href="https://github.com/willccbb/verifiers/actions/workflows/publish-environments.yml">
+    <img src="https://github.com/willccbb/verifiers/actions/workflows/publish-environments.yml/badge.svg" alt="Envs" />
+  </a>
+</p>
+
 <p>
 Environments for LLM Reinforcement Learning
 </p>
@@ -88,7 +100,8 @@ vf_env = vf.load_environment("vf-environment-name", **env_args)
 
 To run a quick evaluation of your Environment with an API-based model, do:
 ```bash
-vf-eval vf-environment-name # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
+vf-eval vf-environment-name -s # run and save eval results locally
+# vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
 The core elements of Environments are:
