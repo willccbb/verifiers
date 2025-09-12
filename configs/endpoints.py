@@ -1,4 +1,9 @@
 ENDPOINTS = {
+    "405b": {
+        "model": "meta-llama/llama-3.1-405b",
+        "url": "https://openrouter.ai/api/v1",
+        "key": "OPENROUTER_API_KEY",
+    },
     "my-model": {
         "model": "my-model",
         "url": "https://some-endpoint.com/v1",
