@@ -14,8 +14,8 @@ import verifiers as vf
 from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
-# Setup logger for eval script
-logger = logging.getLogger(__name__)
+# Setup logger for eval script using verifiers logging format
+logger = logging.getLogger("verifiers.scripts.eval")
 
 
 def eval_environment(
