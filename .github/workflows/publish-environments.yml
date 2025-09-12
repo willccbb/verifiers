@@ -1,4 +1,4 @@
-name: Publish environments
+name: Publish Envs
 
 on:
   push:
