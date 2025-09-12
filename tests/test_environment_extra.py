@@ -176,6 +176,7 @@ def test_evaluate_fallback_and_repeat(mock_openai_client):
         num_examples=2,
         rollouts_per_example=2,
         score_rollouts=False,
+        interleave_scoring=False,
     )
     # Expect n * r rollouts in outputs
     assert len(res.prompt) == 2 * 2
@@ -187,7 +188,7 @@ async def test_generate_inside_running_loop(mock_openai_client):
     env = _make_env(mock_openai_client)
     inputs = {"prompt": [[{"role": "user", "content": "Hi"}]], "answer": [""]}
     # Call the async API directly inside a running event loop to avoid nested sync wrapper issues
-    out = await env.a_generate(inputs, client=env.client)
+    out = await env.a_generate(inputs, client=env.client, interleave_scoring=False)
     assert hasattr(out, "completion") and len(out.completion) == 1
 
 
