@@ -1558,7 +1558,7 @@ class GRPOTrainer(Trainer):
                 span.set_outputs({"completion": completion})
                 mlflow.update_current_trace(tags=reward_dict)
                 mlflow.update_current_trace(tags={
-                    "step": self.state.global_step,
+                    "step": str(self.state.global_step),
                     "wandb_run_id": wandb.run.id,
                 })
 
