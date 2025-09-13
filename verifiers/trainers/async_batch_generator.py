@@ -33,6 +33,7 @@ class BatchResult:
     all_reward_dict: Dict[str, List[float]] = field(default_factory=dict)  # All reward scores
     completions: List[Any] = field(default_factory=list)  # Store completions for logging
     prompts: List[Any] = field(default_factory=list)  # Store prompts for logging
+    turn_rewards: List[List[float]] | None = None  # Optional per-utterance rewards
 
 
 class AsyncBatchGenerator:
@@ -253,5 +254,6 @@ class AsyncBatchGenerator:
             processed_results=processed_results,
             all_reward_dict=all_reward_dict,
             completions=env_results['completion'],
-            prompts=env_results['prompt']
+            prompts=env_results['prompt'],
+            turn_rewards=env_results.get('turn_rewards') if isinstance(env_results, dict) else None,
         ) 

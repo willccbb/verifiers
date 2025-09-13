@@ -28,12 +28,14 @@ from trl.trainer.utils import (
 )
 import wandb
 import numpy as np
+import torch.nn.functional as F
 
 from verifiers import Environment
 from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.utils.logging_utils import print_prompt_completions_sample   
+from verifiers.hierarchical import UtteranceReplayBuffer, UtteranceValueEstimator
 
 class RepeatSampler(Sampler):
     """
@@ -389,7 +391,38 @@ class GRPOTrainer(Trainer):
             "completion": deque(maxlen=maxlen),
             "rewards": defaultdict(lambda: deque(maxlen=maxlen)),
         }
- 
+
+        # Hierarchical utterance-level critic components (optional)
+        self.hier_enabled = args.enable_hierarchical
+        if self.hier_enabled and self.accelerator.is_main_process:
+            # Build value estimator (critic) using frozen LM input embeddings
+            unwrapped = self.accelerator.unwrap_model(model)
+            self.utter_value = UtteranceValueEstimator(
+                lm=unwrapped, hidden_size=args.hier_value_hidden_size
+            ).to(self.accelerator.device)
+            self.utter_value_opt = torch.optim.AdamW(
+                self.utter_value.value_head.parameters(),
+                lr=args.hier_lr,
+                weight_decay=args.hier_weight_decay,
+            )
+            self.utter_buffer = UtteranceReplayBuffer(capacity=args.hier_replay_size)
+            self._metrics["train"]["hier/buffer_size"].append(0.0)
+            # Optional load
+            try:
+                load_dir = args.hier_load_path
+                if load_dir is not None:
+                    import os
+                    val_path = os.path.join(load_dir, "hierarchical", "value_head.pt")
+                    opt_path = os.path.join(load_dir, "hierarchical", "optimizer.pt")
+                    if os.path.isfile(val_path):
+                        state = torch.load(val_path, map_location=self.accelerator.device)
+                        self.utter_value.load_state_dict(state)
+                    if os.path.isfile(opt_path):
+                        state = torch.load(opt_path, map_location=self.accelerator.device)
+                        self.utter_value_opt.load_state_dict(state)
+            except Exception as e:
+                self.logger.warning(f"Failed to load hierarchical critic: {e}")
+
         # OpenAI client for Environment generation (using vLLM server)
         host = args.vllm_server_host
         port = args.vllm_server_port
@@ -557,6 +590,22 @@ class GRPOTrainer(Trainer):
                 self.async_generator.stop()
             self._async_started = False
 
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        """Extend saving to persist hierarchical critic state."""
+        super().save_model(output_dir=output_dir, _internal_call=_internal_call)
+        if not self.hier_enabled or not self.accelerator.is_main_process:
+            return
+        out = output_dir or self.args.output_dir
+        try:
+            import os
+            os.makedirs(os.path.join(out, "hierarchical"), exist_ok=True)
+            val_path = os.path.join(out, "hierarchical", "value_head.pt")
+            opt_path = os.path.join(out, "hierarchical", "optimizer.pt")
+            torch.save(self.utter_value.state_dict(), val_path)  # type: ignore[attr-defined]
+            torch.save(self.utter_value_opt.state_dict(), opt_path)  # type: ignore[attr-defined]
+        except Exception as e:
+            self.logger.warning(f"Failed to save hierarchical critic: {e}")
+
     def _get_last_hidden_state(self, unwrapped_model, input_ids, attention_mask, logits_to_keep=None):
         if is_peft_model(unwrapped_model):
             unwrapped_model = unwrapped_model.base_model.model
@@ -661,6 +710,135 @@ class GRPOTrainer(Trainer):
     def _get_model_name(self) -> str:
         """Get model name for Environment generation."""
         return self.model.config._name_or_path # type: ignore
+
+    # -------------------- Hierarchical critic helpers --------------------
+    def _collect_and_store_utterance_transitions(
+        self,
+        prompts: List[Union[str, List[Dict[str, Any]]]],
+        completions: List[Union[str, List[Dict[str, Any]]]],
+        rewards: List[float],
+        turn_rewards: Optional[List[List[float]]] = None,
+    ) -> None:
+        if not self.hier_enabled or not self.accelerator.is_main_process:
+            return
+        items: List[Tuple[List[Dict[str, Any]], float]] = []
+        gamma = self.args.hier_gamma
+        for idx, (prompt, completion, R) in enumerate(zip(prompts, completions, rewards)):
+            if not isinstance(prompt, list) or not isinstance(completion, list):
+                # Only support chat-format for utterance-level critic
+                continue
+            # Build per-assistant-turn prefixes
+            assistant_indices = [i for i, msg in enumerate(completion) if msg.get('role') == 'assistant']
+
+            # If turn-level rewards are provided, compute Monte Carlo returns per-turn
+            if turn_rewards is not None and idx < len(turn_rewards) and turn_rewards[idx] is not None:
+                tr = turn_rewards[idx]
+                # Ensure alignment: truncate or pad to assistant turns length
+                if len(tr) != len(assistant_indices):
+                    tr = tr[: len(assistant_indices)]
+                    if len(tr) < len(assistant_indices):
+                        tr = tr + [0.0] * (len(assistant_indices) - len(tr))
+                # Compute returns-to-go
+                G_list: List[float] = [0.0] * len(tr)
+                G = 0.0
+                for j in reversed(range(len(tr))):
+                    G = float(tr[j]) + gamma * G
+                    G_list[j] = G
+                for j, comp_idx in enumerate(assistant_indices):
+                    prefix = prompt + completion[: comp_idx + 1]
+                    items.append((prefix, float(G_list[j])))
+            else:
+                # Only terminal reward available: assign discounted terminal reward
+                for idx_pos, comp_idx in enumerate(assistant_indices):
+                    prefix = prompt + completion[: comp_idx + 1]
+                    if gamma != 1.0:
+                        k = len(assistant_indices)
+                        j = idx_pos
+                        ret = float((gamma ** (k - j - 1)) * R)
+                    else:
+                        ret = float(R)
+                    items.append((prefix, ret))
+        if items:
+            assert hasattr(self, 'utter_buffer')
+            self.utter_buffer.add_many(items)  # type: ignore[attr-defined]
+            self._metrics["train"]["hier/buffer_size"].append(float(len(self.utter_buffer)))  # type: ignore[attr-defined]
+
+    def _train_utterance_value(self, num_steps: int) -> None:
+        if not self.hier_enabled or not self.accelerator.is_main_process:
+            return
+        if len(self.utter_buffer) == 0:  # type: ignore[attr-defined]
+            return
+        losses: List[float] = []
+        bs = int(self.args.hier_minibatch_size)
+        max_len = int(self.args.hier_max_seq_length)
+        device = self.accelerator.device
+        for _ in range(int(num_steps)):
+            batch = self.utter_buffer.sample(bs)  # type: ignore[attr-defined]
+            if not batch:
+                break
+            msgs_list = [m for m, _ in batch]
+            targets = torch.tensor([float(r) for _, r in batch], device=device, dtype=torch.float32)
+            input_ids, attn = UtteranceValueEstimator.batch_tokenize_messages(
+                tokenizer=self.processing_class,  # type: ignore
+                batch_messages=msgs_list,
+                max_length=max_len,
+                device=device,
+            )
+            preds = self.utter_value(input_ids, attn)  # type: ignore[attr-defined]
+            loss = F.mse_loss(preds, targets)
+            self.utter_value_opt.zero_grad()  # type: ignore[attr-defined]
+            loss.backward()
+            self.utter_value_opt.step()  # type: ignore[attr-defined]
+            losses.append(loss.item())
+        if losses:
+            self._metrics["train"]["hier/value_loss"].append(float(sum(losses) / len(losses)))
+
+    def _predict_prompt_values(self, prompts: List[Union[str, List[Dict[str, Any]]]]) -> Optional[List[float]]:
+        """Predict V(prompt) for chat-format prompts (no completion content)."""
+        if not self.hier_enabled or not self.accelerator.is_main_process:
+            return None
+        # Filter chat prompts
+        batch_msgs: List[List[Dict[str, Any]]] = []
+        mapping: List[int] = []
+        for i, p in enumerate(prompts):
+            if isinstance(p, list):
+                batch_msgs.append(p)
+                mapping.append(i)
+        if not batch_msgs:
+            return [0.0] * len(prompts)
+        input_ids, attn = UtteranceValueEstimator.batch_tokenize_messages(
+            tokenizer=self.processing_class,  # type: ignore
+            batch_messages=batch_msgs,
+            max_length=int(self.args.hier_max_seq_length),
+            device=self.accelerator.device,
+        )
+        with torch.no_grad():
+            preds = self.utter_value(input_ids, attn)  # type: ignore[attr-defined]
+        out = [0.0] * len(prompts)
+        for idx, val in zip(mapping, preds.tolist()):
+            out[idx] = float(val)
+        return out
+
+    def _compute_advantages_with_critic(self, rewards: torch.Tensor, baselines: torch.Tensor) -> torch.Tensor:
+        """Compute advantages combining group-relative and critic baselines per config."""
+        # rewards and baselines are flat over the global batch (grouped by prompt with num_generations)
+        mode = self.args.hier_advantage_mode
+        assert mode in ("critic", "blend"), f"Invalid hier_advantage_mode: {mode}"
+        # Group shapes
+        G = self.num_generations
+        # Group-relative baseline
+        group_mean = rewards.view(-1, G).mean(dim=1).repeat_interleave(G)
+        base_critic = rewards - baselines
+        base_group = rewards - group_mean
+        if mode == "critic":
+            adv = base_critic
+        else:
+            alpha = float(self.args.hier_advantage_alpha)
+            adv = (1.0 - alpha) * base_group + alpha * base_critic
+        if self.scale_rewards:
+            std_group = rewards.view(-1, G).std(dim=1).repeat_interleave(G)
+            adv = adv / (std_group + 1e-4)
+        return adv
 
     def _ids_to_tensors(self,
                         prompt_ids: List[List[int]],
@@ -817,7 +995,7 @@ class GRPOTrainer(Trainer):
                 # Get batch result
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve) 
                 processed_results = batch_result.processed_results
-                
+
                 # Package raw data for broadcast (not tensors yet)
                 broadcast_data = {
                     'prompt_ids': processed_results['prompt_ids'],
@@ -828,7 +1006,27 @@ class GRPOTrainer(Trainer):
                     'all_reward_dict': batch_result.all_reward_dict if hasattr(batch_result, 'all_reward_dict') else {'reward': processed_results['rewards']},
                     'completions': batch_result.completions if hasattr(batch_result, 'completions') else [],
                     'prompts': batch_result.prompts if hasattr(batch_result, 'prompts') else [],
+                    'turn_rewards': batch_result.turn_rewards if hasattr(batch_result, 'turn_rewards') else None,
                 }
+
+                # If hierarchical critic is enabled, collect utterance-level trajectories and train critic
+                if self.hier_enabled:
+                    try:
+                        self._collect_and_store_utterance_transitions(
+                            prompts=broadcast_data['prompts'],
+                            completions=broadcast_data['completions'],
+                            rewards=broadcast_data['rewards'],
+                            turn_rewards=broadcast_data.get('turn_rewards'),
+                        )
+                        # Compute critic baselines (V(prompt)) to broadcast for advantage shaping
+                        if self.args.hier_advantage_mode != 'none':
+                            baselines = self._predict_prompt_values(broadcast_data['prompts'])
+                        else:
+                            baselines = None
+                        broadcast_data['baselines'] = baselines
+                        self._train_utterance_value(self.args.hier_train_steps_per_batch)
+                    except Exception as e:
+                        self.logger.warning(f"Hierarchical critic step failed: {e}")
             else:
                 broadcast_data = None
             self.accelerator.wait_for_everyone()
@@ -848,7 +1046,12 @@ class GRPOTrainer(Trainer):
             # Create rewards tensor and compute advantages using full batch
             assert broadcast_data is not None  # After broadcast, all processes have data
             all_rewards = torch.tensor(broadcast_data['rewards'], device=self.accelerator.device)
-            all_advantages = self._compute_advantages(all_rewards)
+            # Compute advantages with optional critic baseline
+            if self.hier_enabled and self.args.hier_advantage_mode != 'none' and broadcast_data.get('baselines') is not None:
+                baselines = torch.tensor(broadcast_data['baselines'], device=self.accelerator.device, dtype=torch.float32)
+                all_advantages = self._compute_advantages_with_critic(all_rewards, baselines)
+            else:
+                all_advantages = self._compute_advantages(all_rewards)
             
             # Now create tensors only for this process's slice
             prompt_ids_list = []

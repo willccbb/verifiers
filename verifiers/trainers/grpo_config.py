@@ -316,6 +316,97 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
+    # Hierarchical utterance-level critic (ArCHer-style) options
+    enable_hierarchical: bool = field(
+        default=False,
+        metadata={
+            "help": "Enable hierarchical multi-turn RL support: collects utterance-level trajectories and trains an"
+                    " off-policy value network (critic) over conversation turns alongside GRPO."
+        },
+    )
+    hier_replay_size: int = field(
+        default=50000,
+        metadata={
+            "help": "Capacity of the utterance-level replay buffer (number of turn transitions)."
+        },
+    )
+    hier_minibatch_size: int = field(
+        default=64,
+        metadata={
+            "help": "Minibatch size for training the utterance-level value network."
+        },
+    )
+    hier_train_steps_per_batch: int = field(
+        default=20,
+        metadata={
+            "help": "Number of critic optimization steps to run after each generation batch is retrieved."
+        },
+    )
+    hier_lr: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Learning rate for the utterance-level value network optimizer."
+        },
+    )
+    hier_weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay for the utterance-level value network optimizer."
+        },
+    )
+    hier_gamma: float = field(
+        default=1.0,
+        metadata={
+            "help": "Discount factor for returns used as targets for the utterance-level value network."
+        },
+    )
+    hier_max_seq_length: int = field(
+        default=1024,
+        metadata={
+            "help": "Maximum tokenized sequence length for messages used by the utterance-level value network."
+        },
+    )
+    hier_value_hidden_size: int = field(
+        default=1024,
+        metadata={
+            "help": "Hidden layer size of the MLP head used by the utterance-level value network."
+        },
+    )
+
+    # Coupling between critic and actor (advantage shaping)
+    hier_advantage_mode: str = field(
+        default="none",  # one of: none, critic, blend
+        metadata={
+            "help": "How to incorporate critic predictions into token-level advantages.\n"
+                    "- 'none': standard GRPO group-relative baseline\n"
+                    "- 'critic': use (reward - V(prompt)) as baseline\n"
+                    "- 'blend': convex combo of GRPO and critic baselines"
+        },
+    )
+    hier_advantage_alpha: float = field(
+        default=0.5,
+        metadata={
+            "help": "Blend weight for 'blend' mode: adv = (1-alpha)*(GRPO adv) + alpha*(reward - V(prompt))."
+        },
+    )
+
+    # Optional path to load a pre-trained utterance value model
+    hier_load_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Directory containing saved hierarchical critic state ('hierarchical/value_head.pt')."
+        },
+    )
+
+    # Low-level optimization algorithm label (for clarity)
+    low_level_algo: str = field(
+        default="grpo",  # or 'ppo'
+        metadata={
+            "help": "Low-level token policy optimization label. Current compute_loss already mirrors PPO-style clipping,"
+                    " this flag is for configuration clarity and potential future branching."
+        },
+    )
+
     def __post_init__(self):
         super().__post_init__()
 
