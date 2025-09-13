@@ -4,6 +4,11 @@ ENDPOINTS = {
         "url": "https://openrouter.ai/api/v1",
         "key": "OPENROUTER_API_KEY",
     },
+    "qwen3-next-thinking": {
+        "model": "qwen/qwen3-next-80b-a3b-thinking",
+        "url": "https://openrouter.ai/api/v1",
+        "key": "OPENROUTER_API_KEY",
+    },
     "my-model": {
         "model": "my-model",
         "url": "https://some-endpoint.com/v1",
