@@ -1552,6 +1552,8 @@ class GRPOTrainer(Trainer):
     def _log_traces_to_mlflow(self, all_prompts, all_completions, all_reward_dict):
         import mlflow
 
+        mlflow.set_experiment(self.args.run_name)
+
         def log_generation(prompt, completion, reward_dict):
             with mlflow.start_span("generation") as span:
                 span.set_inputs({"prompt": prompt})
