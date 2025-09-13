@@ -1,8 +1,12 @@
-import os
-from openai import OpenAI
+from typing import Any
 
-from verifiers.parsers import Parser
+from openai import AsyncOpenAI, OpenAI
+from openai import APIError, RateLimitError, APITimeoutError
+
+from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
+from verifiers.types import Messages, State
+from verifiers.utils.async_utils import maybe_await
 
 DEFAULT_JUDGE_PROMPT = """Given a ground truth answer \
 and a response, determine if the response is correct.
@@ -24,49 +28,118 @@ Response:
 
 Respond either "yes" or "no" only."""
 
+
 class JudgeRubric(Rubric):
-    def __init__(self,
-                 judge_client: OpenAI | None = None,
-                 judge_model: str = "gpt-4.1-nano",
-                 judge_prompt: str = DEFAULT_JUDGE_PROMPT,
-                 parser: Parser = Parser(),
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.judge_client = judge_client if judge_client is not None else OpenAI()
+    def __init__(
+        self,
+        parser: Parser | None = None,
+        parallelize_scoring: bool = False,
+        judge_client: OpenAI | AsyncOpenAI | None = None,
+        judge_model: str = "gpt-4.1-nano",
+        judge_sampling_args: dict[str, Any] | None = None,
+        judge_prompt: str = DEFAULT_JUDGE_PROMPT,
+        **kwargs,
+    ):
+        super().__init__(
+            parser=parser, parallelize_scoring=parallelize_scoring, **kwargs
+        )
+        self.judge_client = judge_client if judge_client is not None else AsyncOpenAI()
         self.judge_model = judge_model
         self.judge_prompt = judge_prompt
-        self.parser = parser
-        self.add_reward_func(self.judge_reward_func)
+        self.judge_sampling_args = judge_sampling_args or {}
+        self.class_objects = {
+            "parser": self.parser,
+            "judge": self.judge,
+            "judge_client": self.judge_client,
+            "judge_model": self.judge_model,
+            "judge_prompt": self.judge_prompt,
+            "judge_sampling_args": self.judge_sampling_args,
+        }
 
-    def judge_reward_func(self, prompt, completion, answer, **kwargs) -> float:
-        response = self.parser.parse_answer(completion)
-        # check which fields are present in judge prompt template
-        # get question from answer:
+    async def judge(
+        self,
+        prompt: Messages,
+        completion: Messages,
+        answer: str,
+        state: State,
+        **kwargs,
+    ) -> str:
         if isinstance(prompt, list):
-            question = prompt[-1]['content']
+            last_msg = prompt[-1]
+            if isinstance(last_msg, dict) and "content" in last_msg:
+                question = str(last_msg["content"])
+            else:
+                question = ""
         else:
-            question = prompt
-        if isinstance(completion, list):
-            response = completion[-1]['content']
-        else:
-            response = completion
-        prompt = self.judge_prompt.format(question=question, answer=answer, response=response)
-        judge_response = self.judge_client.chat.completions.create(
-            model=self.judge_model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=10,
+            question = str(prompt)
+        response = self.parser.parse_answer(completion)
+        judge_prompt = self.judge_prompt.format(
+            question=question, answer=answer, response=response
         )
-        judge_response = str(judge_response.choices[0].message.content)
-        if 'yes' in judge_response.lower():
-            return 1.0
-        elif 'no' in judge_response.lower():
-            return 0.0
-        else:
-            # extract float from judge_response
-            return float(judge_response)
-    
-
-
-    
+        cached = state.get("judge_response")
+        if isinstance(cached, dict) and judge_prompt in cached:
+            return cached[judge_prompt]
+        # Normalize judge sampling args for chat API
+        judge_args = dict(self.judge_sampling_args or {})
+        if "max_tokens" in judge_args:
+            if judge_args["max_tokens"] is None:
+                judge_args.pop("max_tokens")
+            else:
+                judge_args["max_completion_tokens"] = judge_args.pop("max_tokens")
+        if (
+            "max_completion_tokens" in judge_args
+            and judge_args["max_completion_tokens"] is None
+        ):
+            judge_args.pop("max_completion_tokens")
+        judge_args = {k: v for k, v in judge_args.items() if v is not None}
+        
+        try:
+            judge_response = await maybe_await(
+                self.judge_client.chat.completions.create,
+                model=self.judge_model,
+                messages=[{"role": "user", "content": judge_prompt}],
+                **judge_args,
+            )
+            judge_response = str(judge_response.choices[0].message.content)
+        except RateLimitError as e:
+            self.logger.warning(
+                f"Rate limit exceeded when calling judge model '{self.judge_model}'. "
+                f"Try reducing concurrency or waiting before retrying. Error: {str(e)}"
+            )
+            raise RuntimeError(
+                f"Judge model rate limit exceeded. Try reducing concurrency or waiting before retrying. "
+                f"Model: {self.judge_model}, Error: {str(e)}"
+            ) from e
+        except APITimeoutError as e:
+            self.logger.warning(
+                f"Timeout when calling judge model '{self.judge_model}'. "
+                f"Increase timeout in judge_sampling_args or check model responsiveness. Error: {str(e)}"
+            )
+            raise RuntimeError(
+                f"Judge model timeout. Increase timeout in judge_sampling_args or check model responsiveness. "
+                f"Model: {self.judge_model}, Error: {str(e)}"
+            ) from e
+        except APIError as e:
+            self.logger.warning(
+                f"API error when calling judge model '{self.judge_model}'. "
+                f"Check model availability and API key. Error: {str(e)}"
+            )
+            raise RuntimeError(
+                f"Judge model API error. Check model availability and API key. "
+                f"Model: {self.judge_model}, Error: {str(e)}"
+            ) from e
+        except Exception as e:
+            self.logger.warning(
+                f"Unexpected error when calling judge model '{self.judge_model}'. "
+                f"Error: {str(e)}"
+            )
+            raise RuntimeError(
+                f"Unexpected error when calling judge model '{self.judge_model}'. "
+                f"Error: {str(e)}"
+            ) from e
+            
+        if not isinstance(cached, dict):
+            cached = {}
+        cached[judge_prompt] = judge_response
+        state["judge_response"] = cached
+        return judge_response

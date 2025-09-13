@@ -1,3 +1,4 @@
+
 # adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_config.py
 
 from dataclasses import dataclass, field
@@ -309,6 +310,51 @@ class GRPOConfig(TrainingArguments):
         metadata={"help": "Number of completions to print with `rich`. If `None`, all completions are logged."},
     )
     wandb_log_unique_prompts: Optional[bool] = field(
+
+# adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_config.py
+
+from dataclasses import dataclass, field
+from typing import Optional, Union
+
+import transformers
+from packaging import version
+from transformers import TrainingArguments  # type: ignore
+
+
+@dataclass
+class GRPOConfig(TrainingArguments):
+    r"""
+    Configuration class for the [`GRPOTrainer`].
+
+    Only the parameters specific to GRPO training are listed here. For details on other parameters, refer to the
+    [`~transformers.TrainingArguments`] documentation.
+
+    Using [`~transformers.HfArgumentParser`] we can turn this class into
+    [argparse](https://docs.python.org/3/library/argparse#module-argparse) arguments that can be specified on the
+    command line.
+    """
+
+    if version.parse(transformers.__version__) <= version.parse("4.50.3"):
+        from transformers.training_args import _VALID_DICT_FIELDS  # type: ignore
+
+        _VALID_DICT_FIELDS.append("model_init_kwargs")
+    else:
+        _VALID_DICT_FIELDS = TrainingArguments._VALID_DICT_FIELDS + [
+            "model_init_kwargs"
+        ]
+
+    # Parameters that control the model and reference model
+    model_init_kwargs: Optional[Union[dict, str]] = field(
+        default=None,
+        metadata={
+            "help": "Keyword arguments for `transformers.AutoModelForCausalLM.from_pretrained`, used when the `model` "
+            "argument of the `GRPOTrainer` is provided as a string."
+        },
+    )
+
+    # Parameters that control the model and reference model
+    disable_dropout: bool = field(
+
         default=False,
         metadata={
             "help": "Whether to log unique prompts in wandb. If `True`, only unique prompts are logged. If `False`, "
@@ -330,8 +376,24 @@ class GRPOConfig(TrainingArguments):
             "help": "Capacity of the utterance-level replay buffer (number of turn transitions)."
         },
     )
+
     hier_minibatch_size: int = field(
         default=64,
+
+    num_generations: int = field(
+        default=8,
+        metadata={
+            "help": "Number of generations to sample. The effective batch size (num_processes * per_device_batch_size "
+            "* gradient_accumulation_steps) must be evenly divisible by this value."
+        },
+    )
+    max_completion_length: Optional[int] = field(
+        default=None,
+        metadata={"help": "Deprecated. Use `max_seq_len` instead."},
+    )
+    ds3_gather_for_generation: bool = field(
+        default=True,
+
         metadata={
             "help": "Minibatch size for training the utterance-level value network."
         },
@@ -348,8 +410,41 @@ class GRPOConfig(TrainingArguments):
             "help": "Learning rate for the utterance-level value network optimizer."
         },
     )
+
     hier_weight_decay: float = field(
         default=0.0,
+
+    max_tokens: Optional[int] = field(
+        default=None,
+        metadata={"help": "Maximum number of tokens to generate per turn."},
+    )
+    max_seq_len: Optional[int] = field(
+        default=2048,
+        metadata={"help": "Maximum number of tokens to generate per turn."},
+    )
+    temperature: float = field(
+        default=1.0,
+        metadata={
+            "help": "Temperature for sampling. The higher the temperature, the more random the completions."
+        },
+    )
+    top_p: float = field(
+        default=1.0,
+        metadata={
+            "help": "Float that controls the cumulative probability of the top tokens to consider. Must be in (0, 1]. "
+            "Set to 1.0 to consider all tokens."
+        },
+    )
+    top_k: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Number of highest probability vocabulary tokens to keep for top-k-filtering. If `None`, "
+            "top-k-filtering is disabled."
+        },
+    )
+    min_p: Optional[float] = field(
+        default=None,
+
         metadata={
             "help": "Weight decay for the utterance-level value network optimizer."
         },
@@ -360,8 +455,39 @@ class GRPOConfig(TrainingArguments):
             "help": "Discount factor for returns used as targets for the utterance-level value network."
         },
     )
+
     hier_max_seq_length: int = field(
         default=1024,
+
+    presence_penalty: float = field(
+        default=0.0,
+        metadata={"help": "Presence penalty (default 0.0)"},
+    )
+    frequency_penalty: float = field(
+        default=0.0,
+        metadata={"help": "Frequency penalty (default 0.0)"},
+    )
+    max_data_workers: int = field(
+        default=8,
+        metadata={
+            "help": "Maximum number of processes to use for filtering the dataset."
+        },
+    )
+    max_concurrent: int = field(
+        default=1024,
+        metadata={"help": "Maximum number of concurrent requests to the environment."},
+    )
+    # Async generation parameters
+    num_batches_ahead: int = field(
+        default=1,
+        metadata={
+            "help": "Number of batches to generate ahead. Higher values can improve GPU utilization but use more memory. "
+            "Set to 0 for synchronous generation (submit and wait immediately, no look-ahead)."
+        },
+    )
+    async_generation_timeout: float = field(
+        default=600.0,
+
         metadata={
             "help": "Maximum tokenized sequence length for messages used by the utterance-level value network."
         },
@@ -373,9 +499,84 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
+
     # Coupling between critic and actor (advantage shaping)
     hier_advantage_mode: str = field(
         default="none",  # one of: none, critic, blend
+
+    vllm_guided_decoding_regex: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Regex for vLLM guided decoding. If `None` (default), guided decoding is disabled."
+        },
+    )
+
+    # Parameters that control the vLLM server
+    vllm_server_host: str = field(
+        default="0.0.0.0",
+        metadata={"help": "Host of the vLLM server to connect to."},
+    )
+    vllm_server_port: int = field(
+        default=8000,
+        metadata={"help": "Port of the vLLM server to connect to."},
+    )
+    vllm_server_timeout: float = field(
+        default=300.0,
+        metadata={
+            "help": "Total timeout duration in seconds to wait for the vLLM server to be up. If the server is not up "
+            "after the timeout, a `ConnectionError` is raised."
+        },
+    )
+    # Parameters that control the training
+    learning_rate: float = field(
+        default=1e-6,
+        metadata={
+            "help": "Initial learning rate for `AdamW` optimizer. The default value replaces that of "
+            "`transformers.TrainingArguments`."
+        },
+    )
+    beta: float = field(
+        default=0.001,
+        metadata={
+            "help": "KL coefficient. If `0.0`, the reference model is not loaded, reducing memory usage and improving "
+            "training speed, but may be numerically unstable for long training runs."
+        },
+    )
+    num_iterations: int = field(
+        default=1,
+        metadata={
+            "help": "Number of iterations per batch (denoted as μ in the algorithm)."
+        },
+    )
+    epsilon: float = field(
+        default=0.2,
+        metadata={"help": "Epsilon value for clipping."},
+    )
+    delta: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "If set to a float value (e.g., 2.0), enables the upper clipping bound in two-sided GRPO loss. If None (default), the standard GRPO clipping is used. Recommended to be > 1 + epsilon when enabled."
+        },
+    )
+    epsilon_high: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": "Upper-bound epsilon value for clipping. If not specified, it defaults to the same value as the "
+            "lower-bound specified in argument `epsilon`. Paper DAPO recommends `0.28`."
+        },
+    )
+    scale_rewards: bool = field(
+        default=False,
+        metadata={
+            "help": "Whether to scale the rewards by dividing them by their standard deviation. If `True` (default), "
+            "the rewards are normalized by the standard deviation, ensuring they have unit variance. If `False`, no "
+            "scaling is applied. The Dr. GRPO paper recommends not scaling the rewards, as scaling by the standard "
+            "deviation introduces a question-level difficulty bias."
+        },
+    )
+    loss_type: str = field(
+        default="dr_grpo",
+
         metadata={
             "help": "How to incorporate critic predictions into token-level advantages.\n"
                     "- 'none': standard GRPO group-relative baseline\n"
@@ -383,7 +584,37 @@ class GRPOConfig(TrainingArguments):
                     "- 'blend': convex combo of GRPO and critic baselines"
         },
     )
+
     hier_advantage_alpha: float = field(
+
+    mask_env_responses: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to mask the environment responses. If `True`, the environment responses are masked, "
+            "preventing them from being incorrectly penalized and introducing noise during training."
+        },
+    )
+    mask_truncated_completions: bool = field(
+        default=True,
+        metadata={
+            "help": "When enabled, truncated completions are excluded from the loss calculation, preventing them from "
+            "being incorrectly penalized and introducing noise during training. According to the DAPO paper, this is "
+            "a good practice for training stability."
+        },
+    )
+    zero_truncated_completions: bool = field(
+        default=False,
+        metadata={"help": "Whether to give zero reward to truncated completions."},
+    )
+    sync_ref_model: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to synchronize the reference model with the active model every `ref_model_sync_steps` "
+            "steps, using the `ref_model_mixup_alpha` parameter."
+        },
+    )
+    ref_model_mixup_alpha: float = field(
+
         default=0.5,
         metadata={
             "help": "Blend weight for 'blend' mode: adv = (1-alpha)*(GRPO adv) + alpha*(reward - V(prompt))."
@@ -398,14 +629,26 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
+
     # Low-level optimization algorithm label (for clarity)
     low_level_algo: str = field(
         default="grpo",  # or 'ppo'
+      
+    num_completions_to_print: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Number of completions to print with `rich`. If `None`, all completions are logged."
+        },
+    )
+    wandb_log_unique_prompts: Optional[bool] = field(
+        default=False,
+      
         metadata={
             "help": "Low-level token policy optimization label. Current compute_loss already mirrors PPO-style clipping,"
                     " this flag is for configuration clarity and potential future branching."
         },
     )
+
 
     def __post_init__(self):
         super().__post_init__()
@@ -459,4 +702,77 @@ class GRPOConfig(TrainingArguments):
                     f"evenly divisible by the number of generations per prompt ({self.num_generations}). Given the "
                     "current global eval batch size, the valid values for the number of generations are: "
                     f"{possible_values}."
+
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        num_processes = self.world_size
+        # The current default effective batch size
+        if (
+            self.generation_batch_size is not None
+            and self.steps_per_generation is not None
+        ):
+            raise ValueError(
+                "'generation_batch_size' and 'steps_per_generation' can not be both configured at the same time"
+            )
+
+        if self.steps_per_generation is None:
+            self.steps_per_generation = self.gradient_accumulation_steps
+
+        if self.generation_batch_size is None:
+            self.generation_batch_size = (
+                self.per_device_train_batch_size
+                * num_processes
+                * self.steps_per_generation
+            )
+
+        if (
+            self.generation_batch_size
+            % self.per_device_train_batch_size
+            * num_processes
+            != 0
+        ):
+            raise ValueError(
+                f"generation_batch_size ({self.generation_batch_size}) must be divisible by the global batch size "
+                f"({self.per_device_train_batch_size * num_processes})."
+            )
+
+        self.steps_per_generation = self.generation_batch_size // (
+            self.per_device_train_batch_size * num_processes
+        )
+
+        # Check if the effective batch size can be divided by the number of generations
+        if self.num_generations < 2:
+            raise ValueError(
+                "GRPO requires at least 2 generations per prompt to calculate the advantages. You provided "
+                f"{self.num_generations}, which is less than the minimum required."
+            )
+        possible_values = [
+            n_gen
+            for n_gen in range(2, self.generation_batch_size + 1)
+            if (self.generation_batch_size) % n_gen == 0
+        ]
+
+        if self.num_generations not in possible_values:
+            raise ValueError(
+                f"The effective train batch size ({num_processes} x {self.per_device_train_batch_size} x "
+                f"{self.steps_per_generation}) must be evenly divisible by the number of generations per "
+                f"prompt ({self.num_generations}). Given the current effective train batch size, the valid values for "
+                f"the number of generations are: {possible_values}."
+            )
+        if self.eval_strategy != "no":
+            global_eval_batch_size = self.per_device_eval_batch_size * num_processes
+            possible_values = [
+                n_gen
+                for n_gen in range(2, global_eval_batch_size + 1)
+                if (global_eval_batch_size) % n_gen == 0
+            ]
+            if self.num_generations not in possible_values:
+                raise ValueError(
+                    f"The global eval batch size ({num_processes} x {self.per_device_eval_batch_size}) must be "
+                    f"evenly divisible by the number of generations per prompt ({self.num_generations}). Given the "
+                    "current global eval batch size, the valid values for the number of generations are: "
+                    f"{possible_values}."
+
                 )

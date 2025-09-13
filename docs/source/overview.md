@@ -1,207 +1,272 @@
 # Overview
 
-Verifiers is a flexible framework for reinforcement learning with large language models (LLMs). It provides a modular architecture for creating evaluation environments, parsing structured outputs, and training models using automated reward signals.
+Verifiers provides a flexible framework for defining custom interaction protocols between LLMs and environments, enabling sophisticated multi-turn reasoning, tool use, and interactive evaluation.
 
-## Core Concepts
+The three key pieces of environments in Verifiers are:
+- Your dataset (`str` or `List[ChatMessage]`)
+- Your Rubric (one or more *reward functions*)
+- Your *interaction protocol*, extended from `MultiTurnEnv`
 
-The framework is built around three fundamental primitives that work together:
+## Core Concept: Interaction Protocols
 
-### 1. Parser: Structured Output Extraction
+Verifiers allows defining arbitrary interaction patterns between models and environments:
 
-Parsers extract structured information from model outputs. The base `Parser` class simply returns text as-is, but specialized parsers can extract specific formats.
-
-```python
-import verifiers as vf
-
-# Base parser (returns text as-is)
-parser = vf.Parser()
-
-# ThinkParser extracts content after </think> tags
-parser = vf.ThinkParser()
-
-# XMLParser extracts structured fields
-parser = vf.XMLParser(fields=["reasoning", "answer"])
+```
+Environment (orchestration layer)
+    ├── Defines interaction protocol (what to observe respond, how to respond, when to terminate)
+    ├── Manages conversation state
+    ├── Integrates tools and external resources
+    └── Evaluates performance via Rubrics
 ```
 
-**ThinkParser** is useful for step-by-step reasoning:
-```python
-parser = vf.ThinkParser()
+### Example Protocols
 
-# Model output: "<think>Let me calculate...</think>The answer is 4"
-# parser.parse_answer(output) returns: "The answer is 4"
-```
-
-**XMLParser** is useful for structured output with multiple fields:
-```python
-parser = vf.XMLParser(fields=["reasoning", "answer"])
-
-# Model output: "<reasoning>First, I calculate...</reasoning><answer>4</answer>"
-parsed = parser.parse(output)
-print(parsed.reasoning)  # "First, I calculate..."
-print(parsed.answer)     # "4"
-```
-
-### 2. Rubric: Multi-Criteria Evaluation
-
-Rubrics combine multiple reward functions to evaluate model outputs. The base `Rubric` class takes a list of functions and weights.
-
-```python
-import verifiers as vf
-
-# Basic rubric with one reward function
-def correct_answer(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response.strip() == answer.strip() else 0.0
-
-rubric = vf.Rubric(
-    funcs=[correct_answer],
-    weights=[1.0]
-)
-```
-
-**Multi-criteria evaluation** combines different aspects:
-```python
-def correctness_reward(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response.strip() == answer.strip() else 0.0
-
-def format_reward(completion, **kwargs):
-    # Check if response follows expected format
-    return parser.get_format_reward_func()(completion)
-
-rubric = vf.Rubric(
-    funcs=[correctness_reward, format_reward],
-    weights=[0.8, 0.2]  # Correctness weighted higher
-)
-```
-
-### 3. Environment: Task Orchestration
-
-Environments bring everything together, managing the interaction flow between models, parsers, and rubrics:
-
-```python
-import verifiers as vf
-
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Solve the problem step by step.",
-    parser=parser,
-    rubric=rubric
-)
-
-# Generate training data
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="example")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-```
-
-## Why This Architecture?
-
-### Separation of Concerns
-- **Parsing** handles format and structure
-- **Evaluation** defines what makes a good response  
-- **Orchestration** manages the interaction flow
-
-### Composability
-Build complex behaviors from simple components:
-- Combine multiple reward functions in a rubric
-- Use built-in rubric types like `MathRubric`, `ToolRubric`
-- Choose from different environment types for different tasks
-
-### Flexibility
-- Support for both chat and completion APIs
-- Synchronous and asynchronous execution
-- Works with any OpenAI-compatible API
-
-## Key Design Principles
-
-### 1. Start Simple
-Many environments provide sensible defaults:
-
-```python
-# Simple - let environment choose defaults
-vf_env = vf.SingleTurnEnv(dataset=dataset)
-
-# Custom - specify your own parser and rubric
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    parser=vf.ThinkParser(),
-    rubric=custom_rubric
-)
-```
-
-### 2. Multi-Criteria Evaluation
-Real-world tasks have multiple success criteria:
-
-```python
-rubric = vf.Rubric(funcs=[
-    correct_answer_func,      # Is it right?
-    reasoning_clarity_func,   # Is it well-explained?
-    format_compliance_func    # Does it follow instructions?
-], weights=[0.7, 0.2, 0.1])
-```
-
-### 3. Incremental Complexity
-Start with basic environments and add complexity as needed:
-
-1. Begin with `SingleTurnEnv` for Q&A tasks
-2. Use `ToolEnv` when models need external tools
-3. Try `DoubleCheckEnv` for verification workflows
-4. Use `MultiTurnEnv` for interactive tasks
-
-## Quick Start Example
-
-Here's a complete working example:
-
-```python
-import verifiers as vf
-
-# 1. Load dataset
-dataset = vf.load_example_dataset("gsm8k", split="train")
-
-# 2. Setup parser and rubric
-parser = vf.ThinkParser()
-
-def correct_answer(completion, answer, **kwargs):
-    response = parser.parse_answer(completion) or ''
-    return 1.0 if response.strip() == answer.strip() else 0.0
-
-rubric = vf.Rubric(
-    funcs=[correct_answer, parser.get_format_reward_func()],
-    weights=[0.8, 0.2]
-)
-
-# 3. Create environment
-vf_env = vf.SingleTurnEnv(
-    dataset=dataset,
-    system_prompt="Think step-by-step inside <think>...</think> tags, then give your answer.",
-    parser=parser,
-    rubric=rubric
-)
-
-# 4. Setup and run training
-model, tokenizer = vf.get_model_and_tokenizer("Qwen/Qwen2.5-1.5B-Instruct")
-args = vf.grpo_defaults(run_name="quick-start")
-trainer = vf.GRPOTrainer(model=model, processing_class=tokenizer, env=vf_env, args=args)
-trainer.train()
-```
+- **Q&A Tasks**: Single model response → evaluation
+- **Tool Use**: Model request → tool execution → model continues
+- **Games**: Model move → game state update → environment feedback → repeat
+- **Tutoring**: Model attempt → hint/correction → retry until correct
+- **Debate**: Model A argument → Model B rebuttal → judge evaluation
 
 ## Environment Types
 
-Different environment types are designed for different tasks:
+### MultiTurnEnv: Maximum Flexibility
 
-- **SingleTurnEnv**: One-shot Q&A tasks
-- **ToolEnv**: Tasks requiring external tools (calculators, code execution)
-- **DoubleCheckEnv**: Multi-stage verification workflows
-- **TextArenaEnv**: Game-based environments
-- **ReasoningGymEnv**: Integration with reasoning gym benchmarks
+The base class for custom interaction protocols:
+
+```python
+import verifiers as vf
+from verifiers.types import Messages, State
+from typing import Tuple
+
+class MyProtocol(vf.MultiTurnEnv):
+    async def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
+        """Define how environment responds to model"""
+        # Custom logic for your protocol
+        response = [{"role": "user", "content": "Environment feedback"}]
+        # Update state
+        state["turn"] = state.get("turn", 0) + 1
+        return response, state
+    
+    async def is_completed(self, messages: Messages, state: State) -> bool:
+        """Define when interaction ends"""
+        return state.get("task_complete", False)
+```
+
+### ToolEnv: Native Tool Calling
+
+Leverages models' built-in tool calling for agentic workflows:
+
+```python
+env = vf.ToolEnv(
+    tools=[search, calculate, execute_code],  # Python functions
+    max_turns=10,
+    dataset=dataset, # HuggingFace dataset
+    rubric=rubric
+)
+```
+
+Tools may be sync or async, and are automatically converted to JSON schemas and integrated with the model's native function calling format.
+
+### SingleTurnEnv: Simple Evaluation
+
+For straightforward Q&A tasks without interaction:
+
+```python
+env = vf.SingleTurnEnv(
+    dataset=dataset,
+    system_prompt="Answer the question."
+    rubric=rubric,
+)
+```
+
+## Key Components
+
+### Rubrics: Multi-Criteria Evaluation
+
+Rubrics define how to evaluate model responses by combining multiple criteria:
+
+```python
+# Simple reward function (can be sync or async)
+async def correctness(prompt, completion, answer, state):
+    return 1.0 if answer.lower() in completion[-1]['content'].lower() else 0.0
+
+# Combine multiple criteria
+rubric = vf.Rubric(
+    funcs=[correctness, efficiency, clarity],
+    weights=[1.0, 0.3, 0.2]  # Relative importance
+)
+```
+
+Each reward function receives the full context (prompt, response, ground truth answer, and environment state) and returns a score. The rubric combines these scores based on weights to produce a final reward.
+
+Common rubric patterns:
+- **Single criterion**: One reward function (e.g., exact match)
+- **Multi-criteria**: Weighted combination of multiple aspects
+- **Judge-based**: Using LLMs to evaluate quality
+- **Stateful**: Tracking patterns across interactions
+
+### Environment Modules
+
+Package your interaction protocol as a reusable module:
+
+```
+my_environment/
+├── outputs/                # Evaluation logs
+├── my_environment.py      # Defines load_environment() -> vf.Environment
+├── pyproject.toml        # Dependencies
+└── README.md            # Documentation
+```
+
+This enables:
+- Easy sharing and versioning
+- Dependency isolation
+- Standardized interfaces
+
+
+### State Management
+
+Environments maintain state throughout interactions:
+
+```python
+state = {
+    # automatically managed  
+    "prompt": prompt, # inputs from dataset
+    "completion": [], # trajectory so far
+    "answer": answer, # golden answer (str)
+    "task": task, # optional environment ID column
+    "info": info, # evaluation metadata (dict) -- can use answer/info/both
+    "responses": [], # Raw API responses from OpenAI client
+    "turn": 0,
+    # custom user-managed state
+    "lives_remaining": 2,
+    "inventory": {"potion": 1, "power-up": 2}
+    ...
+}
+```
+
+A wide variety of complex interaction protocols, reward schemes, and training algorithms can be coordinated via tracking appropriate data in `state`.
+
+## Design Philosophy
+
+### 1. Protocol-First Design
+
+Start by defining your interaction pattern:
+- When should the environment respond?
+- What information should it provide?
+- How should the conversation end?
+
+### 2. Composable Evaluation
+
+Build complex evaluation from simple parts:
+- Individual reward functions for specific criteria
+- Rubrics to combine and weight them
+- Environments to orchestrate the process
+
+### 3. OpenAI-Compatible Integration
+
+Works with any OpenAI-compatible API:
+```python
+# OpenAI, vLLM, or any compatible endpoint
+client = OpenAI(base_url="http://localhost:8000/v1") # or AsyncOpenAI
+results = env.evaluate(client, model="llama-3.1-8b")
+```
+
+## Data Flow
+
+1. **Dataset** provides prompts and ground truth
+2. **Environment** orchestrates the interaction protocol
+3. **Model** generates responses via OpenAI-compatible client
+4. **Rubric** evaluates quality through reward functions
+5. **Results** include full interaction traces and scores
+
+## Evaluation lifecycle
+
+- **Inputs expected by environments**:
+  - `prompt`: str or list[ChatMessage] (chat-style). If you use `question` in your dataset, environments will turn it into a chat message, adding `system_prompt`/`few_shot` if provided.
+  - `answer` or `info`: optional. `answer` is a string; `info` is a dict for richer metadata. Both can be omitted for environments that evaluate based solely on completion quality (e.g., format adherence, length constraints, style assessment).
+  - `task`: optional string used by `EnvGroup`/`RubricGroup` to route behavior.
+
+- **Running evaluation**:
+  ```python
+  results = env.evaluate(
+      client, model,
+      num_examples=100,
+      rollouts_per_example=2,
+      max_concurrent=32,
+  )
+  ```
+  - `rollouts_per_example > 1` repeats dataset entries internally.
+  - `max_concurrent` throttles concurrent rollouts.
+
+- **Scoring**:
+  - Each reward function returns a float. Weights applied inside `Rubric` combine them into `results.reward`.
+  - All individual scores are logged under `results.metrics` keyed by function name (even if weight is 0.0).
+
+- **Outputs** (`GenerateOutputs`):
+  - `prompt`, `completion`, `answer`, `state`, `info`, `task`, `reward`, `metrics: dict[str, list[float]]`.
+
+- **Message types**:
+  - `message_type="chat"` (default) expects chat messages; `"completion"` expects raw text continuation. Choose based on your task (e.g., continuation quality uses completion).
+
+## Optional Utilities
+
+### Parsers
+
+For extracting structured information when needed:
+- `XMLParser`: Extract XML-tagged fields
+- `ThinkParser`: Separate reasoning from answers
+- Custom parsers for domain-specific formats
+
+Parsers are optional conveniences - many environments work perfectly with raw text.
+
+## Integration Points
+
+### For Evaluation
+
+The most convenient way to run quick evaluations is via the `vf-eval` CLI tool:
+```bash
+vf-install my-environment-module # from ./environments/my_environment_module 
+vf-eval my-environment-module -m gpt-5 -n 10 -r 5 -s 
+```
+
+We also provide a TUI for browsing locally-cached (with `-s`) eval results:
+```bash
+vf-tui 
+```
+
+You can also evaluate models in your environments programmatically:
+```python
+results = env.evaluate(client, model, num_examples=100)
+```
+
+### For Training
+
+```python
+# Environments provide rollout-level interfaces for RL
+completion, state = await env.rollout(
+    client, model, prompt, answer
+)
+rewards = await env.rubric.score_rollout(
+    prompt, completion, answer, state
+)
+# Or, process rollouts in batches for high throughput and configurable coordination
+outputs = await env.a_generate(inputs, client, model, sampling_args) # `generate` for sync
+```
+
+### For Custom Workflows
+
+All components can be used independently:
+```python
+# Use rubrics standalone
+scores = await rubric.score_rollout(prompt, completion, answer, state)
+
+# Create custom protocols
+class MyProtocol(vf.MultiTurnEnv):
+    # Your interaction logic
+```
 
 ## Next Steps
 
-- [**Environments**](environments.md): Learn about different environment types
-- [**Parsers**](parsers.md): Master structured output parsing
-- [**Rubrics**](rubrics.md): Design sophisticated evaluation criteria
-- [**Examples**](examples.md): Walk through real-world implementations
-- [**Training**](training.md): Train models with GRPO
+- To create custom interactions, see [Environments](environments.md)
+- For advanced component usage and examples, see [Components](components.md)
+- To train models with your environments, see [Training](training.md)

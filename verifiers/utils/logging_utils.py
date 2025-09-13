@@ -1,20 +1,24 @@
+import json
 import logging
 import sys
-from typing import Optional
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.panel import Panel
+
+from verifiers.types import Messages
+from collections.abc import Mapping
+
 
 def setup_logging(
     level: str = "INFO",
-    log_format: Optional[str] = None,
-    date_format: Optional[str] = None,
+    log_format: str | None = None,
+    date_format: str | None = None,
 ) -> None:
     """
     Setup basic logging configuration for the verifiers package.
-    
+
     Args:
         level: The logging level to use. Defaults to "INFO".
         log_format: Custom log format string. If None, uses default format.
@@ -25,97 +29,98 @@ def setup_logging(
     if date_format is None:
         date_format = "%Y-%m-%d %H:%M:%S"
 
-    # Create a StreamHandler that writes to stderr
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt=log_format, datefmt=date_format))
 
-    # Get the root logger for the verifiers package
     logger = logging.getLogger("verifiers")
     logger.setLevel(level.upper())
     logger.addHandler(handler)
 
     # Prevent the logger from propagating messages to the root logger
-    logger.propagate = False 
+    logger.propagate = False
 
 
 def print_prompt_completions_sample(
-    prompts: list[str],
-    completions: list[dict],
-    rewards: dict[str, list[float]],
+    prompts: list[Messages],
+    completions: list[Messages],
+    rewards: list[float],
     step: int,
-    num_samples: int = 1,  # Number of samples to display
+    num_samples: int = 1,
 ) -> None:
+    def _attr_or_key(obj, key: str, default=None):
+        """Return obj.key if present, else obj[key] if Mapping, else default."""
+        val = getattr(obj, key, None)
+        if val is not None:
+            return val
+        if isinstance(obj, Mapping):
+            return obj.get(key, default)
+        return default
+
+    def _normalize_tool_call(tc):
+        """Return {"name": ..., "args": ...} from a dict or Pydantic-like object."""
+        src = (
+            _attr_or_key(tc, "function") or tc
+        )  # prefer nested function object if present
+        name = _attr_or_key(src, "name", "") or ""
+        args = _attr_or_key(src, "arguments", {}) or {}
+
+        if not isinstance(args, str):
+            try:
+                args = json.dumps(args)
+            except Exception:
+                args = str(args)
+        return {"name": name, "args": args}
+
+    def _format_messages(messages) -> Text:
+        if isinstance(messages, str):
+            return Text(messages)
+
+        out = Text()
+        for idx, msg in enumerate(messages):
+            if idx:
+                out.append("\n\n")
+
+            assert isinstance(msg, dict)
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            style = "bright_cyan" if role == "assistant" else "bright_magenta"
+
+            out.append(f"{role}: ", style="bold")
+            out.append(content, style=style)
+
+            for tc in msg.get("tool_calls") or []:  # treat None as empty list
+                payload = _normalize_tool_call(tc)
+                out.append(
+                    "\n\n[tool call]\n"
+                    + json.dumps(payload, indent=2, ensure_ascii=False),
+                    style=style,
+                )
+
+        return out
 
     console = Console()
     table = Table(show_header=True, header_style="bold white", expand=True)
 
-    # Add columns
     table.add_column("Prompt", style="bright_yellow")
     table.add_column("Completion", style="bright_green")
     table.add_column("Reward", style="bold cyan", justify="right")
 
-    # Get the reward values from the dictionary
-    reward_values = rewards.get("reward", [])
-    
-    # Ensure we have rewards for all prompts/completions
+    reward_values = rewards
     if len(reward_values) < len(prompts):
-        # Pad with zeros if we don't have enough rewards
         reward_values = reward_values + [0.0] * (len(prompts) - len(reward_values))
 
-    # Only show the first num_samples samples
     samples_to_show = min(num_samples, len(prompts))
-    
     for i in range(samples_to_show):
-        prompt = prompts[i]
-        completion = completions[i]
+        prompt = list(prompts)[i]
+        completion = list(completions)[i]
         reward = reward_values[i]
-        
-        # Format prompt (can be string or list of dicts)
-        formatted_prompt = Text()
-        if isinstance(prompt, str):
-            formatted_prompt = Text(prompt)
-        elif isinstance(prompt, list):
-            # For chat format, only show the last message content (typically the user's question)
-            if prompt:
-                last_message = prompt[-1]
-                content = last_message.get("content", "")
-                formatted_prompt = Text(content, style="bright_yellow")
-            else:
-                formatted_prompt = Text("")
-        else:
-            formatted_prompt = Text(str(prompt))
-            
-        # Create a formatted Text object for completion with alternating colors based on role
-        formatted_completion = Text()
-        
-        if isinstance(completion, dict):
-            # Handle single message dict
-            role = completion.get("role", "")
-            content = completion.get("content", "")
-            style = "bright_cyan" if role == "assistant" else "bright_magenta"
-            formatted_completion.append(f"{role}: ", style="bold")
-            formatted_completion.append(content, style=style)
-        elif isinstance(completion, list):
-            # Handle list of message dicts
-            for i, message in enumerate(completion):
-                if i > 0:
-                    formatted_completion.append("\n\n")
-                
-                role = message.get("role", "")
-                content = message.get("content", "")
-                
-                # Set style based on role
-                style = "bright_cyan" if role == "assistant" else "bright_magenta"
-                
-                formatted_completion.append(f"{role}: ", style="bold")
-                formatted_completion.append(content, style=style)
-        else:
-            # Fallback for string completions
-            formatted_completion = Text(str(completion))
+
+        formatted_prompt = _format_messages(prompt)
+        formatted_completion = _format_messages(completion)
 
         table.add_row(formatted_prompt, formatted_completion, Text(f"{reward:.2f}"))
-        if i < samples_to_show - 1:  # Don't add section after last row
-            table.add_section()  # Adds a separator between rows
+        if i < samples_to_show - 1:
+            table.add_section()
 
     panel = Panel(table, expand=False, title=f"Step {step}", border_style="bold white")
     console.print(panel)

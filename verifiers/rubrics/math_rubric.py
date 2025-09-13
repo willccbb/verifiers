@@ -1,26 +1,38 @@
-from typing import List
+from math_verify import parse, verify
 
-from verifiers import RewardFunc
-from verifiers.parsers import XMLParser
-from verifiers.rubrics import Rubric
+from verifiers.parsers.parser import Parser
+from verifiers.parsers.think_parser import ThinkParser
+from verifiers.rubrics.rubric import Rubric
+from verifiers.types import Messages, RewardFunc
+from verifiers.utils.data_utils import extract_boxed_answer
 
 
 class MathRubric(Rubric):
-    def __init__(self,
-                 funcs: List[RewardFunc] = [],
-                 weights: List[float] = [],
-                 parser: XMLParser | None = None):
+    def __init__(
+        self,
+        funcs: list[RewardFunc] | None = None,
+        weights: list[float] | None = None,
+        parser: Parser | None = None,
+    ):
+        parser = parser or ThinkParser(extract_fn=extract_boxed_answer)
         super().__init__(funcs=funcs, weights=weights, parser=parser)
-        if not isinstance(self.parser, XMLParser):
-            self.parser = XMLParser(fields=["think", "answer"])
         self.add_reward_func(self.correct_answer_reward_func)
-        self.add_reward_func(self.parser.get_format_reward_func(), weight=0.2)
 
-    def correct_answer_reward_func(self, completion, answer, **kwargs) -> float:
+    def correct_answer_reward_func(
+        self, parser: Parser, completion: Messages, answer: str, **kwargs
+    ) -> float:
         """Reward function that checks if the final answer matches the expected answer."""
         try:
-            from math_verify import parse, verify # type: ignore
-            response = self.parser.parse_answer(completion)
-            return 1.0 if verify(parse(answer), parse(response)) else 0.0
-        except Exception:
+            response = parser.parse_answer(completion) or ""
+            if response == "":
+                return 0.0
+            if verify(
+                parse(f"\\boxed{{{answer}}}", parsing_timeout=5),
+                parse(f"\\boxed{{{response}}}", parsing_timeout=5),
+                timeout_seconds=5,
+            ):
+                return 1.0
+            else:
+                return 0.0
+        except BaseException:
             return 0.0

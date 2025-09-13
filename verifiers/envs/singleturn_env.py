@@ -1,42 +1,17 @@
-from typing import List, Dict, Any, Literal, Tuple, Union
-
-from openai import AsyncOpenAI
-
-from verifiers.envs.environment import Environment
+from verifiers.envs.multiturn_env import MultiTurnEnv
+from verifiers.types import Messages, State
 
 
-class SingleTurnEnv(Environment):
+class SingleTurnEnv(MultiTurnEnv):
     """
     Environment for single-turn tasks (chat or completion).
     """
-    def __init__(self,
-                 message_type: Literal['chat', 'completion'] = 'chat',
-                 **kwargs):
-        super().__init__(message_type=message_type, **kwargs)
-        self.message_type = message_type
 
-    async def rollout(self,
-                client: AsyncOpenAI,
-                model: str,
-                prompt: Union[str, List[Dict[str, Any]]],
-                answer: str,
-                task: str = "default",
-                info: Dict[str, Any] = {},
-                sampling_args: Dict[str, Any] = {},
-                **kwargs: Any) -> Tuple[Union[str, List[Dict[str, str]]], Dict[str, Any]]:
-        """
-        Returns completion (str or message list) and null state.
-        """
-        state = {'responses': []}
-        completion, response = await self.get_model_response(
-            client=client,
-            model=model,
-            prompt=prompt,
-            sampling_args=sampling_args,
-            message_type=self.message_type
-        )
-        state['responses'].append(response)
-        if self.message_type == 'chat': 
-            return [{'role': 'assistant', 'content': completion}], state
-        return completion, state
-    
+    async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
+        return len(state["responses"]) > 0
+
+    async def env_response(
+        self, messages: Messages, state: State, **kwargs
+    ) -> tuple[Messages, State]:
+        # never called in MultiTurnEnv.rollout
+        return [{"role": "user", "content": ""}], state
