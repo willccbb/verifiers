@@ -1565,7 +1565,7 @@ class GRPOTrainer(Trainer):
         for i in range(len(all_prompts)):
             prompt = all_prompts[i]
             completion = all_completions[i]
-            reward_dict = {k: v[i] for k, v in all_reward_dict.items()}
+            reward_dict = {k: str(v[i]) for k, v in all_reward_dict.items()}
 
             log_generation(prompt, completion, reward_dict)
 
