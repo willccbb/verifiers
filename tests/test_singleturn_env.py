@@ -234,7 +234,7 @@ class TestSingleTurnEnv:
             return_value=RolloutScores(reward=[1.0, 1.0], metrics={})
         )
 
-        results = await mock_singleturn_env.a_generate(inputs)
+        results = await mock_singleturn_env.a_generate(inputs, interleave_scoring=False)
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
@@ -253,7 +253,9 @@ class TestSingleTurnEnv:
             return_value=RolloutScores(reward=[1.0, 1.0], metrics={})
         )
 
-        results = await mock_singleturn_env.a_generate(sample_chat_dataset)
+        results = await mock_singleturn_env.a_generate(
+            sample_chat_dataset, interleave_scoring=False
+        )
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
@@ -286,7 +288,7 @@ class TestSingleTurnEnv:
         )
 
         results = mock_singleturn_env.generate(
-            inputs, client=mock_singleturn_env.client
+            inputs, client=mock_singleturn_env.client, interleave_scoring=False
         )
 
         assert hasattr(results, "completion")

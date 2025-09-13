@@ -102,7 +102,7 @@ class TestEnvironmentBase:
         self, mock_openai_client, sample_dataset
     ):
         """Test that warning is logged when parser and rubric parser are different."""
-        from unittest.mock import patch, Mock
+        from unittest.mock import Mock, patch
 
         think_parser = ThinkParser()
         rubric = Rubric()  # Different parser class
@@ -542,7 +542,9 @@ class TestEnvironmentBase:
 
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
-        results = await env.a_generate(inputs, score_rollouts=True)
+        results = await env.a_generate(
+            inputs, score_rollouts=True, interleave_scoring=False
+        )
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
@@ -566,7 +568,7 @@ class TestEnvironmentBase:
 
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
-        results = env.generate(inputs, client=env.client)
+        results = env.generate(inputs, client=env.client, interleave_scoring=False)
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
