@@ -1547,6 +1547,28 @@ class GRPOTrainer(Trainer):
                 else reward_values
             )
 
+        self._log_traces_to_mlflow(all_prompts, all_completions, all_reward_dict)
+
+    def _log_traces_to_mlflow(self, all_prompts, all_completions, all_reward_dict):
+        import mlflow
+
+        def log_generation(prompt, completion, reward_dict):
+            with mlflow.start_span("generation") as span:
+                span.set_inputs({"prompt": prompt})
+                span.set_outputs({"completion": completion})
+                mlflow.update_current_trace(tags=reward_dict)
+                mlflow.update_current_trace(tags={
+                    "step": self.state.global_step,
+                    "wandb_run_id": wandb.run.id,
+                })
+
+        for i in range(len(all_prompts)):
+            prompt = all_prompts[i]
+            completion = all_completions[i]
+            reward_dict = {k: v[i] for k, v in all_reward_dict.items()}
+
+            log_generation(prompt, completion, reward_dict)
+
     def _log_completion_metrics_primary(
         self,
         mode: str,
