@@ -177,9 +177,20 @@ class AsyncBatchGenerator:
                 pass
 
             # Check timeout
-            if time.time() - start_time > timeout:
+            elapsed_time = time.time() - start_time
+            if elapsed_time > timeout:
+                # Before raising timeout, check if there was an error
+                with self._lock:
+                    # Clean up any pending batches that might have errored
+                    self.pending_batches.discard(batch_id)
+                self.logger.error(f"Batch {batch_id} generation timed out after {timeout}s")
                 raise TimeoutError(
-                    f"Batch {batch_id} generation timed out after {timeout}s"
+                    f"Batch {batch_id} generation timed out after {timeout}s. "
+                    f"Consider reducing max_concurrent, increasing timeout values, "
+                    f"or checking your model server health. "
+                    f"Try reducing max_concurrent parameter, increasing async_generation_timeout in GRPOConfig, "
+                    f"verifying vLLM server is running and responsive, considering reducing max_tokens or using a smaller model, "
+                    f"and increasing system limits with 'ulimit -n 4096'."
                 )
 
     def get_pending_count(self) -> int:
@@ -264,15 +275,22 @@ class AsyncBatchGenerator:
         """
         # Call environment generation
         self.is_generating = True
-        env_results = await self.env.a_generate(
-            request.env_inputs,
-            client=self.client,
-            model=self.model_name,
-            sampling_args=self.sampling_args,
-            score_rollouts=True,
-            max_concurrent=request.max_concurrent,
-        )
-        self.is_generating = False
+        try:
+            env_results = await self.env.a_generate(
+                request.env_inputs,
+                client=self.client,
+                model=self.model_name,
+                sampling_args=self.sampling_args,
+                score_rollouts=True,
+                max_concurrent=request.max_concurrent,
+            )
+        except Exception as e:
+            self.is_generating = False
+            self.logger.error(f"Error during batch generation: {e}")
+            # Re-raise the exception to be handled by the calling function
+            raise e
+        finally:
+            self.is_generating = False
 
         # Extract all reward-related keys
         all_reward_dict = {
@@ -399,7 +417,14 @@ class AsyncBatchGenerator:
         eval_thread.join(timeout=self.generation_timeout)
 
         if eval_thread.is_alive():
-            raise TimeoutError(f"Evaluation timed out after {self.generation_timeout}s")
+            raise TimeoutError(
+                f"Evaluation timed out after {self.generation_timeout}s. "
+                f"Consider reducing max_concurrent, increasing timeout values, "
+                f"or checking your model server health. "
+                f"Try reducing max_concurrent parameter, increasing async_generation_timeout in GRPOConfig, "
+                f"verifying vLLM server is running and responsive, considering reducing max_tokens or using a smaller model, "
+                f"and increasing system limits with 'ulimit -n 4096'."
+            )
 
         if exception_container:
             raise exception_container[0]
