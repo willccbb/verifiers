@@ -1555,14 +1555,22 @@ class GRPOTrainer(Trainer):
         mlflow.set_experiment(self.args.run_name)
 
         def log_generation(prompt, completion, reward_dict):
-            with mlflow.start_span("generation") as span:
-                span.set_inputs({"prompt": prompt})
+            span = mlflow.start_span_no_context(
+                name="generation",
+                inputs={"prompt": prompt}
+            )
+            
+            try:
                 span.set_outputs({"completion": completion})
-                mlflow.update_current_trace(tags=reward_dict)
-                mlflow.update_current_trace(tags={
-                    "step": str(self.state.global_step),
-                    "wandb_run_id": wandb.run.id,
-                })
+                
+                all_tags = {**reward_dict}
+                all_tags["step"] = str(self.state.global_step)
+                all_tags["wandb_run_id"] = wandb.run.id
+                
+                for key, value in all_tags.items():
+                    span.set_tag(key, value)
+            finally:
+                span.end()
 
         for i in range(len(all_prompts)):
             prompt = all_prompts[i]
