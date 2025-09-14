@@ -10,11 +10,13 @@ from typing import Any, Dict, Optional
 import numpy as np
 import typer
 from datasets import Dataset
-from openai import OpenAI
 
 import verifiers as vf
 from verifiers.scripts.tui import RunInfo, VerifiersTUI, ViewRunScreen
+from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
+
+logger = logging.getLogger("verifiers.scripts.eval")
 
 
 def eval_environment(

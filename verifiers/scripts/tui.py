@@ -452,7 +452,7 @@ class ViewRunScreen(Screen):
             ("", ""),
         ]
 
-        col3 = [
+        col3_items = [
             f"[b]Avg reward:[/b] {avg_reward_str}",
             f"[b]Max tokens:[/b] {meta.get('max_tokens', meta.get('sampling_args', {}).get('max_tokens', ''))}",
             f"[b]Temperature:[/b] {meta.get('temperature', meta.get('sampling_args', {}).get('temperature', ''))}",
