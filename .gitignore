@@ -29,7 +29,7 @@ docs/build/
 
 # outputs
 wandb/
-outputs/
+/outputs/
 reports/
 logs/
 

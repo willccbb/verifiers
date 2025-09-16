@@ -3,21 +3,20 @@ import importlib
 import importlib.util
 import json
 import logging
-import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 from datasets import Dataset
-from openai import OpenAI
 
 import verifiers as vf
+from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 from verifiers.utils.report_utils import compute_grouped_summary
 
-# Setup logger for eval script
-logger = logging.getLogger(__name__)
+# Setup logger for eval script using verifiers logging format
+logger = logging.getLogger("verifiers.scripts.eval")
 
 
 def eval_environment(
@@ -79,8 +78,15 @@ def eval_environment(
             f"Model '{model}' not found in endpoint registry, using command-line arguments"
         )
 
-    api_key_value = os.getenv(api_key_var, "EMPTY")
-    client = OpenAI(api_key=api_key_value, base_url=api_base_url)
+    # Setup eval client with high limits, effectively preventing any API timeout errors
+    client = setup_client(
+        api_base_url,
+        api_key_var,
+        timeout=36000.0,  # 10h
+        max_connections=28000,  # Number of available ports
+        max_keepalive_connections=28000,  # Number of available ports
+        max_retries=10,  # 10 retries (w/ exponential backoffs)
+    )
     logger.info(f"Initialized OpenAI client with base_url: {api_base_url}")
 
     logger.info(f"Loading environment: {env}")
@@ -126,11 +132,8 @@ def eval_environment(
     logger.info(
         f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
     )
-    n = num_examples
     r = rollouts_per_example
-
-    if n < 0:
-        n = len(results.reward) // r
+    n = len(results.reward) // r
     for i in range(r):
         # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]

@@ -1,4 +1,4 @@
-__version__ = "0.1.3.post0"
+__version__ = "0.1.4.dev0"
 
 import importlib
 import logging
@@ -10,6 +10,7 @@ from .envs.env_group import EnvGroup
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
 from .envs.singleturn_env import SingleTurnEnv
+from .envs.stateful_tool_env import StatefulToolEnv
 from .envs.tool_env import ToolEnv
 from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
@@ -73,6 +74,7 @@ __all__ = [
     "Environment",
     "MultiTurnEnv",
     "SingleTurnEnv",
+    "StatefulToolEnv",
     "ToolEnv",
     "EnvGroup",
     "extract_boxed_answer",
