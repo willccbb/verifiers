@@ -177,16 +177,13 @@ class MCPBootstrap:
         self.logger = logging.getLogger("verifiers.envs.MCPToolEnv.MCPBootstrap")
 
     async def provision(self) -> None:
-        # Create virtual environment using best practices that work in containers
+        # Create virtual environment
         steps = [
-            # Create venv without upgrading deps (which fails in containers)
-            "python -m venv /opt/mcp-venv",
-            # Manually ensure pip is available by copying from system
-            "cp -r /usr/local/lib/python*/site-packages/pip* /opt/mcp-venv/lib/python*/site-packages/ 2>/dev/null || true",
-            "cp -r /usr/local/lib/python*/site-packages/setuptools* /opt/mcp-venv/lib/python*/site-packages/ 2>/dev/null || true",
-            # Test that pip works in venv
-            "/opt/mcp-venv/bin/python -m pip --version",
-            # Install FastMCP in the isolated venv
+            # Create venv with system site packages access (safer for containers)
+            "python -m venv --system-site-packages /opt/mcp-venv",
+            # Verify the venv works
+            "/opt/mcp-venv/bin/python --version",
+            # Install FastMCP in the venv (will use system packages as base)
             '/opt/mcp-venv/bin/python -m pip install --no-cache-dir "fastmcp>=2.2.0"',
             # Create directory for our runner script
             "mkdir -p /opt/mcp-runner",
