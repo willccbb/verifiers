@@ -680,8 +680,6 @@ class Environment(ABC):
             raise ValueError("split_names must have the same length as datasets")
             
         from datasets import concatenate_datasets as hf_concatenate_datasets
-        import pyarrow as pa
-        from collections import defaultdict
         
         all_columns = set()
         for dataset in datasets:
