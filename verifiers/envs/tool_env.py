@@ -38,7 +38,7 @@ class ToolEnv(MultiTurnEnv):
         """Call a tool based on JSON command."""
         try:
             tool_func = self.tool_map[tool_name]
-            result = str(await maybe_await(tool_func, **tool_args))
+            result = await maybe_await(tool_func, **tool_args)
             return {
                 "role": "tool",
                 "content": str(result),

@@ -165,6 +165,8 @@ class Environment(ABC):
         if seed is not None:
             self.dataset = self.dataset.shuffle(seed=seed)
         if n > 0:
+            # Cap n to the length of the dataset to prevent IndexError
+            n = min(n, len(self.dataset))
             return self.dataset.select(range(n))
         return self.dataset
 
@@ -177,6 +179,8 @@ class Environment(ABC):
         if seed is not None:
             self.eval_dataset = self.eval_dataset.shuffle(seed=seed)
         if n > 0:
+            # Cap n to the length of the dataset to prevent IndexError
+            n = min(n, len(self.eval_dataset))
             return self.eval_dataset.select(range(n))
         return self.eval_dataset
 
@@ -223,6 +227,23 @@ class Environment(ABC):
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
+                # --- detect audio parts and force text-only modality if caller didn't set one ---
+                has_audio = False
+                try:
+                    for m in prompt:
+                        c = m.get("content")  # type: ignore[assignment]
+                        if isinstance(c, list):
+                            for p in c:
+                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
+                                    has_audio = True
+                                    break
+                        if has_audio:
+                            break
+                except Exception:
+                    has_audio = False
+                if has_audio and "modalities" not in clean_sampling_args:
+                    clean_sampling_args = {**clean_sampling_args, "modalities": ["text"]}
+
                 if oai_tools:
                     response = await client.chat.completions.create(
                         model=model,

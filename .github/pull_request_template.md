@@ -13,7 +13,7 @@
 <!-- Describe the tests you ran to verify your changes -->
 - [ ] All existing tests pass
 - [ ] New tests have been added to cover the changes
-- [ ] Tests have been run locally with `python -m pytest tests/`
+- [ ] Tests have been run locally with `uv run pytest`
 
 ### Test Coverage
 <!-- If applicable, mention the test coverage for new code -->
