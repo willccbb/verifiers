@@ -6,8 +6,9 @@ tags = ["mcp", "tools", "multi-turn", "sandbox"]
 requires-python = ">=3.11"
 dependencies = [
     "verifiers>=0.1.2.post0",
-    "prime>=0.3.27",
+    "prime>=0.3.28",
     "python-dotenv",
+    "fastmcp>=2.12.3",
 ]
 
 [build-system]

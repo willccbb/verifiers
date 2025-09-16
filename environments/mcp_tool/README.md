@@ -17,27 +17,27 @@
 
 ### Quickstart
 
-**Filesystem MCP Server:**
+**Python FastMCP Server:**
 ```bash
 uv run vf-eval mcp-tool -a '{
   "mcp_launch_commands": [
     {
-      "name": "filesystem", 
-      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "setup_commands": ["mkdir -p /tmp/workspace"]
+      "name": "calculator", 
+      "script": "/workspace/calc_server.py"
     }
   ],
   "num_examples": 10
 }'
 ```
 
-**Memory MCP Server:**
+**Remote MCP Server (HTTP):**
 ```bash
 uv run vf-eval mcp-tool -a '{
   "mcp_launch_commands": [
     {
-      "name": "memory", 
-      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"]
+      "name": "weather", 
+      "url": "https://weather-api.example.com/mcp",
+      "headers": {"Authorization": "Bearer YOUR_TOKEN"}
     }
   ],
   "num_examples": 10
@@ -49,16 +49,16 @@ uv run vf-eval mcp-tool -a '{
 uv run vf-eval mcp-tool -a '{
   "mcp_launch_commands": [
     {
-      "name": "filesystem",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      "name": "calculator",
+      "script": "/workspace/calc_server.py"
     },
     {
-      "name": "memory",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"]
+      "name": "weather",
+      "url": "https://weather-api.example.com/mcp"
     },
     {
-      "name": "git",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-git", "--repository", "/tmp/repo"]
+      "name": "legacy_python",
+      "command": ["python", "/workspace/legacy_server.py"]
     }
   ],
   "num_examples": 10
@@ -73,9 +73,9 @@ uv run vf-eval mcp-tool \
   -a '{
     "mcp_launch_commands": [
       {
-        "name": "filesystem",
-        "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        "setup_commands": ["mkdir -p /tmp/workspace"]
+        "name": "calculator",
+        "script": "/workspace/calc_server.py",
+        "env": {"DEBUG": "1"}
       }
     ],
     "sandbox_config": {"cpu_cores": 2, "memory_gb": 4}
@@ -84,9 +84,11 @@ uv run vf-eval mcp-tool \
 
 Notes:
 - **Universal MCP Support**: Works with any MCP server that follows the Model Context Protocol
+- **FastMCP Integration**: Uses FastMCP Python library for efficient MCP client/server communication
 - Requires Prime CLI configuration: `prime config set-api-key`
-- Uses Node.js sandbox image for npx/npm support
+- Uses Python 3.12 slim sandbox image with FastMCP installed
 - MCP servers run in isolated Prime Intellect sandboxes
+- Supports Python scripts, HTTP/SSE endpoints, and stdio commands
 - Automatic tool discovery via MCP protocol
 - Dynamic tool schema generation from MCP server metadata
 - See [Prime Sandboxes documentation](https://docs.primeintellect.ai/sandboxes) for details
@@ -104,15 +106,43 @@ Notes:
 | `prime_api_key` | str | `None` | Prime API key (or use CLI config) |
 
 ### MCP Server Configuration
-Each MCP server configuration:
+Each MCP server configuration supports multiple formats:
 
+**Python Script (auto-uploaded):**
 ```json
 {
-  "name": "server_name",
-  "command": ["npx", "-y", "@package/server", "/path"],
-  "setup_commands": ["mkdir -p /path", "npm install"]
+  "name": "calculator",
+  "script": "/workspace/calc_server.py"
 }
 ```
+
+**Remote HTTP/SSE Server:**
+```json
+{
+  "name": "weather",
+  "url": "https://weather-api.example.com/mcp",
+  "headers": {"Authorization": "Bearer TOKEN"}
+}
+```
+
+**Stdio Command:**
+```json
+{
+  "name": "legacy",
+  "command": ["python", "/workspace/legacy_server.py"],
+  "env": {"DEBUG": "1"},
+  "workdir": "/tmp"
+}
+```
+
+### Script Auto-Upload
+The environment automatically uploads local script files to the sandbox:
+
+- **`/workspace/script.py`** → Looks for `script.py` in the environment directory
+- **`relative/path.py`** → Looks for `relative/path.py` relative to environment directory  
+- **`/absolute/local/path.py`** → Uploads from absolute local path (if exists)
+
+Scripts are automatically made executable and parent directories are created.
 
 ### Supported MCP Servers
 The environment supports **any MCP server** that follows the Model Context Protocol. Popular servers include:
