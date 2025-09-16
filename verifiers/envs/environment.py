@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Callable, Any
 
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
@@ -54,6 +54,7 @@ class Environment(ABC):
         message_type: MessageType = "chat",
         oai_tools: list[ChatCompletionToolParam] | None = None,
         max_workers: int = 512,
+        state_logging_hook: Callable[[State], Any] | None = None,
         **kwargs,
     ):
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
@@ -103,6 +104,7 @@ class Environment(ABC):
                     self.sampling_args[key] = value
 
         self.max_workers = max_workers
+        self.state_logging_hook = state_logging_hook
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -350,9 +352,29 @@ class Environment(ABC):
                 )
                 for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
             ]
-        return await tqdm_asyncio.gather(
+            
+        results = await tqdm_asyncio.gather(
             *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
         )
+        
+        # Log states if hook is provided
+        for _, state in results:
+            self._log_state(state)
+            
+        return results
+
+    def _log_state(self, state: State) -> None:
+        """
+        Internal method to log state using the custom state logging hook.
+        
+        Args:
+            state: The state dictionary to log
+        """
+        if self.state_logging_hook is not None:
+            try:
+                self.state_logging_hook(state)
+            except Exception as e:
+                self.logger.warning(f"Error in state logging hook: {e}")
 
     async def a_generate(
         self,
@@ -443,6 +465,11 @@ class Environment(ABC):
         )
         results.completion = [rollout[0] for rollout in rollouts]
         results.state = [rollout[1] for rollout in rollouts]
+        
+        # Log states if hook is provided
+        for state in results.state:
+            self._log_state(state)
+            
         if score_rollouts:
             rollout_scores = await self.rubric.score_rollouts(
                 prompts=results.prompt,
