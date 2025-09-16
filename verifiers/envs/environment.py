@@ -544,19 +544,29 @@ class Environment(ABC):
     def make_dataset(
         self,
         results: GenerateOutputs,
-        push_to_hub: bool = False,
+        push_to_hf_hub: bool = False,
         hub_name: str | None = None,
         state_columns: list[str] | None = None,
         **kwargs,
     ) -> Dataset:
         """
         Make a dataset from the evaluation results.
+
+        Args:
+            results: The evaluation results to convert to a dataset
+            push_to_hf_hub: Whether to push the dataset to the Hugging Face Hub
+            hub_name: The name of the dataset on the Hugging Face Hub
+            state_columns: List of state columns to include in the dataset
+            concatenate_safe: Whether to ensure the dataset can be concatenated with others
+                          by standardizing column types (useful for combining results from
+                          different environments). Defaults to True for consistent schemas.
+            **kwargs: Additional arguments passed to Dataset creation
         """
         # TODO: enable saving of multimodal datasets
         state_columns = state_columns or []
 
-        if push_to_hub and hub_name is None:
-            raise ValueError("hub_name must be provided if push_to_hub is True")
+        if push_to_hf_hub and hub_name is None:
+            raise ValueError("hub_name must be provided if push_to_hf_hub is True")
 
         cols = ["prompt", "completion", "answer", "task", "reward"]
 
@@ -586,7 +596,7 @@ class Environment(ABC):
                         f"Column {col} not found in state, skipping from dataset."
                     )
         dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
-        if push_to_hub:
+        if push_to_hf_hub:
             assert hub_name is not None
             dataset.push_to_hub(hub_name)
         return dataset
