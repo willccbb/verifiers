@@ -4,10 +4,11 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal
-
+from typing import TYPE_CHECKING, Literal, Union
+from transformers import ProcessorMixin, AutoProcessor, AutoConfig
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
@@ -665,7 +666,7 @@ class Environment(ABC):
         prompt: list[ChatMessage],
         completion: list[ChatMessage],
         state: State,
-        processing_class: "PreTrainedTokenizerBase",
+        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
         mask_env_responses: bool = False,
     ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
@@ -772,7 +773,22 @@ class Environment(ABC):
             idx = response_start_idx + len(response_text)
         assert idx == len(completion), "Completion not fully consumed"
 
-        prompt_ids: list[int] = processing_class.encode(prompt)
+        
+        # Ici on ajoute les images en kwargs
+        
+        kwargs = {}
+        has_images = "image" in inputs[0]
+        if has_images:
+            images = [example.get("image") for example in inputs]
+            kwargs = {"images": [[img] for img in images]}
+            if isinstance(prompt, list):
+                for message in prompt:
+                    if isinstance(message, dict) and message.get("role") == "user":
+                        if isinstance(message.get("content"), str):
+                            message["content"] = [{"type": "image"}, {"type": "text", "text": message["content"]}]
+                        break
+                        
+        prompt_ids: list[int] = processing_class(prompt,**kwargs)
         rollout_consumed = prompt
         prompt_mask: list[int] = [0] * len(prompt_ids)
         completion_ids: list[int] = []

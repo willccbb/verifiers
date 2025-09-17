@@ -17,6 +17,7 @@ from transformers import AutoModelForCausalLM
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers import ProcessorMixin, AutoProcessor, AutoConfig
 from transformers.trainer import Trainer
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import seed_worker
@@ -210,7 +211,37 @@ def shuffle_tensor_dict(
         for key, tensor in tensor_dict.items()
     }
 
+def split_pixel_values_by_grid(batch: dict[str, torch.Tensor]) -> dict[str, Union[torch.Tensor, list[torch.Tensor]]]:
+    """
+    Splits `batch["pixel_values"]` into a list of tensors based on the product of each row in
+    `batch["image_grid_thw"]`, while keeping other entries unchanged.
+    """
+    if "image_grid_thw" not in batch or "pixel_values" not in batch:
+        return batch
 
+    lengths = batch["image_grid_thw"].prod(dim=1).tolist()  # [batch_size]
+    pixel_values = batch["pixel_values"]  # [total, feature_dim]
+
+    if sum(lengths) != pixel_values.size(0):
+        raise ValueError(f"Mismatch: sum(lengths) = {sum(lengths)} != pixel_values.size(0) = {pixel_values.size(0)}")
+
+    split_values = list(torch.split(batch["pixel_values"], lengths, dim=0))
+    return {**batch, "pixel_values": split_values}
+
+
+def unsplit_pixel_values_by_grid(batch: dict[str, Union[torch.Tensor, list[torch.Tensor]]]) -> dict[str, torch.Tensor]:
+    """
+    Opposite of `split_pixel_values_by_grid`. Merges a list of tensors in `batch["pixel_values"]`
+    back into a single tensor along the first dimension.
+    """
+    pixel_values = batch.get("pixel_values")
+
+    if isinstance(pixel_values, list):
+        merged = torch.cat(pixel_values, dim=0)
+        return {**batch, "pixel_values": merged}
+    else:
+        return batch
+    
 def nanmin(tensor: torch.Tensor) -> torch.Tensor:
     """
     Compute the minimum value of a tensor, ignoring NaNs. This function only supports 1D tensors.
@@ -247,7 +278,7 @@ class GRPOTrainer(Trainer):
         model: PreTrainedModel,
         env: Environment,
         args: GRPOConfig,
-        processing_class: PreTrainedTokenizerBase,
+        processing_class: Optional[Union[PreTrainedTokenizerBase, ProcessorMixin]] = None,
         callbacks: Optional[list[TrainerCallback]] = None,
         optimizers: tuple[
             Optional[torch.optim.Optimizer], Optional[torch.optim.lr_scheduler.LambdaLR]
@@ -274,9 +305,24 @@ class GRPOTrainer(Trainer):
         # Suppress irrelevant warning
         model.warnings_issued["estimate_tokens"] = True
 
-        # Tokenizer pad token
-        if processing_class.pad_token is None:  # type: ignore
-            processing_class.pad_token = processing_class.eos_token  # type: ignore
+        # Handle pad token for processors or tokenizers
+        if isinstance(processing_class, ProcessorMixin):
+            tokenizer = processing_class.tokenizer
+        elif isinstance(processing_class, PreTrainedTokenizerBase):
+            tokenizer = processing_class
+        else:
+            raise TypeError("The `processing_class` must be either a `PreTrainedTokenizerBase` or a `ProcessorMixin`")
+
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        self.pad_token = tokenizer.pad_token
+        self.pad_token_id = tokenizer.pad_token_id
+        self.eos_token_id = tokenizer.eos_token_id
+        self.image_token = getattr(processing_class, "image_token", None)
+        self.image_token_id = getattr(processing_class, "image_token_id", None)
+        self.vision_start_token_id = getattr(model.config, "vision_start_token_id", None)
+        self.vision_end_token_id = getattr(model.config, "vision_end_token_id", None)
 
         # Training arguments
         self.per_device_train_batch_size = args.per_device_train_batch_size
@@ -475,9 +521,9 @@ class GRPOTrainer(Trainer):
         elif is_deepspeed_zero3_enabled():
             model_id = model.config._name_or_path
             model_init_kwargs = {"torch_dtype": "auto"}
-            self.ref_model = AutoModelForCausalLM.from_pretrained(
-                model_id, **model_init_kwargs
-            )
+            config = AutoConfig.from_pretrained(model_id)
+            architecture = getattr(transformers, config.architectures[0])
+            self.ref_model = architecture.from_pretrained(model_id, **model_init_kwargs)
         elif is_peft_model(model):
             # If PEFT is used, the reference model is not needed since the adapter can be disabled
             # to revert to the initial model.
@@ -510,7 +556,8 @@ class GRPOTrainer(Trainer):
             * args.per_device_train_batch_size
             * args.gradient_accumulation_steps
         )
-        self._textual_logs = {
+        self._logs = {
+            "image": deque(maxlen=maxlen),
             "prompt": deque(maxlen=maxlen),
             "completion": deque(maxlen=maxlen),
             "rewards": defaultdict(lambda: deque(maxlen=maxlen)),
@@ -699,24 +746,62 @@ class GRPOTrainer(Trainer):
                 self.async_generator.stop()
             self._async_started = False
 
+
     def _get_last_hidden_state(
-        self, unwrapped_model, input_ids, attention_mask, logits_to_keep=None
+        self,
+        unwrapped_model,
+        input_ids,
+        attention_mask,
+        logits_to_keep,
+        pixel_values=None,
+        image_grid_thw=None,
+        pixel_attention_mask=None,
+        image_sizes=None,
     ):
         if is_peft_model(unwrapped_model):
             unwrapped_model = unwrapped_model.base_model.model
-        last_hidden_state = unwrapped_model.model(
-            input_ids=input_ids, attention_mask=attention_mask
-        ).last_hidden_state
-        last_hidden_state = last_hidden_state[:, :-1, :]  # (B, L-1, H)
-        if logits_to_keep is not None:
-            last_hidden_state = last_hidden_state[
-                :, -logits_to_keep:, :
-            ]  # (B, logits_to_keep, H)
-        return last_hidden_state
 
+        # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
+        model_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+
+        # For Qwen models:
+        if image_grid_thw is not None and pixel_values is not None:
+            model_inputs["image_grid_thw"] = image_grid_thw
+        # For Gemma, SmolVLM2, LLaVa-Next etc.:
+        if pixel_values is not None:
+            model_inputs["pixel_values"] = pixel_values
+        # For SmolVLM2
+        if pixel_attention_mask is not None:
+            model_inputs["pixel_attention_mask"] = pixel_attention_mask
+        # For LLaVa-Next
+        if image_sizes is not None:
+            model_inputs["image_sizes"] = image_sizes
+
+        # Only add logits_to_keep if the model supports it
+        if "logits_to_keep" in self.model_kwarg_keys:
+            # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
+            model_inputs["logits_to_keep"] = logits_to_keep + 1
+
+        model_inputs["use_cache"] = False  # only used in generation; set False to suppress warnings
+
+        last_hidden_state = unwrapped_model.model(**model_inputs).last_hidden_state
+        # Exclude the last value: it corresponds to the next token pred
+        last_hidden_state = last_hidden_state[:, :-1, :]  # (B, L-1, H)
+        # Only keep the last logits_to_keep. For model that support logits_to_keep, this is a no-op.
+        last_hidden_state = last_hidden_state[:, -logits_to_keep:, :]  # (B, logits_to_keep, H)
+        return last_hidden_state
+    
     # Get the per-token log probabilities for the completions for the model and the reference model
     def _get_per_token_logps(
-        self, model, input_ids, attention_mask, logits_to_keep, batch_size=None
+        self,
+        model,
+        input_ids,
+        attention_mask,
+        logits_to_keep,
+        batch_size=None,
+        compute_entropy=False,
+        pixel_values=None,
+        image_grid_thw=None,
     ) -> torch.Tensor:
         batch_size = batch_size or input_ids.size(
             0
@@ -725,18 +810,27 @@ class GRPOTrainer(Trainer):
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
-            logits = model(
-                input_ids=input_ids_batch,
-                attention_mask=attention_mask_batch,
-                logits_to_keep=logits_to_keep + 1,
-            ).logits
-            logits = logits[
-                :, :-1, :
-            ]  # (B, L-1, V), exclude the last logit: it corresponds to the next token pred
-            input_ids_batch = input_ids_batch[:, -logits_to_keep:]
-            # For transformers<=4.48, logits_to_keep argument isn't supported, so here we drop logits ourselves.
-            # See https://github.com/huggingface/trl/issues/2770
-            logits = logits[:, -logits_to_keep:]
+            # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
+            model_inputs = {"input_ids": input_ids_batch, "attention_mask": attention_mask_batch}
+
+            if image_grid_thw is not None and pixel_values is not None:
+                model_inputs["image_grid_thw"] = image_grid_thw[start : start + batch_size]
+                start_pixel_idx = image_grid_thw[:start].prod(-1).sum().item()
+                end_pixel_idx = image_grid_thw[: start + batch_size].prod(-1).sum().item()
+                model_inputs["pixel_values"] = pixel_values[start_pixel_idx:end_pixel_idx]
+            elif pixel_values is not None:
+                model_inputs["pixel_values"] = pixel_values[start : start + batch_size]
+
+            # Only add logits_to_keep if the model supports it
+            if "logits_to_keep" in self.model_kwarg_keys:
+                # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
+                model_inputs["logits_to_keep"] = logits_to_keep + 1
+
+            logits = model(**model_inputs).logits
+            # Exclude the last value: it corresponds to the next token pred
+            logits = logits[:, :-1, :]  # (B, L-1, H)
+            # Only keep the last logits_to_keep. For model that support logits_to_keep, this is a no-op.
+            logits = logits[:, -logits_to_keep:, :]  # (B, logits_to_keep, H)
             # Divide logits by sampling temperature.
             # See https://huggingface.co/blog/the_n_implementation_details_of_rlhf_with_ppo#policy-training-implementation-details
             logits = logits / self.temperature
@@ -994,7 +1088,9 @@ class GRPOTrainer(Trainer):
                     )
                     break
                 batch_offset = batch_id - batch_id_to_retrieve
-                all_prompts, all_answers, all_tasks, all_infos = (
+                
+                # En gros ici il faut recup les images je pense si elles existe
+                all_prompts, all_answers, all_tasks, all_infos, all_images = (
                     self._gather_batch_data(batch_offset)
                 )
                 if not all_prompts:
@@ -1002,17 +1098,22 @@ class GRPOTrainer(Trainer):
                         f"No prompts for batch {batch_id}, stopping batch generation"
                     )
                     break
-
+                
+                env_inputs = {
+                    "prompt": all_prompts,
+                    "answer": all_answers,
+                    "task": all_tasks,
+                    "info": all_infos,
+                }
+                
+                if len(all_images) > 0 :
+                    env_inputs["image"] = all_images
+                    
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
                     request = BatchRequest(
                         batch_id=batch_id,
-                        env_inputs={
-                            "prompt": all_prompts,
-                            "answer": all_answers,
-                            "task": all_tasks,
-                            "info": all_infos,
-                        },
+                        env_inputs=env_inputs,
                         processing_class=self.processing_class,
                         mask_env_responses=self.mask_env_responses,
                         max_seq_len=self.max_seq_len or -1,
@@ -1190,17 +1291,20 @@ class GRPOTrainer(Trainer):
         completion_mask = attention_mask[:, 1:]
         logits_to_keep = completion_mask.size(1)
         per_token_logps = self._get_per_token_logps(
-            model, input_ids, attention_mask, logits_to_keep
+            model,
+            input_ids,
+            attention_mask,
+            logits_to_keep,
+            compute_entropy=self.top_entropy_quantile < 1.0,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
         )
         # Compute the loss
         advantages = inputs["advantages"]
         # When using num_iterations == 1, old_per_token_logps == per_token_logps,
         # so we can skip it's computation (see _generate_and_score_completions) and use per_token_logps.detach() instead.
-        old_per_token_logps = (
-            per_token_logps.detach()
-            if inputs["old_per_token_logps"] is None
-            else inputs["old_per_token_logps"]
-        )
+        old_per_token_logps = inputs.get("old_per_token_logps")
+        old_per_token_logps = per_token_logps.detach() if old_per_token_logps is None else old_per_token_logps
         coef_1 = torch.exp(per_token_logps - old_per_token_logps)
         coef_2 = torch.clamp(coef_1, 1 - self.epsilon_low, 1 + self.epsilon_high)
 
@@ -1221,12 +1325,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep
+                        self.ref_model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter():  # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep
+                            self.model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps)
@@ -1308,7 +1412,7 @@ class GRPOTrainer(Trainer):
                 msg.pop("tool_call_id")
         return completion
 
-    def evaluate(
+    def evaluate( # TODO : check for images
         self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval", **kwargs
     ):
         """
@@ -1458,11 +1562,12 @@ class GRPOTrainer(Trainer):
         self._metrics[mode].clear()
 
         if self.accelerator.is_main_process and self.log_completions:
-            if len(self._textual_logs["prompt"]) > 0:
+            if len(self._logs["prompt"]) > 0:
                 print_prompt_completions_sample(
-                    self._textual_logs["prompt"],
-                    self._textual_logs["completion"],
-                    self._textual_logs["rewards"]["reward"],
+                    self._logs["prompt"],
+                    self._logs["completion"],
+                    self._logs["rewards"],
+                    self._logs["advantages"],
                     self.state.global_step,
                 )
 
@@ -1475,14 +1580,24 @@ class GRPOTrainer(Trainer):
 
                 table = {
                     "step": [str(self.state.global_step)]
-                    * len(self._textual_logs["prompt"]),
-                    "prompt": list(self._textual_logs["prompt"]),
+                    * len(self._logs["prompt"]),
+                    "prompt": list(self._logs["prompt"]),
                     "completion": [
                         self._sanitize_tool_calls(c)
-                        for c in self._textual_logs["completion"]
+                        for c in self._logs["completion"]
                     ],
-                    **{k: list(v) for k, v in self._textual_logs["rewards"].items()},
+                    **{k: list(v) for k, v in self._logs["rewards"].items()},
                 }
+                
+                if self._logs["image"]:
+                    table["image"] = []
+                    for img in self._logs["image"]:
+                        if img is not None:
+                            # Convert images to wandb Image objects for proper visualization
+                            table["image"].append(wandb.Image(img))
+                        else:
+                            table["image"].append(None)
+                            
                 if len(table["prompt"]) > 0:
                     df = pd.DataFrame(table)
                     if self.wandb_log_unique_prompts:
@@ -1490,10 +1605,12 @@ class GRPOTrainer(Trainer):
                     wandb.log({"completions": wandb.Table(dataframe=df)})
 
             # Clear the textual logs after logging
-            self._textual_logs["prompt"].clear()
-            self._textual_logs["completion"].clear()
-            for key in self._textual_logs["rewards"]:
-                self._textual_logs["rewards"][key].clear()
+            self._logs["prompt"].clear()
+            self._logs["completion"].clear()
+            if self._logs["image"] :
+                self._logs["image"].clear()
+            for key in self._logs["rewards"]:
+                self._logs["rewards"][key].clear()
 
     def _log_reward_metrics_primary(
         self,
@@ -1535,13 +1652,13 @@ class GRPOTrainer(Trainer):
         Log textual data for wandb (PRIMARY PROCESS ONLY).
         This logs the full batch of prompts, completions, and rewards.
         """
-        self._textual_logs["prompt"].extend(all_prompts)
-        self._textual_logs["completion"].extend(all_completions)
+        self._logs["prompt"].extend(all_prompts)
+        self._logs["completion"].extend(all_completions)
 
         # Log all reward scores - both individual functions and consolidated
         for reward_key in all_reward_dict:
             reward_values = all_reward_dict[reward_key]
-            self._textual_logs["rewards"][reward_key].extend(
+            self._logs["rewards"][reward_key].extend(
                 reward_values.tolist()
                 if isinstance(reward_values, torch.Tensor)
                 else reward_values
