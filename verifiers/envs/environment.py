@@ -42,8 +42,6 @@ class Environment(ABC):
 
     def __init__(
         self,
-        client: AsyncOpenAI | None = None,
-        model: str | None = None,
         dataset: Dataset | None = None,
         eval_dataset: Dataset | None = None,
         system_prompt: str | None = None,
@@ -57,8 +55,6 @@ class Environment(ABC):
         **kwargs,
     ):
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
-        self.client = client
-        self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
         self.oai_tools: list[ChatCompletionToolParam] | None = oai_tools
         self.system_prompt = system_prompt
@@ -362,8 +358,8 @@ class Environment(ABC):
     async def a_generate(
         self,
         inputs: GenerateInputs | Dataset | dict,
-        client: AsyncOpenAI | None = None,
-        model: str | None = None,
+        client: AsyncOpenAI,
+        model: str,
         sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
@@ -377,13 +373,6 @@ class Environment(ABC):
         """
         if isinstance(inputs, GenerateInputs):
             inputs = inputs.model_dump()
-        # use class-level client and model if not provided
-        if client is None:
-            assert self.client is not None
-            client = self.client
-        if model is None:
-            assert self.model is not None
-            model = self.model
         gen_sampling_args = deepcopy(self.sampling_args)
         if sampling_args is not None:
             gen_sampling_args.update(sampling_args)
@@ -576,7 +565,7 @@ class Environment(ABC):
         self,
         inputs: GenerateInputs | Dataset,
         client: AsyncOpenAI | OpenAI,
-        model: str | None = None,
+        model: str,
         sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
