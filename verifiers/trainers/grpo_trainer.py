@@ -130,7 +130,12 @@ class RepeatSampler(Sampler):
                         yield index
 
     def __len__(self) -> int:
-        return (self.num_samples // self.batch_size) * self.batch_size * self.mini_repeat_count * self.repeat_count
+        return (
+            (self.num_samples // self.batch_size)
+            * self.batch_size
+            * self.mini_repeat_count
+            * self.repeat_count
+        )
 
 
 # torch.nanstd doesn't exist, so we define it here
@@ -411,7 +416,7 @@ class GRPOTrainer(Trainer):
             train_dataset = train_dataset.filter(
                 filter_by_prompt_length,
                 num_proc=self.max_data_workers,
-                fn_kwargs={"processing_class": processing_class}
+                fn_kwargs={"processing_class": processing_class},
             )
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
@@ -1135,12 +1140,22 @@ class GRPOTrainer(Trainer):
                     all_completion_ids=broadcast_data["completion_ids"],
                     all_prompt_mask=broadcast_data["prompt_mask"],
                 )
+            with torch.no_grad():
+                completion_mask = attention_mask[:, 1:]
+                logits_to_keep = completion_mask.size(1)
+                old_per_token_logps = self._get_per_token_logps(
+                    self.model,
+                    input_ids,
+                    attention_mask,
+                    logits_to_keep,
+                    batch_size=self.per_device_train_batch_size,
+                )
 
             # Concatenate all data for shuffling
             full_batch = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
-                "old_per_token_logps": None,
+                "old_per_token_logps": old_per_token_logps,
                 "advantages": advantages,
             }
 
