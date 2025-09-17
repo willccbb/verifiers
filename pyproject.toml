@@ -33,6 +33,7 @@ dependencies = [
     "rich",
     "textual",
     "openai-agents>=0.0.7",
+    "claude-code-sdk>=0.0.22",
 ]
 
 [project.optional-dependencies]
