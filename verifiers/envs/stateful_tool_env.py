@@ -4,6 +4,7 @@ from typing import Callable
 
 from verifiers.envs.tool_env import ToolEnv
 from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
+from verifiers.utils.async_utils import maybe_await
 from verifiers.utils.tool_utils import convert_func_to_oai_tool
 
 
@@ -40,7 +41,7 @@ class StatefulToolEnv(ToolEnv):
         """Call a tool based on JSON command."""
         try:
             tool_func = self.tool_map[tool_name]
-            result = str(tool_func(**tool_args))
+            result = await maybe_await(tool_func, **tool_args)
             return {
                 "role": "tool",
                 "content": str(result),
