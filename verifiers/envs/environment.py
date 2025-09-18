@@ -128,8 +128,8 @@ class Environment(ABC):
         answer_key: str = "answer",
     ) -> Dataset:
         # skip if "prompt" already exists
-        if "prompt" in dataset.column_names:
-            return dataset
+        if "id" not in dataset.column_names:
+            dataset = dataset.add_column("id", range(len(dataset)))  # type: ignore
 
         # extract format_prompt as a standalone function to avoid capturing self
         def format_prompt_fn(prompt_str: str) -> list[ChatMessage]:
@@ -141,19 +141,23 @@ class Environment(ABC):
             messages.append({"role": "user", "content": prompt_str})
             return messages
 
-        if answer_key == "answer":
-            return dataset.map(
-                lambda x: {
-                    "prompt": format_prompt_fn(x[question_key]),
-                }
-            )
-        else:
-            return dataset.map(
-                lambda x: {
-                    "prompt": format_prompt_fn(x[question_key]),
-                    "answer": x[answer_key],
-                }
-            )
+        if "prompt" not in dataset.column_names:
+            if answer_key == "answer":
+                dataset = dataset.map(
+                    lambda x: {
+                        "prompt": format_prompt_fn(x[question_key]),
+                    }
+                )
+            else:
+                dataset = dataset.map(
+                    lambda x: {
+                        "prompt": format_prompt_fn(x[question_key]),
+                        "answer": x[answer_key],
+                    }
+                )
+        assert "id" in dataset.column_names
+        assert "prompt" in dataset.column_names
+        return dataset
 
     def get_dataset(self, n: int = -1, seed: int | None = None) -> Dataset:
         if self.dataset is None:
