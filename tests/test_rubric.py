@@ -330,7 +330,6 @@ class TestRubric:
         prompts = ["test"]
         completions = ["test"]
         answers = ["test"]
-        states = [{}]
         tasks = ["test"]
         infos = [{}]
 

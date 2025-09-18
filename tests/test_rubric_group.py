@@ -147,7 +147,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -192,7 +191,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -231,7 +229,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -270,7 +267,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -307,7 +303,6 @@ class TestRubricGroup:
         prompts = []
         completions = []
         answers = []
-        states = []
         tasks = []
         infos = []
 
@@ -363,7 +358,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?", "What is 2+2?"]
         completions = ["2", "4"]
         answers = ["2", "4"]
-        states = [{}, {}]
         tasks = ["default", "default"]
         infos = [{}, {}]
 

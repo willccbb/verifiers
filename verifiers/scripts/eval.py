@@ -155,6 +155,9 @@ def eval_environment(
             "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
             "completion": [sanitize_tool_calls(c) for c in printable_completions],
             "task": tasks,
+            "generation_ms": [s["timing"]["generation_ms"] for s in results.state],
+            "scoring_ms": [s["timing"]["scoring_ms"] for s in results.state],
+            "total_ms": [s["timing"]["total_ms"] for s in results.state],
         }
         if results.info[0] != {}:
             data_dict["info"] = results.info
