@@ -1,8 +1,23 @@
-<div align="center">
+<p align="center">
+</p>
 
 <p align="center">
-  <h1>Verifiers</h1>
+  <img src="https://github.com/user-attachments/assets/40c36e38-c5bd-4c5a-9cb3-f7b902cd155d#gh-light-mode-only" alt="Prime Intellect" width="312">
+  <img src="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8#gh-dark-mode-only"  alt="Prime Intellect" width="312">
 </p>
+
+---
+
+<h3 align="center">
+Verifiers: Environments for LLM Reinforcement Learning
+</h3>
+<!---
+<p align="center">
+Created by Will Brown (<a href="https://github.com/willccbb">@willccbb</a>)
+</p>
+--->
+
+---
 
 <p align="center">
   <a href="https://github.com/willccbb/verifiers/actions/workflows/style.yml">
@@ -16,11 +31,6 @@
   </a>
 </p>
 
-<p>
-Environments for LLM Reinforcement Learning
-</p>
-
-</div>
 
 ## Overview
 
