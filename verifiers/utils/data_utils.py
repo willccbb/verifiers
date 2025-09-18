@@ -270,9 +270,9 @@ def load_example_dataset(
     elif name == "prime_code":
         if split is None:
             split = "train"
-        dataset: Dataset = load_dataset("PrimeIntellect/verifiable-coding-problems")[
+        dataset: Dataset = load_dataset("PrimeIntellect/verifiable-coding-problems")[  # type: ignore
             split
-        ]  # type: ignore
+        ]
         dataset = dataset.filter(
             lambda x: x["prompt"].startswith(
                 "Solve the following coding problem using the programming language python:"
