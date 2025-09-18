@@ -1,8 +1,11 @@
 """Tests for the Rubric class."""
 
+from typing import cast
+
 import pytest
 
 from verifiers import Parser, Rubric
+from verifiers.types import RewardFunc
 
 
 class TestRubric:
@@ -25,7 +28,7 @@ class TestRubric:
         def reward_func2(completion, **kwargs):
             return len(completion) * 0.1
 
-        funcs = [reward_func1, reward_func2]
+        funcs = cast(list[RewardFunc], [reward_func1, reward_func2])
         weights = [1.0, 0.5]
 
         rubric = Rubric(funcs=funcs, weights=weights)
@@ -38,13 +41,13 @@ class TestRubric:
     def test_rubric_initialization_functions_without_weights(self):
         """Test Rubric initialization with functions but no explicit weights."""
 
-        def reward_func1(completion, **kwargs):
+        def reward_func1(completion, **kwargs) -> float:
             return 1.0
 
-        def reward_func2(completion, **kwargs):
+        def reward_func2(completion, **kwargs) -> float:
             return 0.5
 
-        funcs = [reward_func1, reward_func2]
+        funcs = cast(list[RewardFunc], [reward_func1, reward_func2])
 
         rubric = Rubric(funcs=funcs)
 
