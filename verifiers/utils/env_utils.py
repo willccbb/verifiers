@@ -26,7 +26,11 @@ def load_environment(env_id: str, **env_args) -> Environment:
 
         if not hasattr(module, "load_environment"):
             raise AttributeError(
-                f"Module '{module_name}' does not have a 'load_environment' function"
+                f"Module '{module_name}' does not have a 'load_environment' function. "
+                f"This usually means there's a package name collision. Please either:\n"
+                f"1. Rename your environment (e.g. suffix with '-env')\n"
+                f"2. Remove unneeded files with the same name\n"
+                f"3. Check that you've installed the correct environment package"
             )
 
         # Get the signature of the environment's load_environment function to log defaults
