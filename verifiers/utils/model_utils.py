@@ -101,8 +101,17 @@ def get_tokenizer(model_name: str) -> Any:
 
 
 def get_model_and_tokenizer(
-    model_name: str, use_liger: bool = True, model_kwargs: dict[str, Any] | None = None
+    model_name: str, 
+    use_liger: bool = True, 
+    model_kwargs: dict[str, Any] | None = None,
+    attn_implementation: str | None = None
 ) -> tuple[Any, Any]:
+    # If attn_implementation is provided, override it in model_kwargs
+    if attn_implementation is not None:
+        if model_kwargs is None:
+            model_kwargs = {}
+        model_kwargs["attn_implementation"] = attn_implementation
+    
     model = get_model(model_name, use_liger, model_kwargs)
     tokenizer = get_tokenizer(model_name)
     return model, tokenizer
