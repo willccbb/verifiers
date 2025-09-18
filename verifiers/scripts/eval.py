@@ -3,6 +3,7 @@ import importlib
 import importlib.util
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -100,7 +101,7 @@ def eval_environment(
     logger.info(
         f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent={max_concurrent}"
     )
-
+    start_time = time.time()
     results = vf_env.evaluate(
         client=client,
         model=model,
@@ -109,6 +110,8 @@ def eval_environment(
         rollouts_per_example=rollouts_per_example,
         max_concurrent=max_concurrent,
     )
+    end_time = time.time()
+    logger.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")
     logger.info("Evaluation completed successfully")
     print("--- Evaluation ---")
     print(f"Environment: {env}")
@@ -169,8 +172,8 @@ def eval_environment(
             "num_examples": n,
             "rollouts_per_example": rollouts_per_example,
             "sampling_args": merged_sampling_args,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "time": datetime.now().strftime("%H:%M:%S"),
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "time_ms": (end_time - start_time) * 1000,
             "avg_reward": sum(results.reward) / len(results.reward),
         }
         for k in results.metrics:
