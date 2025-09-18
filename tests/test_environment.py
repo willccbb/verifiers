@@ -45,14 +45,10 @@ class TestEnvironmentBase:
     def test_environment_initialization(self, mock_openai_client, sample_dataset):
         """Test that Environment initializes correctly."""
         env = SimpleEnvironment(
-            client=mock_openai_client,
-            model="test-model",
             dataset=sample_dataset,
             parser=Parser(),
             rubric=Rubric(),
         )
-        assert env.client == mock_openai_client
-        assert env.model == "test-model"
         assert env.message_type == "chat"
         assert isinstance(env.parser, Parser)
         assert isinstance(env.rubric, Rubric)
@@ -62,8 +58,6 @@ class TestEnvironmentBase:
     ):
         """Test Environment with only eval_dataset."""
         env = SimpleEnvironment(
-            client=mock_openai_client,
-            model="test-model",
             eval_dataset=sample_dataset,
             parser=Parser(),
             rubric=Rubric(),
@@ -89,8 +83,6 @@ class TestEnvironmentBase:
         """Test that completion mode with system prompt raises error."""
         with pytest.raises(ValueError, match="not supported for completion tasks"):
             SimpleEnvironment(
-                client=mock_openai_client,
-                model="test-model",
                 dataset=sample_dataset,
                 message_type="completion",
                 system_prompt="test prompt",
@@ -543,7 +535,11 @@ class TestEnvironmentBase:
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
         results = await env.a_generate(
-            inputs, score_rollouts=True, interleave_scoring=False
+            inputs,
+            client=mock_openai_client,
+            model="test-model",
+            score_rollouts=True,
+            interleave_scoring=False,
         )
 
         assert hasattr(results, "completion")
@@ -554,8 +550,6 @@ class TestEnvironmentBase:
     def test_generate_sync_wrapper(self, mock_openai_client, sample_dataset):
         """Test synchronous generate wrapper."""
         env = SimpleEnvironment(
-            client=mock_openai_client,
-            model="test-model",
             dataset=sample_dataset,
             parser=Parser(),
             rubric=Rubric(),
@@ -568,7 +562,12 @@ class TestEnvironmentBase:
 
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
-        results = env.generate(inputs, client=env.client, interleave_scoring=False)
+        results = env.generate(
+            inputs,
+            client=mock_openai_client,
+            model="test-model",
+            interleave_scoring=False,
+        )
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")

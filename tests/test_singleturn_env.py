@@ -26,8 +26,8 @@ class TestSingleTurnEnv:
             rubric=Rubric(),
         )
         assert env.message_type == "chat"
-        assert env.client == mock_openai_client
-        assert env.model == "test-model"
+        assert isinstance(env.parser, Parser)
+        assert isinstance(env.rubric, Rubric)
 
     def test_singleturn_env_initialization_completion(self, mock_openai_client):
         """Test SingleTurnEnv initialization with completion format."""
@@ -234,7 +234,12 @@ class TestSingleTurnEnv:
             return_value=RolloutScores(reward=[1.0, 1.0], metrics={})
         )
 
-        results = await mock_singleturn_env.a_generate(inputs, interleave_scoring=False)
+        results = await mock_singleturn_env.a_generate(
+            inputs,
+            client=mock_singleturn_env.client,
+            model="test-model",
+            interleave_scoring=False,
+        )
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
@@ -254,7 +259,10 @@ class TestSingleTurnEnv:
         )
 
         results = await mock_singleturn_env.a_generate(
-            sample_chat_dataset, interleave_scoring=False
+            sample_chat_dataset,
+            client=mock_singleturn_env.client,
+            model="test-model",
+            interleave_scoring=False,
         )
 
         assert hasattr(results, "completion")
@@ -267,7 +275,12 @@ class TestSingleTurnEnv:
         """Test async generation without scoring rollouts."""
         inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
 
-        results = await mock_singleturn_env.a_generate(inputs, score_rollouts=False)
+        results = await mock_singleturn_env.a_generate(
+            inputs,
+            client=mock_singleturn_env.client,
+            model="test-model",
+            score_rollouts=False,
+        )
 
         assert hasattr(results, "completion")
         assert hasattr(results, "state")
@@ -288,7 +301,10 @@ class TestSingleTurnEnv:
         )
 
         results = mock_singleturn_env.generate(
-            inputs, client=mock_singleturn_env.client, interleave_scoring=False
+            inputs,
+            client=mock_singleturn_env.client,
+            model="test-model",
+            interleave_scoring=False,
         )
 
         assert hasattr(results, "completion")

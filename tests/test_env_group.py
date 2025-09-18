@@ -80,7 +80,9 @@ class TestEnvGroupRubric:
             prompt="Test prompt",
             completion="Test completion",
             answer="Test answer",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="math",
         )
 

@@ -63,9 +63,9 @@ class MultiTurnEnv(Environment):
             "responses": [],
             "turn": 0,
             "timing": {
-                "generation_ms": 0,
-                "scoring_ms": 0,
-                "total_ms": 0,
+                "generation_ms": 0.0,
+                "scoring_ms": 0.0,
+                "total_ms": 0.0,
             },
         }
         start_time = time.time()

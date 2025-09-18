@@ -223,7 +223,9 @@ class TestRubric:
             prompt="test prompt",
             completion="test",
             answer="test",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="test_task",
             info={},
         )
@@ -253,7 +255,9 @@ class TestRubric:
             prompt="test",
             completion=completion,  # type: ignore
             answer="test",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="test",
             info={},
         )
@@ -276,7 +280,11 @@ class TestRubric:
         prompts = ["prompt1", "prompt2", "prompt3"]
         completions = ["answer1", "answer2", "wrong"]
         answers = ["answer1", "answer2", "answer3"]
-        states = [{}, {}, {}]
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}},
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}},
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}},
+        ]
         tasks = ["task1", "task2", "task3"]
         infos = [{}, {}, {}]
 
@@ -328,7 +336,9 @@ class TestRubric:
             prompts=prompts,  # type: ignore
             completions=completions,  # type: ignore
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
             apply_weights=True,
@@ -341,7 +351,9 @@ class TestRubric:
             prompts=prompts,  # type: ignore
             completions=completions,  # type: ignore
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
             apply_weights=False,
@@ -383,7 +395,9 @@ class TestRubric:
             prompts=["test"],
             completions=["test"],
             answers=["test"],
-            states=[{}],
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=["test"],
             infos=[{}],  # Explicitly provide infos to match other lists
         )
@@ -415,7 +429,9 @@ class TestRubric:
             prompts=["test"],
             completions=["test"],
             answers=["test"],
-            states=[{}],
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=["test"],
             infos=[{}],
         )
@@ -426,7 +442,7 @@ class TestRubric:
     @pytest.mark.asyncio
     async def test_call_reward_func_kwargs_filtering(self):
         """Test that functions without **kwargs get filtered kwargs."""
-        
+
         def f_no_kwargs(completion, answer):
             return 0.5
 
@@ -435,17 +451,19 @@ class TestRubric:
             return 1.0
 
         rubric = Rubric(funcs=[f_no_kwargs, f_with_kwargs], weights=[1.0, 2.0])
-        
+
         result = await rubric.score_rollout(
             prompt=[{"role": "user", "content": "q"}],
             completion=[{"role": "assistant", "content": "a"}],
             answer="ans",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="default",
             info={},
             extra=123,
         )
-        
+
         # Weighted sum: 0.5*1 + 1.0*2 = 2.5
         assert result.reward == pytest.approx(2.5)
         assert set(result.metrics.keys()) == {"f_no_kwargs", "f_with_kwargs"}
@@ -464,52 +482,58 @@ class TestRubric:
             return 0.3
 
         rubric = Rubric(funcs=[g1, g2], weights=[1.0, 1.0], parallelize_scoring=False)
-        
+
         result = await rubric.score_rollout(
             prompt="q",
             completion="a",
             answer="ans",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="default",
         )
-        
+
         assert result.reward == pytest.approx(0.5)
         assert calls == ["g1", "g2"]  # serial order respected
 
     @pytest.mark.asyncio
     async def test_call_reward_func_error_handling_both_paths(self):
         """Test error handling for both kwargs and no-kwargs functions."""
-        
+
         def error_func_no_kwargs(completion, answer):
             raise ValueError("Test error without kwargs")
-        
+
         def error_func_with_kwargs(completion, **kwargs):
             raise RuntimeError("Test error with kwargs")
-        
+
         rubric = Rubric()
-        
+
         # Test both error paths return 0.0
         result1 = await rubric.call_reward_func(
             func=error_func_no_kwargs,
             parser=rubric.parser,
             prompt="test",
-            completion="test", 
+            completion="test",
             answer="test",
-            state={},
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="test",
             info={},
         )
-        
+
         result2 = await rubric.call_reward_func(
             func=error_func_with_kwargs,
             parser=rubric.parser,
             prompt="test",
             completion="test",
-            answer="test", 
-            state={},
+            answer="test",
+            state={
+                "timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}
+            },
             task="test",
             info={},
         )
-        
+
         assert result1 == 0.0
         assert result2 == 0.0
