@@ -114,6 +114,8 @@ vf-eval vf-environment-name -s # run and save eval results locally
 # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
+If you're using Prime Intellect infrastructure, the [`prime` CLI](https://github.com/PrimeIntellect-ai/prime-cli) provides first-class commands for working with Verifiers environments through the [Environments Hub](https://docs.primeintellect.ai/tutorials-environments/environments). Install it with `uv tool install prime`, authenticate via `prime login`, then use `prime env push` to publish your package and `prime env install owner/name` (optionally pinning a version) to consume it from pods or local machines.
+
 The core elements of Environments are:
 - Datasets: a Hugging Face `Dataset` with a `prompt` column for inputs, and optionally `answer (str)` or `info (dict)` columns for evaluation (both can be omitted for environments that evaluate based solely on completion quality)
 - Rollout logic: interactions between models and the environment (e.g. `env_response` + `is_completed` for any `MultiTurnEnv`)
