@@ -21,9 +21,11 @@ EXA_FETCH_TOOLS = [
         "command": "npx",
         "args": [
             "-y",
-            "mcp-remote",
-            f"https://mcp.exa.ai/mcp?exaApiKey={os.getenv('EXA_API_KEY')}",
+            "exa-mcp-server",
         ],
+        "env": {
+            "EXA_API_KEY": os.getenv("EXA_API_KEY"),
+        },
         "description": "Exa MCP server",
     },
     {
@@ -132,7 +134,9 @@ class MCPEnv(ToolEnv):
         fut.result(timeout=5)
 
 
-def load_environment(mcp_servers: list = [], dataset=None, **kwargs) -> vf.Environment:
+def load_environment(
+    mcp_servers: list = EXA_FETCH_TOOLS, dataset=None, **kwargs
+) -> vf.Environment:
     """Load an MCPEnv environment with fetch server for testing."""
     dataset = dataset or Dataset.from_dict(
         {
@@ -142,8 +146,6 @@ def load_environment(mcp_servers: list = [], dataset=None, **kwargs) -> vf.Envir
             "answer": ["ENVIRONMENTS HUB"],
         }
     )
-
-    mcp_servers = mcp_servers or EXA_FETCH_TOOLS
 
     rubric = vf.JudgeRubric(judge_model="gpt-4.1-mini")
 

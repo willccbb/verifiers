@@ -13,7 +13,7 @@ class MCPToolWrapper:
         self.tool = tool
         self.server_connection = server_connection
 
-        self.__name__ = f"{server_name}_{tool.name}"
+        self.__name__ = tool.name
         self.__doc__ = tool.description or ""
 
         self.__annotations__ = self._build_annotations()
