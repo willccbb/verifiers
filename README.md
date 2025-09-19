@@ -12,7 +12,6 @@
 Verifiers: Environments for LLM Reinforcement Learning
 </h3>
 
-
 ---
 
 <p align="center">

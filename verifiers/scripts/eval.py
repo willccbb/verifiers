@@ -112,7 +112,6 @@ def eval_environment(
     )
     end_time = time.time()
     logger.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")
-    logger.info("Evaluation completed successfully")
     print("--- Evaluation ---")
     print(f"Environment: {env}")
     print(f"Model: {model}")
