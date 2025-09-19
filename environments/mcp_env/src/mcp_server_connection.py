@@ -19,8 +19,11 @@ class MCPServerConnection:
         self._connection_task: Optional[asyncio.Task] = None
         self._ready = asyncio.Event()
         self._error: Optional[Exception] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self):
+        # Record the loop this connection is bound to
+        self.loop = asyncio.get_running_loop()
         self._connection_task = asyncio.create_task(self._get_connection())
 
         await self._ready.wait()
@@ -59,43 +62,38 @@ class MCPServerConnection:
             raise
         except Exception as e:
             self._error = e
-            self._ready.set()  # so connection doesnt hang?
+            self._ready.set()
         finally:
             self.session = None
             self.tools = {}
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
-        if not self.session:
-            raise RuntimeError(f"Server '{self.config.name}' not connected")
+        assert self.session is not None, f"Server '{self.config.name}' not connected"
+        assert self.loop is not None, "Connection loop not initialized"
+        fut = asyncio.run_coroutine_threadsafe(
+            self.session.call_tool(tool_name, arguments=arguments), self.loop
+        )
+        result = await asyncio.wrap_future(fut)
 
-        try:
-            result = await self.session.call_tool(tool_name, arguments=arguments)
+        if result.content:
+            text_parts = []
+            for content_item in result.content:
+                if hasattr(content_item, "text"):
+                    assert isinstance(content_item, TextContent)
+                    text_parts.append(content_item.text)
+                elif hasattr(content_item, "type") and content_item.type == "text":
+                    text_parts.append(getattr(content_item, "text", str(content_item)))
+                else:
+                    text_parts.append(str(content_item))
 
-            if result.content:
-                text_parts = []
-                for content_item in result.content:
-                    if hasattr(content_item, "text"):
-                        assert isinstance(content_item, TextContent)
-                        text_parts.append(content_item.text)
-                    elif hasattr(content_item, "type") and content_item.type == "text":
-                        text_parts.append(
-                            getattr(content_item, "text", str(content_item))
-                        )
-                    else:
-                        text_parts.append(str(content_item))
+            return "\n".join(text_parts)
 
-                return "\n".join(text_parts)
-
-            return "No result returned from tool"
-
-        except Exception as e:
-            self.logger.error(f"Error calling tool {tool_name}: {e}")
-            return "Error calling tool"
+        return "No result returned from tool"
 
     async def disconnect(self):
-        if self._connection_task and not self._connection_task.done():
-            self._connection_task.cancel()
-            try:
-                await self._connection_task
-            except asyncio.CancelledError:
-                pass
+        assert self._connection_task is not None
+        self._connection_task.cancel()
+        try:
+            await self._connection_task
+        except asyncio.CancelledError:
+            pass

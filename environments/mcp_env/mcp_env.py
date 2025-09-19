@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 from typing import Callable, Dict, List
 
 from datasets import Dataset
@@ -10,14 +11,9 @@ from src.models import MCPServerConfig
 
 import verifiers as vf
 from verifiers.envs.tool_env import ToolEnv
-from verifiers.types import Message, State
+from verifiers.types import Message
 
 load_dotenv()
-
-FETCH_MCP_SYSTEM_PROMPT = """You are a Web Search Agent with access to a fetch tool that can retrieve web page content and Exa a search tool. \
-
-Do not respond to the user until after you have made the necessary tool call and got the results needed.
-"""
 
 EXA_FETCH_TOOLS = [
     {
@@ -47,7 +43,6 @@ class MCPEnv(ToolEnv):
         mcp_servers: List[MCPServerConfig] = [],
         max_turns: int = 10,
         error_formatter: Callable[[Exception], str] = lambda e: f"Error: {str(e)}",
-        ignore_connection_errors: bool = False,
         **kwargs,
     ):
         self.mcp_servers = []
@@ -62,7 +57,6 @@ class MCPEnv(ToolEnv):
         self.mcp_tools: Dict[str, MCPToolWrapper] = {}
 
         self.error_formatter = error_formatter
-        self.ignore_connection_errors = ignore_connection_errors
         self._setup_complete = False
         self._init_kwargs = kwargs
         self._max_turns = max_turns
@@ -70,48 +64,36 @@ class MCPEnv(ToolEnv):
         super().__init__(
             tools=[], max_turns=max_turns, error_formatter=error_formatter, **kwargs
         )
+        # Start a persistent background event loop and connect synchronously
+        self._bg_loop = asyncio.new_event_loop()
+        self._bg_thread = threading.Thread(
+            target=self._run_loop, args=(self._bg_loop,), daemon=True
+        )
+        self._bg_thread.start()
+        fut = asyncio.run_coroutine_threadsafe(self._connect_servers(), self._bg_loop)
+        fut.result()
+        self._setup_complete = True
 
-    async def setup_state(self, state: State, **kwargs) -> State:
-        if not self._setup_complete:
-            await self._connect_servers()
-            self._setup_complete = True
-
-        if self.oai_tools:
-            state["info"]["oai_tools"] = self.oai_tools
-
-        return await super().setup_state(state, **kwargs)
+    def _run_loop(self, loop: asyncio.AbstractEventLoop):
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
 
     async def _connect_servers(self):
         wrapper_tools = []
 
         for server_config in self.mcp_servers:
-            try:
-                # Create connection
-                connection = MCPServerConnection(server_config, self.logger)
+            connection = MCPServerConnection(server_config, self.logger)
+            tools = await connection.connect()
 
-                # Connect to server
-                tools = await connection.connect()
+            self.server_connections[server_config.name] = connection
 
-                # Store connection
-                self.server_connections[server_config.name] = connection
-
-                # Create wrappers for each tool
-                for tool_name, tool in tools.items():
-                    wrapper = MCPToolWrapper(server_config.name, tool, connection)
-
-                    wrapper_tools.append(wrapper)
-                    self.mcp_tools[wrapper.__name__] = wrapper
-
-                    self.logger.info(
-                        f"Registered MCP tool: {wrapper.__name__} from server '{server_config.name}'"
-                    )
-
-            except Exception as e:
-                self.logger.error(
-                    f"Failed to connect to MCP server '{server_config.name}': {e}"
+            for tool in tools.values():
+                wrapper = MCPToolWrapper(server_config.name, tool, connection)
+                wrapper_tools.append(wrapper)
+                self.mcp_tools[wrapper.__name__] = wrapper
+                self.logger.info(
+                    f"Registered MCP tool: {wrapper.__name__} from server '{server_config.name}'"
                 )
-                if not self.ignore_connection_errors:
-                    raise
 
         self.tools = wrapper_tools
         self.oai_tools = [tool.to_oai_tool() for tool in wrapper_tools]
@@ -120,59 +102,39 @@ class MCPEnv(ToolEnv):
     async def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
     ) -> Message:
-        """Call a tool and return the result as a Message."""
-        try:
-            if tool_name in self.tool_map:
-                tool_wrapper = self.tool_map[tool_name]
-                result = await tool_wrapper(**tool_args)
-                return {
-                    "role": "tool",
-                    "content": str(result),
-                    "tool_call_id": tool_call_id,
-                }
-            else:
-                raise ValueError(f"Tool '{tool_name}' not found")
-
-        except Exception as e:
+        if tool_name in self.tool_map:
+            tool_wrapper = self.tool_map[tool_name]
+            result = await tool_wrapper(**tool_args)
             return {
                 "role": "tool",
-                "content": self.error_formatter(e),
+                "content": str(result),
+                "tool_call_id": tool_call_id,
+            }
+        else:
+            return {
+                "role": "tool",
+                "content": f"Error: Tool '{tool_name}' not found",
                 "tool_call_id": tool_call_id,
             }
 
     async def cleanup(self):
-        for server_name, connection in self.server_connections.items():
-            try:
-                await connection.disconnect()
-            except Exception as e:
-                self.logger.error(f"Error cleaning up server '{server_name}': {e}")
+        for connection in self.server_connections.values():
+            await connection.disconnect()
 
         self.server_connections.clear()
         self.mcp_tools.clear()
 
+        self._bg_loop.call_soon_threadsafe(self._bg_loop.stop)
+        self._bg_thread.join(timeout=5)
+
     def __del__(self):
-        if hasattr(self, "server_connections") and self.server_connections:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Schedule cleanup as a task
-                    loop.create_task(self.cleanup())
-                else:
-                    # Run cleanup synchronously
-                    loop.run_until_complete(self.cleanup())
-            except RuntimeError:
-                if hasattr(self, "logger"):
-                    self.logger.warning(
-                        "Unable to clean up MCP connections - no event loop available"
-                    )
-            except Exception as e:
-                if hasattr(self, "logger"):
-                    self.logger.error(f"Error during cleanup in destructor: {e}")
+        fut = asyncio.run_coroutine_threadsafe(self.cleanup(), self._bg_loop)
+        fut.result(timeout=5)
 
 
 def load_environment(mcp_servers: list = [], dataset=None, **kwargs) -> vf.Environment:
     """Load an MCPEnv environment with fetch server for testing."""
-    ds = dataset or Dataset.from_dict(
+    dataset = dataset or Dataset.from_dict(
         {
             "question": [
                 "Find out what Prime Intellect's newest announcement was from their website, give me the headline in 2 words. Their url is primeintellect.ai",
@@ -183,11 +145,17 @@ def load_environment(mcp_servers: list = [], dataset=None, **kwargs) -> vf.Envir
 
     mcp_servers = mcp_servers or EXA_FETCH_TOOLS
 
+    rubric = vf.JudgeRubric(judge_model="gpt-4.1-mini")
+
+    async def judge_reward(judge, prompt, completion, answer, state):
+        judge_response = await judge(prompt, completion, answer, state)
+        return 1.0 if "yes" in judge_response.lower() else 0.0
+
+    rubric.add_reward_func(judge_reward, weight=1.0)
     vf_env = MCPEnv(
         mcp_servers=mcp_servers,
-        dataset=ds,
-        system_prompt=FETCH_MCP_SYSTEM_PROMPT,
-        ignore_connection_errors=kwargs.get("ignore_connection_errors", False),
+        dataset=dataset,
+        rubric=rubric,
         **kwargs,
     )
 
