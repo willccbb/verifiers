@@ -23,80 +23,29 @@ from src.models import MCPServerConfig
 
 load_dotenv()
 
-
-CHROMA_MCP_SYSTEM_PROMPT = """You are a ChromaDB DBA. \
-You are to make tool calls based on user needs.  Don't respond with just text.  Keep calling tools until you have accomplished what is needed.
-"""
-
-BRAVE_MCP_SYSTEM_PROMPT = """You are a Web Search Agent. \
-You are to make tool calls based on user needs.  Don't respond with just text.  Keep calling tools until you have accomplished what is needed.
-"""
-
-FETCH_MCP_SYSTEM_PROMPT = """You are a Web Search Agent with access to a fetch tool that can retrieve web page content. \
-
-When the user asks about a website, use the fetch_fetch tool to retrieve the content. Then answer an user question if need.
-
-You have access to the fetch_fetch tool which takes a 'url' parameter.
+FETCH_MCP_SYSTEM_PROMPT = """You are a Web Search Agent with access to a fetch tool that can retrieve web page content and Exa a search tool. \
 
 Do not respond to the user until after you have made the necessary tool call and got the results needed.
 """
 
-BROWSERBASE_SYSTEM_PROMPT = """You are a Browser Agent that can navigate to urls, observe web pages, perform actions on web pages, extract information from web pages, and even take screenshots.
-
-Use the tools you have available to help the user.  Do not reply with text simply keep making tool calls until you accomplish what the user needed.
-
-"""
-
-PEOPLEBASE_SYSTEM_PROMPT = """You are a Browser Agent that can navigate to urls, observe web pages, perform actions on web pages, extract information from web pages, and even take screenshots.
-
-You also have tools to use a sqlite db including creating tables, writing data, and querying data from the sqlite db. Use this db to store any useful information you find relevant to the users needs.
-
-Use the tools you have available to help the user.  Do not reply with text simply keep making tool calls until you accomplish what the user needed.
-
-DO NOT use Google, they will block you.  If you need to search use Exa.
-
-Prime Intellect website: https://www.primeintellect.ai/
-
-"""
-
-PEOPLEBASE_MCP_TOOLS = [
-    {
-        "name": "browserbase",
-        "command": "npx",
-        "args": [
-            "-y",
-            "@smithery/cli@latest",
-            "run",
-            "@browserbasehq/mcp-browserbase",
-            "--key",
-            os.getenv("BROWSERBASE_API_KEY"),
-            "--profile",
-            os.getenv("SMITHERY_PROFILE")
-            
-        ]
-    },
-    {
-        "name": "sqlite",
-        "command": "uvx",
-        "args": [
-            "mcp-server-sqlite",
-            "--db-path",
-            os.getenv("SQLITE_PATH")
-        ]
-    },
+EXA_FETCH_TOOLS = [
     {
         "name": "exa",
         "command": "npx",
         "args": [
             "-y",
-            "@smithery/cli@latest",
-            "run",
-            "exa",
-            "--key",
-            os.getenv("EXA_API_KEY"),
-            "--profile",
-            os.getenv("SMITHERY_PROFILE")
-        ]
+            "mcp-remote",
+            f"https://mcp.exa.ai/mcp?exaApiKey={os.getenv('EXA_API_KEY')}",
+        ],
+        "description": "Exa MCP server"
+    },
+    {
+        "name": "fetch",
+        "command": "uvx",
+        "args": [
+            "mcp-server-fetch"
+        ],
+        "description": "Fetch MCP server"
     }
 ]
 
@@ -238,28 +187,26 @@ class MCPEnv(ToolEnv):
                     self.logger.error(f"Error during cleanup in destructor: {e}")
 
 
-def load_environment(mcp_servers=None, **kwargs) -> vf.Environment:
+def load_environment(mcp_servers=None, dataset=None, **kwargs) -> vf.Environment:
     """Load an MCPEnv environment with fetch server for testing."""
-    ds = Dataset.from_dict(
+    ds = dataset or Dataset.from_dict(
         {
             "question": [
-                "find out who the founders of prime intellect are, try to think about what they like, then find some potential new office spaces for their startup in san fransisco they might like. you can store all information you find in the db",
-                "check https://www.primeintellect.ai/ and see what the latest announcement was",
-                "are there any collections?", 
-                "what collections do we have", 
-                "how many documents are in the collection"
+                "Find out what Prime Intellect's newest announcement was from their website, give me the headline in 2 words. Their url is primeintellect.ai",
             ],
-            "answer": ["", "", "", "", ""]
+            "answer": [
+                "ENVIRONMENTS HUB"
+            ]
         }
     )
 
-    mcp_servers = mcp_servers or PEOPLEBASE_MCP_TOOLS
+    mcp_servers = mcp_servers or EXA_FETCH_TOOLS
     
     
     vf_env = MCPEnv(
         mcp_servers=mcp_servers,
         dataset=ds,
-        system_prompt=PEOPLEBASE_SYSTEM_PROMPT,
+        system_prompt=FETCH_MCP_SYSTEM_PROMPT,
         ignore_connection_errors=kwargs.get("ignore_connection_errors", False),
         **kwargs
     )
@@ -267,62 +214,3 @@ def load_environment(mcp_servers=None, **kwargs) -> vf.Environment:
     return vf_env
 
 
-# Additional server configurations (commented out)
-# {
-#     "name": "chroma",
-#     "command": "uvx",
-#     "args": ["chroma-mcp"],
-#     "description": "ChromaDB vector database"
-# }
-# {
-#     "name": "brave-search",
-#     "command": "npx",
-#     "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
-#     "description": "Brave web search API"
-# }
-#{
-#    "name": "fetch",
-#    "command": "uvx",
-#    "args": ["mcp-server-fetch"],
-#    "description": "Fetch MCP server"
-#}
-
-
-#{
-#    "name": "browserbase",
-#    "command": "npx",
-#    "args": [
-#        "-y",
-#        "@smithery/cli@latest",
-#        "run",
-#        "@browserbasehq/mcp-browserbase",
-#        "--key",
-#        os.getenv("BROWSERBASE_API_KEY"),
-#        "--profile",
-#        os.getenv("SMITHERY_PROFILE")
-#        
-#    ]
-#},
-#{
-#    "name": "sqlite",
-#    "command": "uvx",
-#    "args": [
-#        "mcp-server-sqlite",
-#        "--db-path",
-#        os.getenv("SQLITE_PATH")
-#    ]
-#},
-#{
-#    "name": "exa",
-#    "command": "npx",
-#    "args": [
-#        "-y",
-#        "@smithery/cli@latest",
-#        "run",
-#        "exa",
-#        "--key",
-#        os.getenv("EXA_API_KEY"),
-#        "--profile",
-#        os.getenv("SMITHERY_PROFILE")
-#    ]
-#}
