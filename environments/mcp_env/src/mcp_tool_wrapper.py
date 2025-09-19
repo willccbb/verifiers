@@ -1,32 +1,14 @@
-import verifiers as vf
-
-import asyncio
-import json
-import logging
-from typing import Any, Callable, Dict, List, Optional, Union
-from dataclasses import dataclass
-from datasets import Dataset
-from contextlib import AsyncExitStack
-
-from verifiers.envs.tool_env import ToolEnv
-from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
-from verifiers.utils.tool_utils import convert_func_to_oai_tool
+from typing import Any
 
 # Official MCP SDK imports
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.types import Tool, CallToolResult
+from mcp.types import Tool
 
 from .mcp_server_connection import MCPServerConnection
-from .models import MCPServerConfig
 
 
 class MCPToolWrapper:
     def __init__(
-        self,
-        server_name: str,
-        tool: Tool,
-        server_connection: MCPServerConnection
+        self, server_name: str, tool: Tool, server_connection: MCPServerConnection
     ):
         self.server_name = server_name
         self.tool = tool
@@ -42,7 +24,7 @@ class MCPToolWrapper:
 
         if self.tool.inputSchema:
             properties = self.tool.inputSchema.get("properties", {})
-        
+
             for param_name, param_spec in properties.items():
                 param_type = param_spec.get("type", "string")
                 if param_type == "string":
@@ -59,8 +41,8 @@ class MCPToolWrapper:
                     annotations[param_name] = dict
                 else:
                     annotations[param_name] = Any
-        
-        annotations["return"] = str 
+
+        annotations["return"] = str
         return annotations
 
     async def __call__(self, **kwargs):
@@ -72,11 +54,7 @@ class MCPToolWrapper:
             "function": {
                 "name": self.__name__,
                 "description": self.__doc__ or "",
-                "parameters": self.tool.inputSchema or {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
+                "parameters": self.tool.inputSchema
+                or {"type": "object", "properties": {}},
+            },
         }
-
-

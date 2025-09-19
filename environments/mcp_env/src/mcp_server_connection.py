@@ -1,22 +1,12 @@
-import verifiers as vf
-
 import asyncio
-import json
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
-from dataclasses import dataclass
-from datasets import Dataset
-
-from verifiers.envs.tool_env import ToolEnv
-from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
-from verifiers.utils.tool_utils import convert_func_to_oai_tool
+from typing import Dict, Optional
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.types import Tool, CallToolResult
+from mcp.types import TextContent, Tool
 
 from .models import MCPServerConfig
-
 
 
 class MCPServerConnection:
@@ -29,7 +19,6 @@ class MCPServerConnection:
         self._connection_task: Optional[asyncio.Task] = None
         self._ready = asyncio.Event()
         self._error: Optional[Exception] = None
-
 
     async def connect(self):
         self._connection_task = asyncio.create_task(self._get_connection())
@@ -46,7 +35,7 @@ class MCPServerConnection:
             server_params = StdioServerParameters(
                 command=self.config.command,
                 args=self.config.args or [],
-                env=self.config.env
+                env=self.config.env,
             )
 
             async with stdio_client(server_params) as (read, write):
@@ -70,7 +59,7 @@ class MCPServerConnection:
             raise
         except Exception as e:
             self._error = e
-            self._ready.set() # so connection doesnt hang?
+            self._ready.set()  # so connection doesnt hang?
         finally:
             self.session = None
             self.tools = {}
@@ -85,10 +74,13 @@ class MCPServerConnection:
             if result.content:
                 text_parts = []
                 for content_item in result.content:
-                    if hasattr(content_item, 'text'):
+                    if hasattr(content_item, "text"):
+                        assert isinstance(content_item, TextContent)
                         text_parts.append(content_item.text)
-                    elif hasattr(content_item, 'type') and content_item.type == 'text':
-                        text_parts.append(getattr(content_item, 'text', str(content_item)))
+                    elif hasattr(content_item, "type") and content_item.type == "text":
+                        text_parts.append(
+                            getattr(content_item, "text", str(content_item))
+                        )
                     else:
                         text_parts.append(str(content_item))
 
@@ -98,6 +90,7 @@ class MCPServerConnection:
 
         except Exception as e:
             self.logger.error(f"Error calling tool {tool_name}: {e}")
+            return "Error calling tool"
 
     async def disconnect(self):
         if self._connection_task and not self._connection_task.done():
@@ -106,4 +99,3 @@ class MCPServerConnection:
                 await self._connection_task
             except asyncio.CancelledError:
                 pass
-
