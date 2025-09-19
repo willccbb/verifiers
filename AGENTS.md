@@ -27,6 +27,8 @@ uv add 'verifiers[dev]'     # + notebooks + test helpers
 uv add 'verifiers[all]'     # + trainer extras
 ```
 
+When developing or contributing directly to the `verifiers` core repository:
+
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
