@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import os
 import threading
 from typing import Callable, Dict, List
@@ -76,6 +77,16 @@ class MCPEnv(ToolEnv):
         fut.result()
         self._setup_complete = True
 
+        # cleanup on exit
+        atexit.register(
+            lambda: (
+                asyncio.run_coroutine_threadsafe(self.cleanup(), self._bg_loop).result(
+                    timeout=5
+                ),
+                self._shutdown_loop(),
+            )
+        )
+
     def _run_loop(self, loop: asyncio.AbstractEventLoop):
         asyncio.set_event_loop(loop)
         loop.run_forever()
@@ -126,12 +137,9 @@ class MCPEnv(ToolEnv):
         self.server_connections.clear()
         self.mcp_tools.clear()
 
+    def _shutdown_loop(self):
         self._bg_loop.call_soon_threadsafe(self._bg_loop.stop)
         self._bg_thread.join(timeout=5)
-
-    def __del__(self):
-        fut = asyncio.run_coroutine_threadsafe(self.cleanup(), self._bg_loop)
-        fut.result(timeout=5)
 
 
 def load_environment(

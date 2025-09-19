@@ -58,7 +58,6 @@ class MCPServerConnection:
                         await asyncio.sleep(1)
 
         except asyncio.CancelledError:
-            self.logger.info(f"Connection to '{self.config.name}' cancelled")
             raise
         except Exception as e:
             self._error = e
@@ -97,3 +96,4 @@ class MCPServerConnection:
             await self._connection_task
         except asyncio.CancelledError:
             pass
+        self.logger.info(f"MCP server '{self.config.name}' terminated")
