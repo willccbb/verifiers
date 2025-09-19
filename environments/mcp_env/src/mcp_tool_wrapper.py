@@ -1,6 +1,5 @@
 from typing import Any
 
-# Official MCP SDK imports
 from mcp.types import Tool
 
 from .mcp_server_connection import MCPServerConnection
