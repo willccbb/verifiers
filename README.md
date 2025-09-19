@@ -11,11 +11,15 @@
 <h3 align="center">
 Verifiers: Environments for LLM Reinforcement Learning
 </h3>
+<<<<<<< HEAD
 <!---
 <p align="center">
 Created by Will Brown (<a href="https://github.com/willccbb">@willccbb</a>)
 </p>
 --->
+=======
+
+>>>>>>> main
 
 ---
 
@@ -37,6 +41,8 @@ Created by Will Brown (<a href="https://github.com/willccbb">@willccbb</a>)
 Verifiers is a library of modular components for creating RL environments and training LLM agents. Environments built with Verifiers can be used directly as LLM evaluations, synthetic data pipelines, or agent harnesses for any OpenAI-compatible model endpoint, in addition to RL training. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client.
 
 Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
+
+Verifiers is also the native library used by Prime Intellect's [Environments Hub](https://app.primeintellect.ai/dashboard/environments?ex_sort=most_stars); see [here](https://docs.primeintellect.ai/tutorials-environments/environments) for information about publishing your Environments to the Hub.
 
 ## Setup
 
@@ -114,6 +120,11 @@ vf-eval vf-environment-name -s # run and save eval results locally
 # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
+<<<<<<< HEAD
+=======
+If you're using Prime Intellect infrastructure, the [`prime` CLI](https://github.com/PrimeIntellect-ai/prime-cli) provides first-class commands for working with Verifiers environments through the [Environments Hub](https://docs.primeintellect.ai/tutorials-environments/environments). Install it with `uv tool install prime`, authenticate via `prime login`, then use `prime env push` to publish your package and `prime env install owner/name` (optionally pinning a version) to consume it from pods or local machines.
+
+>>>>>>> main
 The core elements of Environments are:
 - Datasets: a Hugging Face `Dataset` with a `prompt` column for inputs, and optionally `answer (str)` or `info (dict)` columns for evaluation (both can be omitted for environments that evaluate based solely on completion quality)
 - Rollout logic: interactions between models and the environment (e.g. `env_response` + `is_completed` for any `MultiTurnEnv`)
@@ -284,7 +295,7 @@ If you do not require LoRA support, you may want to use the `prime-rl` trainer, 
 
 See the full [docs](https://verifiers.readthedocs.io/en/latest/) for more information.
 
-## Contributions
+## Contribution Guidelines
 
 Verifiers warmly welcomes community contributions! Please open an issue or PR if you encounter bugs or other pain points during your development, or start a discussion for more open-ended questions.
 
@@ -292,19 +303,16 @@ Please note that the core `verifiers/` library is intended to be a relatively li
 
 ## Citation
 
+Originally created by Will Brown ([@willccbb](https://github.com/willccbb)).
+
 If you use this code in your research, please cite:
 
 ```bibtex
 @misc{brown_verifiers_2025,
   author       = {William Brown},
-  title        = {{Verifiers}: Reinforcement Learning with LLMs in Verifiable Environments},
+  title        = {{Verifiers}: Environments for LLM Reinforcement Learning},
   howpublished = {\url{https://github.com/willccbb/verifiers}},
   note         = {Commit abcdefg • accessed DD Mon YYYY},
   year         = {2025}
 }
 ```
-
-## Roadmap
-- Default patterns for hosted resources such as code sandboxes, auxiliary models, and MCP servers
-- Multimodal input support
-- Non-increasing token sequences via REINFORCE
