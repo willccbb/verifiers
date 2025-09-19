@@ -1,7 +1,7 @@
 import time
 from abc import abstractmethod
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from verifiers.envs.environment import Environment
 from verifiers.types import (
@@ -82,15 +82,29 @@ class MultiTurnEnv(Environment):
             if await maybe_await(self.is_completed, rollout, state, **kwargs):
                 is_completed = True
                 break
-            response = await self.get_model_response(
-                client=client,
-                model=model,
-                prompt=rollout,
-                oai_tools=info.get("oai_tools", None),
-                sampling_args=sampling_args,
-                message_type=self.message_type,
-            )
-            state["responses"].append(response)
+            try:
+                response = await self.get_model_response(
+                    client=client,
+                    model=model,
+                    prompt=rollout,
+                    oai_tools=info.get("oai_tools", None),
+                    sampling_args=sampling_args,
+                    message_type=self.message_type,
+                )
+                state["responses"].append(response)
+            except BadRequestError as e:
+                if len(state["responses"]) == 0:
+                    raise e
+                elif e.message.startswith("This model's maximum context length is"):
+                    print(f"rewriting {e} to truncation")
+                    state["responses"][-1].choices[0].finish_reason = "length"
+                    is_completed = True
+                    end_time = time.time()
+                    state["timing"]["generation_ms"] = (end_time - start_time) * 1000
+                    state["timing"]["total_ms"] = (end_time - start_time) * 1000
+                    break
+                else:
+                    raise e
             if self.message_type == "chat":
                 assert isinstance(rollout, list)
                 assert isinstance(completion, list)
