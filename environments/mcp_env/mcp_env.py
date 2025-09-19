@@ -117,12 +117,19 @@ class MCPEnv(ToolEnv):
     ) -> Message:
         if tool_name in self.tool_map:
             tool_wrapper = self.tool_map[tool_name]
-            result = await tool_wrapper(**tool_args)
-            return {
-                "role": "tool",
-                "content": str(result),
-                "tool_call_id": tool_call_id,
-            }
+            try:
+                result = await tool_wrapper(**tool_args)
+                return {
+                    "role": "tool",
+                    "content": str(result),
+                    "tool_call_id": tool_call_id,
+                }
+            except Exception as e:
+                return {
+                    "role": "tool",
+                    "content": self.error_formatter(e),
+                    "tool_call_id": tool_call_id,
+                }
         else:
             return {
                 "role": "tool",
