@@ -74,7 +74,10 @@ def cleanup_message(message: ChatMessage) -> ChatMessage:
                 new_message["content"].append(new_c)
             elif str(c_dict.get("type", "")).startswith("input_audio"):
                 # Ensure input_audio content blocks only have the required fields
-                clean_c = {"type": "input_audio", "input_audio": c_dict.get("input_audio", {})}
+                clean_c = {
+                    "type": "input_audio",
+                    "input_audio": c_dict.get("input_audio", {}),
+                }
                 new_message["content"].append(clean_c)
             else:
                 new_message["content"].append(new_c)

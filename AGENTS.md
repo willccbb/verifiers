@@ -21,8 +21,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv init && uv venv --python 3.12 
 source .venv/bin/activate
 
-# install verifiers with dev deps
-uv add `verifiers[dev]`
+# install verifiers (choose extras as needed)
+uv add verifiers            # core
+uv add 'verifiers[dev]'     # + notebooks + test helpers
+uv add 'verifiers[all]'     # + trainer extras
 ```
 
 ```bash
@@ -37,6 +39,10 @@ uv sync --all-extras && uv pip install flash-attn --no-build-isolation
 
 # install pre-commit hooks
 uv run pre-commit install
+
+# run style + lint checks locally
+uv run ruff check --fix .
+uv run pre-commit run --all-files
 ```
 
 ### Code style
@@ -65,13 +71,14 @@ The main exceptions are for cases where introducing a very lightweight dependenc
 
 ### Docs
 - Keep docs short and actionable. Update relevant pages when behavior changes. Prefer adding or refining a single section over duplicating content elsewhere.
+- For the authoritative testing/setup walkthrough, see `docs/source/development.md`.
 
 ## Developing environments
 
 The environment APIs are defined under `verifiers/envs/`.
 
 ### Lifecycle and what to implement
-- Most multi‑turn environments should extend `MultiTurnEnv` and implement exactly:
+- Most multi-turn environments should extend `MultiTurnEnv` and implement exactly:
   - `is_completed(messages, state, **kwargs) -> bool`
   - `env_response(messages, state, **kwargs) -> tuple[Messages, State]`
 - Use `setup_state(state, **kwargs) -> State` for complex or dynamic per‑rollout initialization, e.g. provisioning and tracking resources such as sandboxes.
@@ -85,9 +92,15 @@ Tools are one pattern; many environments do not use tools.
 - **Stateless tools** (pure functions that can call external APIs directly): use `ToolEnv`.
   - Provide `tools: list[Callable]`. They will be exposed as OpenAI‑style tools automatically.
   - Completion ends when the model produces an assistant turn with no tool calls (handled by `ToolEnv.is_completed`).
-- **Stateful tools** (tools that depend on per‑rollout state, e.g., ephemeral sandboxes): use `StatefulToolEnv`.
+- **Stateful tools** (tools that depend on per-rollout state, e.g., ephemeral sandboxes): use `StatefulToolEnv`.
   - Implement `update_tool_args(tool_args, messages, state, **kwargs) -> dict` to inject or transform arguments using state.
-- **MCP‑backed tools**: see `environments/mcp_env/` for integrating MCP tool servers.
+- **MCP-backed tools**: see `environments/mcp_env/` for integrating MCP tool servers.
+
+### Environment quickstart
+- Bootstrap from the template: `vf-init vf-new-environment` (defaults to creating a package under `./environments/`).
+- Install your local module while iterating: `vf-install vf-new-environment` (editable install via `uv`).
+- Smoke-test rollouts: `vf-eval vf-new-environment -n 5 -m gpt-4.1-mini`.
+- Every packaged environment must expose `load_environment(...)` and maintain its own `pyproject.toml`.
 
 ### Resource management
 - **Heavy and reusable resources** (datasets, clients, long‑lived caches) should be provisioned in `__init__`.
@@ -116,6 +129,7 @@ Tools are one pattern; many environments do not use tools.
 
 ### State structure
 - The default rollout state includes keys like `prompt`, `completion`, `responses`, `turn`, `timing`, `task`, and `info`. Only rely on keys your environment sets or updates explicitly.
+- Examples covering the most common patterns live in `environments/README.md`—skim it to find the closest reference implementation before building from scratch.
 
 ## Checklists
 
