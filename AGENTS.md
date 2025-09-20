@@ -1,150 +1,141 @@
-## AGENTS.md
+# AGENTS.md
 
-This guide explains how to contribute to the core repository, and how to use it for developing new environments and tools. It reflects the existing code, documentation patterns, and best practices for the `verifiers` repo.
+This guide covers best practices for contributing to the core `verifiers` library and for and developing new environments (e.g. in `environments/`).
 
-## Core repository development
+## Setup
 
-Relevant for:
-- Immediate PRs to `verifiers` (small features, bug fixes).
-- Independent forks of `verifiers` which you may want to upstream later (larger projects).
-
-### Setup
-
-We use `uv`, not `pip`, for developing `verifiers`. 
-
-When developing in a project which *uses* `verifiers`:
+We strongly recommend using `uv` for developing `verifiers`.
 ```bash
-# install uv (first time only)
+# Install uv (first time)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# for a fresh project -- 3.11 + 3.12 supported
-uv init && uv venv --python 3.12 
+# Setup blank project if needed
+uv init && uv venv --python 3.12
 source .venv/bin/activate
-
-# install verifiers (choose extras as needed)
-uv add verifiers            # core
-uv add 'verifiers[dev]'     # + notebooks + test helpers
-uv add 'verifiers[all]'     # + trainer extras
 ```
 
-When developing or contributing directly to the `verifiers` core repository:
+## General Guidelines (Core + Environments)
 
+### Code Style & Typing
+- **Formatting**: Strict `ruff` enforcement. All PRs must pass `ruff check --fix .`
+- **Typing**: Explicit types preferred
+  - ✅ **OK**: `cast(...)`, `assert ...` for type narrowing
+  - ⚠️ **SOMETIMES OK**: Untyped args for simple cases (e.g., reward functions) 
+  - ❌ **NOT OK**: `# type: ignore` without strong justification
+
+### Error Handling Philosophy  
+- **Fail fast, fail loud** - No defensive programming or silent fallbacks
+- **Minimize branching** - Prefer single code paths; every `if`/`try` needs justification
+- **Example**: Missing API key → immediate failure, not fallback
+
+## Core Repository Development
+
+For PRs to `verifiers` core (e.g. `verifiers/verifiers/`):
 ```bash
 git clone https://github.com/willccbb/verifiers.git
 cd verifiers
 
-# for CPU-only dev:
+# CPU-only development:
 uv sync --extra dev
 
-# for GPU-based trainer dev:
+# GPU-based trainer development:
 uv sync --all-extras && uv pip install flash-attn --no-build-isolation
 
-# install pre-commit hooks
+# Install pre-commit hooks:
 uv run pre-commit install
+```
 
-# run style + lint checks locally
+### Dependencies
+- Avoid new core dependencies
+- Use optional extras for non-essential features
+- Exception: tiny deps that simplify widely-used code
+
+### Testing  
+- `uv run pytest` with discovery under `tests/`
+- Write simple, deterministic unit tests
+- Update tests when changing functionality
+
+### Documentation
+- Keep concise and actionable
+- Update relevant pages when behavior changes
+- Avoid content duplication
+- See `docs/source/development.md` for authoritative walkthrough
+
+### Scope
+- Small, focused diffs
+- One change per PR
+- Backward compatibility is only desirable if it can be done without introducing excessive maintenance burden
+- Delete dead code (don't guard it)
+
+### Checklist
+
+Before a PR:
+
+```bash
+# Run style + lint checks:
 uv run ruff check --fix .
 uv run pre-commit run --all-files
 ```
 
-### Code style
-- **Style**: We strictly enforce ruff style (imports, formatting, linting). Keep diffs small and focused. All PRs must pass `ruff check --fix .`.
-- **Typing**: Prefer explicit typing throughout the core codebase.
-  - **OK**: `cast(...)`, `assert ...` for type narrowing.
-  - **NOT OK**: `# type: ignore` (avoid unless there is a very strong justification).
+Ensure docs and tests are updated if necessary, and dead code is deleted.  Strive for minimal, surgical diffs.
 
-### Error handling philosophy
-- **Fail fast, fail loud.** Do not add defensive programming or silent fallbacks.
-- Avoid excessive conditionals; prefer one clear, direct code path. Any conditional logic (if/else, try/except) **must** be justified by necessity.
+## Developing Environments
 
-### Dependencies
+Environment APIs live in `verifiers/envs/`. Actual environment implementations go in `environments/` (whether in the `verifiers` repo, or in a standalone project where you are developing new environments). Always reuse existing patterns.
 
-Avoid adding new dependencies to `verifiers` via PRs; if they are needed for core-but-optional features (e.g. TextArena, trainer dependencies), these should live in an optional dependency group.
+### Quick Start
 
-The main exceptions are for cases where introducing a very lightweight dependency allows majorly streamlining or importing logic which serves a clear utility purpose.
+```bash
+# Add verifiers
+uv add verifiers            # core
+uv add 'verifiers[dev]'     # + dev tools  
+uv add 'verifiers[all]'     # + training
 
-### PR hygiene
-- Keep PRs self‑contained and concise. Smaller diffs are better.
-- Prefer single, well‑scoped changes per PR. Remove dead code instead of adding conditionals around it.
+# Scaffold new environment
+vf-init new-environment
 
-### Tests
-- Tests live in `tests/` and follow `pytest` discovery (`test_*.py`). See `[tool.pytest.ini_options]` in `pyproject.toml` for markers and options.
-- Add unit tests for new components and behaviors. Favor simple, deterministic tests over broad integration coverage unless necessary.
+# Install + test
+vf-install new-environment
+vf-eval new-environment -n 5 -m gpt-4.1-mini
+```
 
-### Docs
-- Keep docs short and actionable. Update relevant pages when behavior changes. Prefer adding or refining a single section over duplicating content elsewhere.
-- For the authoritative testing/setup walkthrough, see `docs/source/development.md`.
+### Requirements
+- Define `load_environment(...)` function
+- Include `environments/<name>/pyproject.toml`
+- Use module folders for multi-file projects
+- Include upstream dependencies when porting existing projects
 
-## Developing environments
+### Environment Patterns
 
-The environment APIs are defined under `verifiers/envs/`.
+Choose the appropriate base class from `verifiers/envs/` or by borrowing from other examples:
 
-### Lifecycle and what to implement
-- Most multi-turn environments should extend `MultiTurnEnv` and implement exactly:
-  - `is_completed(messages, state, **kwargs) -> bool`
-  - `env_response(messages, state, **kwargs) -> tuple[Messages, State]`
-- Use `setup_state(state, **kwargs) -> State` for complex or dynamic per‑rollout initialization, e.g. provisioning and tracking resources such as sandboxes.
+| Pattern | Base Class | When to Use | Key Methods |
+|---------|------------|-------------|-------------|
+| **Single-turn** | `SingleTurnEnv` | Q&A tasks, single response | Dataset + reward functions |
+| **Multi-turn** | `MultiTurnEnv` | Games, simulations, agents | Add `is_completed`, `env_response` |
+| **Stateless tools** | `ToolEnv` | Idempotent Python functions | Pass `tools: list[Callable]` |
+| **MCP tools** | `MCPEnv` | MCP server integration | See `environments/mcp_env/` |
+| **Stateful tools** | `StatefulToolEnv` | Tools requiring state | Use `setup_state`, `update_tool_args` |
 
-- You should almost never override `rollout`. If you must, you **must** call `super().rollout`. The loop provided by `MultiTurnEnv` wires together prompting, tool calls, and environment responses.
+**Important**:
+- Never override `rollout()` - use the provided loop
+- Always create a `Rubric` with reward functions for rewards/metrics
+- Preprocess data in `load_environment()`
+- Heavy setup in `__init__()`, per-rollout in `setup_state()`
+- **Always** look for relevant canonical examples (in `verifiers/envs` or `environments`) before designing your own patterns
 
-### Environment patterns and when to use them
-Tools are one pattern; many environments do not use tools.
+### Configuration Guidelines
 
-- **Non‑tool environments** (user simulations, interactive games, multi‑agent tasks): extend `MultiTurnEnv` directly and implement `is_completed` and `env_response` (and optionally `setup_state`).
-- **Stateless tools** (pure functions that can call external APIs directly): use `ToolEnv`.
-  - Provide `tools: list[Callable]`. They will be exposed as OpenAI‑style tools automatically.
-  - Completion ends when the model produces an assistant turn with no tool calls (handled by `ToolEnv.is_completed`).
-- **Stateful tools** (tools that depend on per-rollout state, e.g., ephemeral sandboxes): use `StatefulToolEnv`.
-  - Implement `update_tool_args(tool_args, messages, state, **kwargs) -> dict` to inject or transform arguments using state.
-- **MCP-backed tools**: see `environments/mcp_env/` for integrating MCP tool servers.
+- **Environment variables**: ONLY for API keys (document in README)
+- **Hardcode**: Dataset names, URLs, defaults  
+- **Arguments**: Only for essential customization via `load_environment()`
+- **State keys**: Only rely on what your env explicitly sets
 
-### Environment quickstart
-- Bootstrap from the template: `vf-init vf-new-environment` (defaults to creating a package under `./environments/`).
-- Install your local module while iterating: `vf-install vf-new-environment` (editable install via `uv`).
-- Smoke-test rollouts: `vf-eval vf-new-environment -n 5 -m gpt-4.1-mini`.
-- Every packaged environment must expose `load_environment(...)` and maintain its own `pyproject.toml`.
+### State Management
+Default state includes: `prompt`, `completion`, `responses`, `turn`, `timing`, `task`, `info`. 
+Only depend on keys your environment explicitly manages.
 
-### Resource management
-- **Heavy and reusable resources** (datasets, clients, long‑lived caches) should be provisioned in `__init__`.
-- **Per‑rollout resources** (e.g., ephemeral sandboxes, temp dirs, per‑attempt credentials) should be created in `setup_state`. Tear‑down should be centralized and predictable.
 
-### Dependencies and “source files as dependencies”
-- Each environment lives in `environments/<name>/` with its own `pyproject.toml`. Put environment‑specific dependencies there.
-- Avoid vendoring external source files. Prefer clean library dependencies or well‑scoped local modules.
-- If an environment relies on external services (API keys, endpoints), document the required environment variables and fail fast if they are not present. Do not add fallbacks.
-
-### Error handling and conditionals (environments)
-- No defensive programming and no silent fallbacks.
-- Prefer a single code path. Every `if` should exist for a clear, documented reason.
-- Example of what NOT to handle: if a required API key is missing and a tool call fails, it should fail immediately and loudly.
-
-### Typing guidance (environments)
-- Prefer explicit types in public methods and shared utilities.
-- **OK**: `cast`, `assert` for refinement.
-- **SOMETIMES OK**: untyped arguments for narrow, performance‑sensitive cases (e.g., simple reward functions), when types add more friction than value.
-- **NOT OK**: `# type: ignore` except with strong, documented justification.
-
-### Tools
-- Tools provided to `ToolEnv`/`StatefulToolEnv` should be small, composable callables.
-- Stateless tools should be pure (idempotent with the same inputs). Keep side effects to a minimum.
-- Use exceptions to surface errors; let the environment surface them without retries or fallbacks.
-
-### State structure
-- The default rollout state includes keys like `prompt`, `completion`, `responses`, `turn`, `timing`, `task`, and `info`. Only rely on keys your environment sets or updates explicitly.
-- Examples covering the most common patterns live in `environments/README.md`—skim it to find the closest reference implementation before building from scratch.
-
-## Checklists
-
-### New environment checklist
-- Choose `ToolEnv` (stateless) or `StatefulToolEnv` (stateful).
-- Put heavy resources in `__init__`; per‑rollout setup in `setup_state`.
-- Implement `is_completed` and `env_response` only (and `update_tool_args` if stateful).
-- Declare dependencies in `environments/<name>/pyproject.toml`.
-- Add concise tests under `tests/` and minimal docs under `environments/<name>/README.md`.
-- Keep conditionals minimal and avoid fallbacks.
-
-### PR checklist
-- Small, self‑contained diff
-- Explicit typing, ruff‑clean
-- Tests updated/added
-- Docs updated when behavior changes
+### Checklist
+- Guidelines here are followed
+- Environment works with `vf-eval -s` test run, outputs look sensible
