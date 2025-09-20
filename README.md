@@ -86,28 +86,28 @@ Environments in Verifiers are installable Python modules which can specify depen
 
 To initialize a blank Environment module template, do:
 ```bash
-vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
+vf-init environment-name # -p /path/to/environments (defaults to "./environments")
 ```
 
 To an install an Environment module into your project, do:
 ```bash
-vf-install vf-environment-name # -p /path/to/environments (defaults to "./environments") 
+vf-install environment-name # -p /path/to/environments (defaults to "./environments") 
 ```
 
 To install an Environment module from this repo's `environments` folder, do:
 ```bash
-vf-install vf-math-python --from-repo # -b branch_or_commit (defaults to "main")
+vf-install math-python --from-repo # -b branch_or_commit (defaults to "main")
 ```
 
 Once an Environment module is installed, you can create an instance of the Environment using `load_environment`, passing any necessary args:
 ```python
 import verifiers as vf
-vf_env = vf.load_environment("vf-environment-name", **env_args)
+vf_env = vf.load_environment("environment-name", **env_args)
 ```
 
 To run a quick evaluation of your Environment with an API-based model, do:
 ```bash
-vf-eval vf-environment-name -s # run and save eval results locally
+vf-eval environment-name -s # run and save eval results locally
 # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 

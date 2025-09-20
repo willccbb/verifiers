@@ -5,11 +5,10 @@ env/
 .env
 .env.local
 uv.lock
-CLAUDE.md
-AGENTS.md
 .claude/
 .cursorrules
 .cursor/
+.ropeproject/
 
 # artifacts
 core.* 
