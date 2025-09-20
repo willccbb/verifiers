@@ -595,9 +595,9 @@ def load_environment(
 
     game_entries = _normalize_games(games)
     dataset = _build_dataset(game_entries)
-    api_key = os.getenv("ARC_AGI_API_KEY")
+    api_key = os.getenv("ARC_API_KEY")
     if not api_key:
-        raise ValueError("ARC_AGI_API_KEY is required to call the ARC-AGI-3 API")
+        raise ValueError("ARC_API_KEY is required to call the ARC-AGI-3 API")
     rubric = vf.Rubric()
     rubric.add_reward_func(success, weight=1.0)
     env = ArcAgi3Env(
@@ -610,6 +610,3 @@ def load_environment(
         system_prompt=SYSTEM_PROMPT,
     )
     return env
-
-
-__all__ = ["ArcAgi3Env", "load_environment"]
