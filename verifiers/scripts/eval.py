@@ -37,7 +37,7 @@ def eval_environment(
     verbose: bool,
     save_dataset: bool,
     save_dataset_cache: bool,
-    cache_dir: bool,
+    cache_dir: str,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
 ):
