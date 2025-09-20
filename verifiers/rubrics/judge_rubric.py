@@ -63,7 +63,7 @@ class JudgeRubric(Rubric):
         answer: str,
         state: State,
         **kwargs,
-    ) -> str:
+    ) -> str | dict:
         if isinstance(prompt, list):
             last_msg = prompt[-1]
             if isinstance(last_msg, dict) and "content" in last_msg:
@@ -91,16 +91,28 @@ class JudgeRubric(Rubric):
             and judge_args["max_completion_tokens"] is None
         ):
             judge_args.pop("max_completion_tokens")
+        # Extract response_format from sampling args if provided
+        response_format = judge_args.pop("response_format", None)
         judge_args = {k: v for k, v in judge_args.items() if v is not None}
 
         try:
-            judge_response = await maybe_await(
-                self.judge_client.chat.completions.create,
-                model=self.judge_model,
-                messages=[{"role": "user", "content": judge_prompt}],
-                **judge_args,
-            )
-            judge_response = str(judge_response.choices[0].message.content)
+            if response_format:
+                judge_response = await maybe_await(
+                    self.judge_client.chat.completions.parse,
+                    model=self.judge_model,
+                    messages=[{"role": "user", "content": judge_prompt}],
+                    response_format=response_format,
+                    **judge_args,
+                )
+                judge_response = judge_response.choices[0].message.parsed
+            else:
+                judge_response = await maybe_await(
+                    self.judge_client.chat.completions.create,
+                    model=self.judge_model,
+                    messages=[{"role": "user", "content": judge_prompt}],
+                    **judge_args,
+                )
+                judge_response = str(judge_response.choices[0].message.content)
         except RateLimitError as e:
             self.logger.warning(
                 f"Rate limit exceeded when calling judge model '{self.judge_model}'. "

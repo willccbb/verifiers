@@ -2,21 +2,22 @@
 Mock OpenAI client for testing purposes.
 """
 
-from typing import List, Dict
+from typing import Any, List, Dict
 from unittest.mock import Mock
 
 
 class MockCompletion:
-    def __init__(self, content: str, finish_reason: str = "stop"):
+    def __init__(self, content: str, finish_reason: str = "stop", parsed: Any = None):
         self.message = Mock()
         self.message.content = content
+        self.message.parsed = parsed
         self.text = content
         self.finish_reason = finish_reason
 
 
 class MockCompletionResponse:
-    def __init__(self, content: str, finish_reason: str = "stop"):
-        self.choices = [MockCompletion(content, finish_reason)]
+    def __init__(self, content: str, finish_reason: str = "stop", parsed: Any = None):
+        self.choices = [MockCompletion(content, finish_reason, parsed)]
 
 
 class MockChatCompletions:
@@ -45,6 +46,25 @@ class MockChatCompletions:
         for pattern, response in self.responses.items():
             if pattern in last_message:
                 return MockCompletionResponse(response)
+
+        return MockCompletionResponse(self.default_response)
+
+    def parse(
+        self, model: str, messages: List[Dict[str, str]], **kwargs
+    ) -> MockCompletionResponse:
+        self.call_count += 1
+        self.last_messages = messages
+        self.last_model = model
+
+        # Handle special error cases
+        if kwargs.get("max_tokens", 0) == 1:
+            return MockCompletionResponse("", "length")
+
+        # Check for specific response patterns
+        last_message = messages[-1]["content"] if messages else ""
+        for pattern, response in self.responses.items():
+            if pattern in last_message:
+                return MockCompletionResponse(content=response, parsed=response)
 
         return MockCompletionResponse(self.default_response)
 
