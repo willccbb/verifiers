@@ -17,5 +17,5 @@ def convert_func_to_oai_tool(func: Any) -> ChatCompletionToolParam:
             "description": function_schema_obj.description or "",
             "parameters": function_schema_obj.params_json_schema,
             "strict": True,
-        }
+        },
     }
