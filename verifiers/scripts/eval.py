@@ -203,8 +203,13 @@ def eval_environment(
             logger.info(f"Saved dataset to {results_path}")
         if save_dataset_cache:
             if cache_dir:
+                cache_base = Path(cache_dir)
+            else:
                 cache_base = Path(
-                    os.environ.get("VF_CACHE_DIR", Path.home() / ".cache" / "verifiers")
+                    os.environ.get(
+                        "VF_CACHE_DIR", 
+                        Path.home() / ".cache" / "verifiers"
+                    )
                 )
             cache_path = cache_base / "evals" / env_model_str / uuid_str
             cache_path.mkdir(parents=True, exist_ok=True)
