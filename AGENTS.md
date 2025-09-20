@@ -19,9 +19,9 @@ source .venv/bin/activate
 ### Code Style & Typing
 - **Formatting**: Strict `ruff` enforcement. All PRs must pass `ruff check --fix .`
 - **Typing**: Explicit types preferred
-  - ✅ **OK**: `cast(...)`, `assert ...` for type narrowing
-  - ⚠️ **SOMETIMES OK**: Untyped args for simple cases (e.g., reward functions) 
-  - ❌ **NOT OK**: `# type: ignore` without strong justification
+  - **OK**: `cast(...)`, `assert ...` for type narrowing
+  - **SOMETIMES OK**: Untyped args for simple cases (e.g., reward functions) 
+  - **NOT OK**: `# type: ignore` without strong justification
 
 ### Error Handling Philosophy  
 - **Fail fast, fail loud** - No defensive programming or silent fallbacks
