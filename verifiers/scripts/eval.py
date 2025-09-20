@@ -382,6 +382,7 @@ def main():
         verbose=args.verbose,
         save_dataset=args.save_dataset,
         save_dataset_cache=args.save_dataset_cache,
+        cache_dir=args.cache_dir,
         save_to_hf_hub=args.save_to_hf_hub,
         hf_hub_dataset_name=args.hf_hub_dataset_name,
     )
