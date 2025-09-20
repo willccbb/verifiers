@@ -335,6 +335,13 @@ class GRPOConfig(TrainingArguments):
             "all prompts are logged."
         },
     )
+    log_policy_entropy: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to log the policy entropy during training. If `True`, the policy entropy is logged to "
+            "`wandb` and printed to the console."
+        },
+    )
 
     def __post_init__(self):
         super().__post_init__()
