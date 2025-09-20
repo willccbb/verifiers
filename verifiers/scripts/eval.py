@@ -350,6 +350,13 @@ def main():
         help="Save dataset to disk .cache",
     )
     parser.add_argument(
+        "--cache-dir",
+        "-C",
+        type=str,
+        default="",
+        help="Custom cache directory"
+    )
+    parser.add_argument(
         "--save-to-hf-hub",
         "-H",
         default=False,
