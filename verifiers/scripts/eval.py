@@ -5,6 +5,7 @@ import json
 import logging
 import time
 import uuid
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -202,10 +203,9 @@ def eval_environment(
             logger.info(f"Saved dataset to {results_path}")
         if save_dataset_cache:
             if cache_dir:
-                cache_base = Path(os.environ.get(
-                    "VF_CACHE_DIR",
-                    Path.home() / ".cache" / "verifiers"
-                ))
+                cache_base = Path(
+                    os.environ.get("VF_CACHE_DIR", Path.home() / ".cache" / "verifiers")
+                )
             cache_path = cache_base / "evals" / env_model_str / uuid_str
             cache_path.mkdir(parents=True, exist_ok=True)
 
@@ -227,12 +227,11 @@ def eval_environment(
                 "path": str(cache_path),
                 "avg_reward": metadata.get("avg_reward"),
                 "num_examples": n,
-                "rollouts_per_example": rollouts_per_example
+                "rollouts_per_example": rollouts_per_example,
             }
 
             with open(index_file, "w") as f:
                 json.dump(index_data, f, indent=2)
-
 
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
