@@ -131,7 +131,7 @@ async def test_response_format_validation_accepts_pydantic_model():
         parser=Parser(),
         judge_client=client,
         judge_model="test-model",
-        response_format=JudgeResponse,
+        judge_sampling_args={"response_format": JudgeResponse},
     )
 
     prompt = "P"

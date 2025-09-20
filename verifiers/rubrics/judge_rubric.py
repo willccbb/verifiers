@@ -1,7 +1,6 @@
 from typing import Any
 
 from openai import AsyncOpenAI, OpenAI
-from openai.types.chat.completion_create_params import ResponseFormat
 from openai import APIError, RateLimitError, APITimeoutError
 
 from verifiers.parsers.parser import Parser
@@ -39,7 +38,6 @@ class JudgeRubric(Rubric):
         judge_model: str = "gpt-4.1-nano",
         judge_sampling_args: dict[str, Any] | None = None,
         judge_prompt: str = DEFAULT_JUDGE_PROMPT,
-        response_format: ResponseFormat | None = None,
         **kwargs,
     ):
         super().__init__(
@@ -49,7 +47,6 @@ class JudgeRubric(Rubric):
         self.judge_model = judge_model
         self.judge_prompt = judge_prompt
         self.judge_sampling_args = judge_sampling_args or {}
-        self.response_format = response_format
         self.class_objects = {
             "parser": self.parser,
             "judge": self.judge,
@@ -57,7 +54,6 @@ class JudgeRubric(Rubric):
             "judge_model": self.judge_model,
             "judge_prompt": self.judge_prompt,
             "judge_sampling_args": self.judge_sampling_args,
-            "response_format": self.response_format,
         }
 
     async def judge(
@@ -95,15 +91,17 @@ class JudgeRubric(Rubric):
             and judge_args["max_completion_tokens"] is None
         ):
             judge_args.pop("max_completion_tokens")
+        # Extract response_format from sampling args if provided
+        response_format = judge_args.pop("response_format", None)
         judge_args = {k: v for k, v in judge_args.items() if v is not None}
 
         try:
-            if self.response_format:
+            if response_format:
                 judge_response = await maybe_await(
                     self.judge_client.chat.completions.parse,
                     model=self.judge_model,
                     messages=[{"role": "user", "content": judge_prompt}],
-                    response_format=self.response_format,
+                    response_format=response_format,
                     **judge_args,
                 )
                 judge_response = judge_response.choices[0].message.parsed

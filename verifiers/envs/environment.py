@@ -224,6 +224,8 @@ class Environment(ABC):
         ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
+        # Extract response_format if provided via sampling_args
+        response_format = clean_sampling_args.pop("response_format", None)
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
@@ -234,7 +236,9 @@ class Environment(ABC):
                         c = m.get("content")  # type: ignore[assignment]
                         if isinstance(c, list):
                             for p in c:
-                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
+                                if isinstance(p, dict) and str(
+                                    p.get("type", "")
+                                ).startswith("input_audio"):
                                     has_audio = True
                                     break
                         if has_audio:
@@ -242,22 +246,32 @@ class Environment(ABC):
                 except Exception:
                     has_audio = False
                 if has_audio and "modalities" not in clean_sampling_args:
-                    clean_sampling_args = {**clean_sampling_args, "modalities": ["text"]}
+                    clean_sampling_args = {
+                        **clean_sampling_args,
+                        "modalities": ["text"],
+                    }
 
+                # Build common args for chat completion request
+                method = client.chat.completions.create
+                args = {
+                    "model": model,
+                    "messages": prompt,  # type: ignore
+                    **clean_sampling_args,
+                }
+
+                # Add tools if provided
                 if oai_tools:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        tools=oai_tools,
-                        **clean_sampling_args,
-                    )
-                else:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        **clean_sampling_args,
-                    )
+                    args["tools"] = oai_tools
+
+                # Add response_format if provided
+                if response_format:
+                    args["response_format"] = response_format
+                    # Use parse API if response_format provided, otherwise default
+                    method = client.chat.completions.parse
+
+                response = await method(**args)
                 return response
+
             elif message_type == "completion":
                 if oai_tools:
                     raise ValueError(
