@@ -8,7 +8,12 @@ import textwrap
 from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
-from arc_agi_3_agents.agents.structs import FrameData, GameAction, GameState, Scorecard
+from arc_agi_3_agents.structs import (  # type: ignore
+    FrameData,
+    GameAction,
+    GameState,
+    Scorecard,
+)
 from datasets import Dataset
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -183,15 +188,19 @@ class ArcAgi3Client:
     """Thin wrapper around the official ARC-AGI-3 HTTP API."""
 
     def __init__(self, base_url: str, api_key: str, timeout: float) -> None:
-        if not api_key:
-            raise ValueError("ARC_API_KEY is required to call the ARC-AGI-3 API")
         base = base_url.rstrip("/")
         if not base:
             raise ValueError("A non-empty base_url is required")
         self._client = httpx.AsyncClient(
             base_url=base,
-            headers={"X-API-Key": api_key, "Accept": "application/json"},
+            headers={
+                "X-API-Key": api_key,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
             timeout=timeout,
+            cookies=httpx.Cookies(),
+            follow_redirects=True,
         )
         self._base_url = base
 
@@ -238,9 +247,7 @@ class ArcAgi3Client:
                 raise ValueError("ACTION6 requires both x and y fields")
             body["x"] = payload.x
             body["y"] = payload.y
-        response = await self._client.post(
-            f"/api/cmd/{action.name}", json=body
-        )
+        response = await self._client.post(f"/api/cmd/{action.name}", json=body)
         data = self._parse_response(response)
         frame = FrameData.model_validate(data)
         return frame
@@ -251,14 +258,18 @@ class ArcAgi3Client:
     @staticmethod
     def _parse_response(response: httpx.Response) -> Dict[str, Any]:
         try:
-            response.raise_for_status()
             data = response.json()
-        except httpx.HTTPError as exc:
-            raise ArcAgi3APIError(f"HTTP error calling ARC API: {exc}") from exc
         except json.JSONDecodeError as exc:  # pragma: no cover - network guard
-            raise ArcAgi3APIError("ARC API returned invalid JSON") from exc
+            raise ArcAgi3APIError(
+                f"ARC API returned non-JSON (status {response.status_code})"
+            ) from exc
+        # Prefer API-provided error message even on non-2xx
         if isinstance(data, dict) and data.get("error"):
             raise ArcAgi3APIError(str(data["error"]))
+        if response.is_error:
+            raise ArcAgi3APIError(
+                f"HTTP {response.status_code}: {data if isinstance(data, dict) else 'error'}"
+            )
         if not isinstance(data, dict):
             raise ArcAgi3APIError("Unexpected payload from ARC API")
         return data
@@ -333,10 +344,17 @@ class ArcAgi3Env(vf.MultiTurnEnv):
         # Mutate prompt in-place so rollout sees the instructions
         prompt = state.get("prompt", [])
         if isinstance(prompt, list):
-            prompt.append({"role": "user", "content": _initial_instruction(game_id, self.max_actions)})
+            prompt.append(
+                {
+                    "role": "user",
+                    "content": _initial_instruction(game_id, self.max_actions),
+                }
+            )
         return state
 
-    async def is_completed(self, messages: Messages, state: State, **kwargs: Any) -> bool:
+    async def is_completed(
+        self, messages: Messages, state: State, **kwargs: Any
+    ) -> bool:
         arc = state.get("arc", {})
         return arc.get("phase") == "done"
 
@@ -348,7 +366,9 @@ class ArcAgi3Env(vf.MultiTurnEnv):
         if not phase:
             return [], state
         last_message = messages[-1]
-        content = last_message.get("content", "")
+        assert isinstance(last_message, dict)
+        content = last_message.get("content")
+        assert isinstance(content, str)
         try:
             payload_dict = _extract_json_object(content)
         except ValueError as exc:
@@ -374,7 +394,7 @@ class ArcAgi3Env(vf.MultiTurnEnv):
                             "role": "user",
                             "content": (
                                 "Invalid action payload. Ensure fields match the schema. "
-                                f"Details: {exc}" 
+                                f"Details: {exc}"
                             ),
                         }
                     ],
@@ -412,7 +432,11 @@ class ArcAgi3Env(vf.MultiTurnEnv):
             if arc["actions_taken"] >= arc["max_actions"]:
                 arc["phase"] = "awaiting_summary"
                 last_frame_data = arc.get("frames", [])[-1] if arc.get("frames") else {}
-                frame = FrameData.model_validate(last_frame_data) if last_frame_data else FrameData(game_id=arc["game_id"])
+                frame = (
+                    FrameData.model_validate(last_frame_data)
+                    if last_frame_data
+                    else FrameData(game_id=arc["game_id"])
+                )
                 summary = _summary_prompt(
                     frame,
                     arc["actions_taken"],
@@ -497,7 +521,7 @@ class ArcAgi3Env(vf.MultiTurnEnv):
                         {
                             "role": "user",
                             "content": (
-                                "Invalid final summary. Expected {\"final\": {...}}. "
+                                'Invalid final summary. Expected {"final": {...}}. '
                                 f"Details: {exc}"
                             ),
                         }
@@ -553,38 +577,37 @@ def _normalize_games(games: Optional[Iterable[Any]]) -> List[Dict[str, Any]]:
     return normalized
 
 
-async def _reward_success(prompt: Messages, completion: Messages, answer: str, state: State) -> float:
+async def success(state: State) -> float:
     arc = state.get("arc", {})
     return 1.0 if arc.get("final_state") == GameState.WIN.value else 0.0
 
 
+DEFAULT_GAME_IDS = ["ls20"]
+
+
 def load_environment(
     *,
-    games: Optional[Iterable[Any]] = None,
-    base_url: Optional[str] = None,
-    api_key: Optional[str] = None,
-    max_actions: int = 80,
-    request_timeout: float = 10.0,
-    tags: Optional[List[str]] = None,
-    system_prompt: str = SYSTEM_PROMPT,
+    games: Iterable[Any] = DEFAULT_GAME_IDS,
+    max_actions: int = 5,
+    request_timeout: float = 3.0,
 ) -> vf.Environment:
     """Factory for the ARC-AGI-3 environment."""
 
     game_entries = _normalize_games(games)
     dataset = _build_dataset(game_entries)
-    resolved_base = (base_url or DEFAULT_BASE_URL).rstrip("/")
-    resolved_key = api_key or os.getenv("ARC_API_KEY", "")
+    api_key = os.getenv("ARC_AGI_API_KEY")
+    if not api_key:
+        raise ValueError("ARC_AGI_API_KEY is required to call the ARC-AGI-3 API")
     rubric = vf.Rubric()
-    rubric.add_reward_func(_reward_success, weight=1.0)
+    rubric.add_reward_func(success, weight=1.0)
     env = ArcAgi3Env(
-        base_url=resolved_base,
-        api_key=resolved_key,
+        base_url=DEFAULT_BASE_URL,
+        api_key=api_key,
         dataset=dataset,
         rubric=rubric,
         max_actions=max_actions,
         request_timeout=request_timeout,
-        tags=tags,
-        system_prompt=system_prompt,
+        system_prompt=SYSTEM_PROMPT,
     )
     return env
 

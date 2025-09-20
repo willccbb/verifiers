@@ -2,12 +2,12 @@
 name = "arc-agi-3"
 description = "ARC-AGI-3 environment using the official agent API"
 tags = ["train", "eval"]
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.12"
 dependencies = [
+    "arc-agi-3-agents",
     "httpx>=0.27",
     "pydantic>=2.7",
-    "arc-agi-3-agents",
     "verifiers>=0.1.3.post0",
 ]
 
@@ -22,4 +22,4 @@ allow-direct-references = true
 include = ["arc_agi_3.py"]
 
 [tool.uv.sources]
-arc-agi-3-agents = {git = "https://github.com/arcprize/ARC-AGI-3-Agents.git"}
+arc-agi-3-agents = { git = "https://github.com/willccbb/ARC-AGI-3-Agents.git" }
