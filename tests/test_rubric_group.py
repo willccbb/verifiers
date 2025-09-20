@@ -147,7 +147,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -156,7 +155,9 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
         )
@@ -190,7 +191,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -199,7 +199,9 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
         )
@@ -227,7 +229,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -236,7 +237,9 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
             custom_param="test",
@@ -264,7 +267,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?"]
         completions = ["2"]
         answers = ["2"]
-        states = [{}]
         tasks = ["default"]
         infos = [{}]
 
@@ -273,7 +275,9 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
         )
@@ -299,7 +303,6 @@ class TestRubricGroup:
         prompts = []
         completions = []
         answers = []
-        states = []
         tasks = []
         infos = []
 
@@ -308,7 +311,9 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+            ],
             tasks=tasks,
             infos=infos,
         )
@@ -353,7 +358,6 @@ class TestRubricGroup:
         prompts = ["What is 1+1?", "What is 2+2?"]
         completions = ["2", "4"]
         answers = ["2", "4"]
-        states = [{}, {}]
         tasks = ["default", "default"]
         infos = [{}, {}]
 
@@ -362,7 +366,10 @@ class TestRubricGroup:
             prompts=prompts,
             completions=completions,
             answers=answers,
-            states=states,
+            states=[
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}},
+                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}},
+            ],
             tasks=tasks,
             infos=infos,
             max_concurrent=1,  # Force sequential execution

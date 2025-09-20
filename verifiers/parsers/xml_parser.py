@@ -69,7 +69,7 @@ class XMLParser(Parser):
                 if last:
                     match = None
                     for match in re.finditer(pattern, text, re.DOTALL):
-                        pass # iterate over matches to bind last match
+                        pass  # iterate over matches to bind last match
                 else:
                     match = re.search(pattern, text, re.DOTALL)
                 if match:

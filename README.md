@@ -1,8 +1,18 @@
-<div align="center">
+<p align="center">
+</p>
 
 <p align="center">
-  <h1>Verifiers</h1>
+  <img src="https://github.com/user-attachments/assets/40c36e38-c5bd-4c5a-9cb3-f7b902cd155d#gh-light-mode-only" alt="Prime Intellect" width="312">
+  <img src="https://github.com/user-attachments/assets/6414bc9b-126b-41ca-9307-9e982430cde8#gh-dark-mode-only"  alt="Prime Intellect" width="312">
 </p>
+
+---
+
+<h3 align="center">
+Verifiers: Environments for LLM Reinforcement Learning
+</h3>
+
+---
 
 <p align="center">
   <a href="https://github.com/willccbb/verifiers/actions/workflows/style.yml">
@@ -16,17 +26,14 @@
   </a>
 </p>
 
-<p>
-Environments for LLM Reinforcement Learning
-</p>
-
-</div>
 
 ## Overview
 
 Verifiers is a library of modular components for creating RL environments and training LLM agents. Environments built with Verifiers can be used directly as LLM evaluations, synthetic data pipelines, or agent harnesses for any OpenAI-compatible model endpoint, in addition to RL training. Verifiers includes an async GRPO implementation built around the `transformers` Trainer, is supported by `prime-rl` for large-scale FSDP training, and can easily be integrated into any RL framework which exposes an OpenAI-compatible inference client.
 
 Full documentation is available [here](https://verifiers.readthedocs.io/en/latest/). 
+
+Verifiers is also the native library used by Prime Intellect's [Environments Hub](https://app.primeintellect.ai/dashboard/environments?ex_sort=most_stars); see [here](https://docs.primeintellect.ai/tutorials-environments/environments) for information about publishing your Environments to the Hub.
 
 ## Setup
 
@@ -79,30 +86,32 @@ Environments in Verifiers are installable Python modules which can specify depen
 
 To initialize a blank Environment module template, do:
 ```bash
-vf-init vf-environment-name # -p /path/to/environments (defaults to "./environments")
+vf-init environment-name # -p /path/to/environments (defaults to "./environments")
 ```
 
 To an install an Environment module into your project, do:
 ```bash
-vf-install vf-environment-name # -p /path/to/environments (defaults to "./environments") 
+vf-install environment-name # -p /path/to/environments (defaults to "./environments") 
 ```
 
 To install an Environment module from this repo's `environments` folder, do:
 ```bash
-vf-install vf-math-python --from-repo # -b branch_or_commit (defaults to "main")
+vf-install math-python --from-repo # -b branch_or_commit (defaults to "main")
 ```
 
 Once an Environment module is installed, you can create an instance of the Environment using `load_environment`, passing any necessary args:
 ```python
 import verifiers as vf
-vf_env = vf.load_environment("vf-environment-name", **env_args)
+vf_env = vf.load_environment("environment-name", **env_args)
 ```
 
 To run a quick evaluation of your Environment with an API-based model, do:
 ```bash
-vf-eval vf-environment-name -s # run and save eval results locally
+vf-eval environment-name -s # run and save eval results locally
 # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
+
+If you're using Prime Intellect infrastructure, the [`prime` CLI](https://github.com/PrimeIntellect-ai/prime-cli) provides first-class commands for working with Verifiers environments through the [Environments Hub](https://docs.primeintellect.ai/tutorials-environments/environments). Install it with `uv tool install prime`, authenticate via `prime login`, then use `prime env push` to publish your package and `prime env install owner/name` (optionally pinning a version) to consume it from pods or local machines.
 
 The core elements of Environments are:
 - Datasets: a Hugging Face `Dataset` with a `prompt` column for inputs, and optionally `answer (str)` or `info (dict)` columns for evaluation (both can be omitted for environments that evaluate based solely on completion quality)
@@ -274,7 +283,7 @@ If you do not require LoRA support, you may want to use the `prime-rl` trainer, 
 
 See the full [docs](https://verifiers.readthedocs.io/en/latest/) for more information.
 
-## Contributions
+## Contribution Guidelines
 
 Verifiers warmly welcomes community contributions! Please open an issue or PR if you encounter bugs or other pain points during your development, or start a discussion for more open-ended questions.
 
@@ -282,19 +291,16 @@ Please note that the core `verifiers/` library is intended to be a relatively li
 
 ## Citation
 
+Originally created by Will Brown ([@willccbb](https://github.com/willccbb)).
+
 If you use this code in your research, please cite:
 
 ```bibtex
 @misc{brown_verifiers_2025,
   author       = {William Brown},
-  title        = {{Verifiers}: Reinforcement Learning with LLMs in Verifiable Environments},
+  title        = {{Verifiers}: Environments for LLM Reinforcement Learning},
   howpublished = {\url{https://github.com/willccbb/verifiers}},
   note         = {Commit abcdefg • accessed DD Mon YYYY},
   year         = {2025}
 }
 ```
-
-## Roadmap
-- Default patterns for hosted resources such as code sandboxes, auxiliary models, and MCP servers
-- Multimodal input support
-- Non-increasing token sequences via REINFORCE
