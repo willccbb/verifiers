@@ -3,20 +3,20 @@ import importlib
 import importlib.util
 import json
 import logging
-import time
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 from datasets import Dataset
+from openai import OpenAI
 
 import verifiers as vf
-from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
-# Setup logger for eval script using verifiers logging format
-logger = logging.getLogger("verifiers.scripts.eval")
+# Setup logger for eval script
+logger = logging.getLogger(__name__)
 
 
 def eval_environment(
@@ -35,6 +35,8 @@ def eval_environment(
     sampling_args: dict | None,
     verbose: bool,
     save_dataset: bool,
+    save_dataset_cache: bool,
+    cache_dir: str,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
 ):
@@ -47,15 +49,13 @@ def eval_environment(
             endpoints_file = endpoints_path_obj
 
         if endpoints_file.exists():
-            logger.debug(f"Loading endpoint registry from {endpoints_file}")
+            logger.info(f"Loading endpoint registry from {endpoints_file}")
             spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
             assert spec and spec.loader
             endpoints_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(endpoints_module)
             ENDPOINTS = endpoints_module.ENDPOINTS
-            logger.debug(
-                f"Successfully loaded {len(ENDPOINTS)} endpoints from registry"
-            )
+            logger.info(f"Successfully loaded {len(ENDPOINTS)} endpoints from registry")
         else:
             raise ImportError(f"endpoints.py not found at {endpoints_file}")
     except (ImportError, AttributeError) as e:
@@ -64,30 +64,26 @@ def eval_environment(
             f"Please specify the model name (-m), API host base URL (-b), and API key variable name (-k). "
             f"Error details: {str(e)}"
         )
-        logger.debug("Using default empty endpoints registry")
+        logger.info("Using default empty endpoints registry")
         ENDPOINTS = {}
 
     if model in ENDPOINTS:
         api_key_var = ENDPOINTS[model]["key"]
         api_base_url = ENDPOINTS[model]["url"]
         model = ENDPOINTS[model]["model"]
-        logger.debug(f"Using endpoint configuration for model '{model}' from registry")
+        logger.info(f"Using endpoint configuration for model '{model}' from registry")
     else:
-        logger.debug(
+        logger.info(
             f"Model '{model}' not found in endpoint registry, using command-line arguments"
         )
 
-    # Setup eval client with high limits to prevent API timeout errors
-    client = setup_client(
-        api_base_url,
-        api_key_var,
-        timeout=3600.0,  # 1h
-        max_connections=28000,  # Number of available ports
-        max_keepalive_connections=28000,  # Number of available ports
-        max_retries=10,  # 10 retries (w/ exponential backoffs)
-    )
-    logger.debug(f"Initialized OpenAI client with base_url: {api_base_url}")
+    api_key_value = os.getenv(api_key_var, "EMPTY")
+    client = OpenAI(api_key=api_key_value, base_url=api_base_url)
+    logger.info(f"Initialized OpenAI client with base_url: {api_base_url}")
+
+    logger.info(f"Loading environment: {env}")
     vf_env = vf.load_environment(env_id=env, **env_args)
+    logger.info(f"Successfully loaded environment: {env}")
     # Merge sampling args with precedence to JSON payload over explicit flags
     merged_sampling_args: dict = {}
     if sampling_args is not None:
@@ -101,7 +97,7 @@ def eval_environment(
     logger.info(
         f"Configuration: num_examples={num_examples}, rollouts_per_example={rollouts_per_example}, max_concurrent={max_concurrent}"
     )
-    start_time = time.time()
+
     results = vf_env.evaluate(
         client=client,
         model=model,
@@ -110,42 +106,44 @@ def eval_environment(
         rollouts_per_example=rollouts_per_example,
         max_concurrent=max_concurrent,
     )
-    end_time = time.time()
-    logger.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")
-    print("--- Evaluation ---")
-    print(f"Environment: {env}")
-    print(f"Model: {model}")
-    print(f"Provider: {api_base_url}")
-    print(f"Examples: {num_examples}")
-    print(f"Rollouts per example: {rollouts_per_example}")
-    print("--- Example ---")
+    logger.info("Evaluation completed successfully")
+    logger.info("--- Evaluation ---")
+    logger.info(f"Environment: {env}")
+    logger.info(f"Model: {model}")
+    logger.info(f"Provider: {api_base_url}")
+    logger.info(f"Examples: {num_examples}")
+    logger.info(f"Rollouts per example: {rollouts_per_example}")
+    logger.info("--- Example ---")
     printable_prompts = [messages_to_printable(p) for p in results.prompt]
     printable_completions = [messages_to_printable(c) for c in results.completion]
     vf.print_prompt_completions_sample(
         printable_prompts, printable_completions, results.reward, step=0
     )
-    print("--- All ---")
-    print("Rewards:")
-    print(
+    logger.info("--- All ---")
+    logger.info("Rewards:")
+    logger.info(
         f"reward: avg - {sum(results.reward) / len(results.reward):.3f}, std - {np.std(results.reward):.3f}"
     )
+    n = num_examples
     r = rollouts_per_example
-    n = len(results.reward) // r
+
+    if n < 0:
+        n = len(results.reward) // r
     for i in range(r):
         # rounded to 3 decimal places
         trials = [round(results.reward[(i * n) + j], 3) for j in range(n)]
         out = f"r{i + 1}: {trials}"
-        print(out)
+        logger.info(out)
     for k in results.metrics:
         v = results.metrics[k]
-        print(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
+        logger.info(f"{k}: avg - {sum(v) / len(v):.3f}, std - {np.std(v):.3f}")
         for i in range(r):
             # rounded to 3 decimal places
             trials = [round(v[(i * n) + j], 3) for j in range(n)]
             out = f"r{i + 1}: {trials}"
-            print(out)
+            logger.info(out)
 
-    if save_dataset or save_to_hf_hub:
+    if save_dataset or save_dataset_cache or save_to_hf_hub:
         ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
         rewards = results.reward
         tasks = results.task
@@ -154,9 +152,6 @@ def eval_environment(
             "prompt": [sanitize_tool_calls(p) for p in printable_prompts],
             "completion": [sanitize_tool_calls(c) for c in printable_completions],
             "task": tasks,
-            "generation_ms": [s["timing"]["generation_ms"] for s in results.state],
-            "scoring_ms": [s["timing"]["scoring_ms"] for s in results.state],
-            "total_ms": [s["timing"]["total_ms"] for s in results.state],
         }
         if results.info[0] != {}:
             data_dict["info"] = results.info
@@ -174,8 +169,8 @@ def eval_environment(
             "num_examples": n,
             "rollouts_per_example": rollouts_per_example,
             "sampling_args": merged_sampling_args,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "time_ms": (end_time - start_time) * 1000,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "time": datetime.now().strftime("%H:%M:%S"),
             "avg_reward": sum(results.reward) / len(results.reward),
         }
         for k in results.metrics:
@@ -198,6 +193,42 @@ def eval_environment(
                 json.dump(metadata, f)
 
             logger.info(f"Saved dataset to {results_path}")
+        if save_dataset_cache:
+            if cache_dir:
+                cache_base = Path(cache_dir)
+            else:
+                cache_base = Path(os.environ.get(
+                    "VF_CACHE_DIR",
+                    Path.home() / ".cache" / "verifiers"
+                ))
+
+            cache_path = cache_base / "evals" / env_model_str / uuid_str
+            cache_path.mkdir(parents=True, exist_ok=True)
+
+            dataset.to_json(cache_path / "results.jsonl")
+            with open(cache_path / "metadata.json", "w") as f:
+                json.dump(metadata, f)
+
+            index_file = cache_base / "evals" / "index.json"
+            index_data = {}
+            if index_file.exists():
+                with open(index_file, "r") as f:
+                    index_data = json.load(f)
+
+            run_key = f"{env_model_str}/{uuid_str}"
+            index_data[run_key] = {
+                "env": env,
+                "model": model,
+                "timestamp": datetime.now().isoformat(),
+                "path": str(cache_path),
+                "avg_reward": metadata.get("avg_reward"),
+                "num_examples": n,
+                "rollouts_per_example": rollouts_per_example
+            }
+
+            with open(index_file, "w") as f:
+                json.dump(index_data, f, indent=2)
+
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
                 dataset_name = (
@@ -207,6 +238,7 @@ def eval_environment(
                 dataset_name = hf_hub_dataset_name
             dataset.push_to_hub(dataset_name)
             logger.info(f"Saved dataset to Hugging Face Hub: {dataset_name}")
+        
 
 
 def main():
@@ -308,6 +340,20 @@ def main():
         help="Save dataset to disk",
     )
     parser.add_argument(
+        "--save-dataset-cache",
+        "-sc",
+        default=False,
+        action="store_true",
+        help="Save dataset to disk cache",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        "-C",
+        type=str,
+        default="",
+        help="Custom cache directory (overrides VF_CACHE_DIR environment variable)"
+    )
+    parser.add_argument(
         "--save-to-hf-hub",
         "-H",
         default=False,
@@ -339,6 +385,8 @@ def main():
         sampling_args=args.sampling_args,
         verbose=args.verbose,
         save_dataset=args.save_dataset,
+        save_dataset_cache=args.save_dataset_cache,
+        cache_dir=args.cache_dir,
         save_to_hf_hub=args.save_to_hf_hub,
         hf_hub_dataset_name=args.hf_hub_dataset_name,
     )
