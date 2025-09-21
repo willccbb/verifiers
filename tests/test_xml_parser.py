@@ -1,6 +1,7 @@
 """Tests for the XMLParser class."""
 
 import pytest
+
 from verifiers import XMLParser
 
 
@@ -161,8 +162,13 @@ class TestXMLParser:
 
     def test_invalid_field_types(self):
         """Test XMLParser initialization with invalid field types."""
+        from typing import Any, cast
+
         with pytest.raises(TypeError):
-            XMLParser([123])  # Invalid field type
+            bad_fields = cast(
+                list[str | tuple[str, ...]], [cast(Any, "valid"), cast(Any, 123)]
+            )
+            XMLParser(bad_fields)  # Invalid field type mixed in
 
         # Empty fields is actually allowed - it just creates a parser with no fields
         empty_parser = XMLParser([])  # This works

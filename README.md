@@ -53,7 +53,7 @@ uv add verifiers # uv add 'verifiers[dev]' for Jupyter + testing support
 
 For training on GPUs with `vf.GRPOTrainer`, do:
 ```bash
-uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
+uv add 'verifiers[train]' && uv pip install flash-attn --no-build-isolation
 ```
 
 To use the latest `main` branch, do:
