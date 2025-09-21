@@ -398,6 +398,8 @@ class GRPOTrainer(Trainer):
 
         eval_dataset = env.get_eval_dataset()
 
+        print("data", train_dataset)
+        print(train_dataset.column_names)
         if "prompt" not in train_dataset.column_names:
             raise ValueError("Train dataset must contain a 'prompt' column")
         if "answer" not in train_dataset.column_names:
