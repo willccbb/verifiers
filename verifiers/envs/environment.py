@@ -9,7 +9,6 @@ from transformers import ProcessorMixin
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-import transformers
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (

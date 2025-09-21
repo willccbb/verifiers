@@ -4,7 +4,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Sized, Tuple, Union
+from typing import Any, Dict, List, Optional, Sized, Union
 
 import datasets
 import numpy as np
@@ -838,14 +838,16 @@ class GRPOTrainer(Trainer):
             attention_mask_batch = attention_mask[i : i + batch_size]
             # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
             model_inputs = {"input_ids": input_ids_batch, "attention_mask": attention_mask_batch}
-
-            if image_grid_thw is not None and pixel_values is not None:
-                model_inputs["image_grid_thw"] = image_grid_thw[start : start + batch_size]
-                start_pixel_idx = image_grid_thw[:start].prod(-1).sum().item()
-                end_pixel_idx = image_grid_thw[: start + batch_size].prod(-1).sum().item()
-                model_inputs["pixel_values"] = pixel_values[start_pixel_idx:end_pixel_idx]
-            elif pixel_values is not None:
-                model_inputs["pixel_values"] = pixel_values[start : start + batch_size]
+            
+            
+            # TODO : check if needed there or if already robust to VLM
+            # if image_grid_thw is not None and pixel_values is not None:
+            #     model_inputs["image_grid_thw"] = image_grid_thw[start : start + batch_size]
+            #     start_pixel_idx = image_grid_thw[:start].prod(-1).sum().item()
+            #     end_pixel_idx = image_grid_thw[: start + batch_size].prod(-1).sum().item()
+            #     model_inputs["pixel_values"] = pixel_values[start_pixel_idx:end_pixel_idx]
+            # elif pixel_values is not None:
+            #     model_inputs["pixel_values"] = pixel_values[start : start + batch_size]
 
             # Only add logits_to_keep if the model supports it
             if "logits_to_keep" in self.model_kwarg_keys:
