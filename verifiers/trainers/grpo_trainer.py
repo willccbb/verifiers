@@ -439,18 +439,31 @@ class GRPOTrainer(Trainer):
             )
             max_length = self.max_prompt_length  # Capture for closure
 
-            def filter_by_prompt_length(example, processing_class):
+            def filter_by_prompt_length(example, processing_class, max_length):
                 prompt = example["prompt"]
-                # Tokenize prompt to check length
+                
                 if isinstance(prompt, list):
-                    # Chat format
                     prompt_text = processing_class.apply_chat_template(
                         prompt, tokenize=False, add_generation_prompt=True
                     )
                 else:
-                    # Completion format
                     prompt_text = prompt
-                prompt_ids = processing_class.encode(prompt_text)  # type: ignore
+
+                if isinstance(processing_class, PreTrainedTokenizerBase):
+                    prompt_ids = processing_class.encode(prompt_text)
+                elif isinstance(processing_class, ProcessorMixin):
+                    kwargs = {}
+                    if "image" in example:
+                        kwargs["images"] = [example["image"]]
+                    inputs = processing_class(
+                        text=prompt_text,
+                        return_tensors="pt",
+                        add_special_tokens=False,
+                        **kwargs,
+                    )
+                    prompt_ids = inputs["input_ids"][0].tolist()
+                else:
+                    raise ValueError(f"Unsupported processing class: {type(processing_class)}")
                 return len(prompt_ids) <= max_length
 
             original_size = len(train_dataset)
@@ -1090,7 +1103,7 @@ class GRPOTrainer(Trainer):
                 batch_offset = batch_id - batch_id_to_retrieve
                 
                 # En gros ici il faut recup les images je pense si elles existe
-                all_prompts, all_answers, all_tasks, all_infos, all_images = (
+                all_prompts, all_answers, all_tasks, all_infos = (
                     self._gather_batch_data(batch_offset)
                 )
                 if not all_prompts:
@@ -1106,8 +1119,8 @@ class GRPOTrainer(Trainer):
                     "info": all_infos,
                 }
                 
-                if len(all_images) > 0 :
-                    env_inputs["image"] = all_images
+                # if len(all_images) > 0 :
+                #     env_inputs["image"] = all_images
                     
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
