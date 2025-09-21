@@ -9,7 +9,7 @@ from transformers import ProcessorMixin, AutoProcessor, AutoConfig
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-
+import transformers
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
@@ -225,6 +225,7 @@ class Environment(ABC):
         ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
+
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
@@ -471,6 +472,8 @@ class Environment(ABC):
     ) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
+
+        print("inputs",inputs)
         coro = self.a_generate(
             inputs,
             client,

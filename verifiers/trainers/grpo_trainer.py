@@ -26,6 +26,7 @@ from trl.trainer.callbacks import SyncRefModelCallback
 from trl.trainer.utils import disable_dropout_in_model, pad, selective_log_softmax
 import base64
 from io import BytesIO
+import transformers
 
 from verifiers import Environment
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
@@ -1014,55 +1015,48 @@ class GRPOTrainer(Trainer):
         ids = torch.stack(ids, dim=0)
         mask = torch.stack(mask, dim=0)
         return {"ids": ids, "mask": mask}
-
-    def _gather_batch_data(
-        self, batch_offset: int = 0
-    ) -> Tuple[List[Any], List[Any], List[Any], List[Any]]:
+    
+    def _gather_batch_data(self, batch_offset: int = 0):
         """
-        Gather batch data from all processes.
-
-        Args:
-            batch_offset: 0 for current batch, >0 for future batches (peek ahead)
-
-        Returns:
-            Tuple of (all_prompts, all_answers, all_tasks)
+        Gather batch data from all processes and convert PIL images in prompts to base64 image_url.
         """
+        print("GATHERING BATCH DATA")
         batches = self._async_dataloader.peek_ahead(batch_offset)
-
+    
         if batch_offset == 0:
             batch = batches[0] if batches else None
         else:
             batch = batches[batch_offset - 1] if batches else None
-
+    
         if batch is None:
             return [], [], [], []
-
+    
         if isinstance(batch, dict):
             batch = [batch]
-        
-        # Vérifier si le batch contient "image" si c'est le cas, il faut transformer ça en image url
-        # Gather batch data from all processes
+    
         prompts = []
         for x in batch:
             prompt = x["prompt"]
-            if "image" in x and x["image"] is not None:
-                img_url = pil_to_base64_url(x["image"])
-                for message in prompt:
-                    for content in message.get("content", []):
-                        if content.get("type") == "image":
-                            content["type"] = "image_url"
-                            content["image_url"] = img_url
-                            if "image" in content:
-                                del content["image"]
+            for message in prompt:
+                for content in message.get("content", []):
+                    if content.get("type") == "image" :
+                        img_url = pil_to_base64_url(x["image"])
+                        content.clear()
+                        content.update({
+                            "type": "image_url",
+                            "image_url": {"url":img_url}
+                        })
             prompts.append(prompt)
-        
+    
         answers = [x["answer"] for x in batch]
         tasks = [x.get("task", "default") for x in batch]
         infos = [x.get("info", {}) for x in batch]
+    
         all_prompts = gather_object(prompts)
         all_answers = gather_object(answers)
         all_tasks = gather_object(tasks)
         all_infos = gather_object(infos)
+    
         return all_prompts, all_answers, all_tasks, all_infos
 
     def _prepare_inputs(  # type: ignore
