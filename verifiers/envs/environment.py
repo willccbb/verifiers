@@ -406,11 +406,11 @@ class Environment(ABC):
                 "but reward functions requiring ground truth data may return 0.0. "
                 "Proceeding with empty values."
             )
-        if "answer" not in results_dict:
+        if not results_dict.get("answer"):
             results_dict["answer"] = [""] * len(results_dict["prompt"])
-        if "task" not in results_dict:
+        if not results_dict.get("task"):
             results_dict["task"] = ["default"] * len(results_dict["prompt"])
-        if "info" not in results_dict:
+        if not results_dict.get("info"):
             results_dict["info"] = [{}] * len(results_dict["prompt"])
         for i, info in enumerate(results_dict["info"]):
             if isinstance(info, str):
