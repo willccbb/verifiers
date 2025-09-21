@@ -17,14 +17,14 @@ def setup_client(
     A helper function to setup an
     """
     # Setup timeouts and limits
-    timeout = httpx.Timeout(timeout, connect=5.0)
+    http_timeout = httpx.Timeout(timeout, connect=5.0)
     limits = httpx.Limits(
         max_connections=max_connections,
         max_keepalive_connections=max_keepalive_connections,
     )
 
     # Setup client
-    http_client = AsyncClient(limits=limits, timeout=timeout)
+    http_client = AsyncClient(limits=limits, timeout=http_timeout)
     client = AsyncOpenAI(
         base_url=api_base_url,
         api_key=os.getenv(api_key_var, "EMPTY"),

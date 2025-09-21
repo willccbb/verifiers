@@ -6,7 +6,7 @@ import pytest
 from datasets import Dataset
 
 from verifiers import Environment, Parser, Rubric, ThinkParser
-from verifiers.types import GenerateOutputs, RolloutScores
+from verifiers.types import ChatCompletion, Completion, GenerateOutputs, RolloutScores
 
 
 # Create a concrete implementation for testing the abstract base class
@@ -18,22 +18,24 @@ class SimpleEnvironment(Environment):
         client,
         model,
         prompt,
-        answer="",
-        task="default",
-        info={},
-        sampling_args={},
+        answer: str = "",
+        task: str = "default",
+        info: dict | None = None,
+        sampling_args: dict | None = None,
         **kwargs,
     ):
         """Simple test rollout implementation."""
         response = await self.get_model_response(
-            prompt=prompt, client=client, model=model, sampling_args=sampling_args
+            prompt=prompt, client=client, model=model, sampling_args=sampling_args or {}
         )
         if self.message_type == "chat":
+            assert isinstance(response, ChatCompletion)
             completion = [
                 {"role": "assistant", "content": response.choices[0].message.content}
             ]
             state = {"responses": [response]}
         else:
+            assert isinstance(response, Completion)
             completion = response.choices[0].text
             state = {}
         return completion, state
@@ -528,7 +530,7 @@ class TestEnvironmentBase:
         )
 
         # Mock the rubric scoring
-        env.rubric.score_rollouts = AsyncMock(
+        env.rubric.score_rollouts = AsyncMock(  # type: ignore[attr-defined]
             return_value=RolloutScores(reward=[1.0], metrics={})
         )
 
@@ -556,14 +558,17 @@ class TestEnvironmentBase:
         )
 
         # Mock the rubric scoring
-        env.rubric.score_rollouts = AsyncMock(
+        env.rubric.score_rollouts = AsyncMock(  # type: ignore[attr-defined]
             return_value=RolloutScores(reward=[1.0], metrics={})
         )
 
-        inputs = {"prompt": [[{"role": "user", "content": "Hello"}]], "answer": ["Hi"]}
+        from verifiers.types import GenerateInputs
 
+        gi = GenerateInputs(
+            prompt=[[{"role": "user", "content": "Hello"}]], answer=["Hi"]
+        )  # type: ignore[arg-type]
         results = env.generate(
-            inputs,
+            gi,
             client=mock_openai_client,
             model="test-model",
             interleave_scoring=False,

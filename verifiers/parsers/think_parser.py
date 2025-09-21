@@ -5,8 +5,8 @@ from verifiers.types import ChatMessage
 
 
 class ThinkParser(Parser):
-    def __init__(self, extract_fn: Callable[[str], str] = lambda x: x, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, extract_fn: Callable[[str], str] = lambda x: x):
+        super().__init__(extract_fn=extract_fn)
         self.extract_fn = extract_fn
 
     def parse(self, text: str) -> str:
