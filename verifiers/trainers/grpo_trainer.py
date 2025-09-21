@@ -24,6 +24,8 @@ from transformers.trainer_utils import seed_worker
 from trl.models import create_reference_model, prepare_deepspeed
 from trl.trainer.callbacks import SyncRefModelCallback
 from trl.trainer.utils import disable_dropout_in_model, pad, selective_log_softmax
+import base64
+from io import BytesIO
 
 from verifiers import Environment
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
@@ -271,6 +273,14 @@ def nanmax(tensor: torch.Tensor) -> torch.Tensor:
         return torch.tensor(float("nan"), dtype=tensor.dtype, device=tensor.device)
     return torch.max(tensor[~torch.isnan(tensor)])
 
+def pil_to_base64_url(pil_image) -> str:
+    """
+    Convert a PIL image to a base64 URL string suitable for OpenAI/vLLM messages.
+    """
+    buffered = BytesIO()
+    pil_image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{img_str}"
 
 class GRPOTrainer(Trainer):
     def __init__(
@@ -1029,9 +1039,23 @@ class GRPOTrainer(Trainer):
 
         if isinstance(batch, dict):
             batch = [batch]
-
+        
+        # Vérifier si le batch contient "image" si c'est le cas, il faut transformer ça en image url
         # Gather batch data from all processes
-        prompts = [x["prompt"] for x in batch]
+        prompts = []
+        for x in batch:
+            prompt = x["prompt"]
+            if "image" in x and x["image"] is not None:
+                img_url = pil_to_base64_url(x["image"])
+                for message in prompt:
+                    for content in message.get("content", []):
+                        if content.get("type") == "image":
+                            content["type"] = "image_url"
+                            content["image_url"] = img_url
+                            if "image" in content:
+                                del content["image"]
+            prompts.append(prompt)
+        
         answers = [x["answer"] for x in batch]
         tasks = [x.get("task", "default") for x in batch]
         infos = [x.get("info", {}) for x in batch]
