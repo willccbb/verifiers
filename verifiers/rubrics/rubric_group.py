@@ -17,7 +17,6 @@ class RubricGroup(Rubric):
     def __init__(self, rubrics: list[Rubric], **kwargs):
         if not rubrics:
             raise ValueError("RubricGroup must have at least one rubric")
-
         super().__init__(**kwargs)
         self.rubrics = rubrics
         self.logger.info(f"Initialized RubricGroup with {len(rubrics)} rubrics")
