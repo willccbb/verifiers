@@ -13,11 +13,10 @@ import wandb
 from accelerate.utils import broadcast_object_list, gather_object, is_peft_model
 from peft import PeftConfig, get_peft_model
 from torch.utils.data import DataLoader, Sampler
-from transformers import AutoModelForCausalLM
 from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from transformers import ProcessorMixin, AutoProcessor, AutoConfig
+from transformers import ProcessorMixin, AutoConfig
 from transformers.trainer import Trainer
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import seed_worker
@@ -790,25 +789,26 @@ class GRPOTrainer(Trainer):
         # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
         model_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
-        # For Qwen models:
-        if image_grid_thw is not None and pixel_values is not None:
-            model_inputs["image_grid_thw"] = image_grid_thw
-        # For Gemma, SmolVLM2, LLaVa-Next etc.:
-        if pixel_values is not None:
-            model_inputs["pixel_values"] = pixel_values
-        # For SmolVLM2
-        if pixel_attention_mask is not None:
-            model_inputs["pixel_attention_mask"] = pixel_attention_mask
-        # For LLaVa-Next
-        if image_sizes is not None:
-            model_inputs["image_sizes"] = image_sizes
+        # TODO : check if needed or no
+        # # For Qwen models:
+        # if image_grid_thw is not None and pixel_values is not None:
+        #     model_inputs["image_grid_thw"] = image_grid_thw
+        # # For Gemma, SmolVLM2, LLaVa-Next etc.:
+        # if pixel_values is not None:
+        #     model_inputs["pixel_values"] = pixel_values
+        # # For SmolVLM2
+        # if pixel_attention_mask is not None:
+        #     model_inputs["pixel_attention_mask"] = pixel_attention_mask
+        # # For LLaVa-Next
+        # if image_sizes is not None:
+        #     model_inputs["image_sizes"] = image_sizes
 
-        # Only add logits_to_keep if the model supports it
-        if "logits_to_keep" in self.model_kwarg_keys:
-            # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
-            model_inputs["logits_to_keep"] = logits_to_keep + 1
+        # # Only add logits_to_keep if the model supports it
+        # if "logits_to_keep" in self.model_kwarg_keys:
+        #     # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
+        #     model_inputs["logits_to_keep"] = logits_to_keep + 1
 
-        model_inputs["use_cache"] = False  # only used in generation; set False to suppress warnings
+        # model_inputs["use_cache"] = False  # only used in generation; set False to suppress warnings
 
         last_hidden_state = unwrapped_model.model(**model_inputs).last_hidden_state
         # Exclude the last value: it corresponds to the next token pred

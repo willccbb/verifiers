@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, Union
-from transformers import ProcessorMixin, AutoProcessor, AutoConfig
+from transformers import ProcessorMixin
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -780,16 +780,16 @@ class Environment(ABC):
         # Ici on ajoute les images en kwargs
         
         kwargs = {}
-        has_images = "image" in inputs[0]
-        if has_images:
-            images = [example.get("image") for example in inputs]
-            kwargs = {"images": [[img] for img in images]}
-            if isinstance(prompt, list):
-                for message in prompt:
-                    if isinstance(message, dict) and message.get("role") == "user":
-                        if isinstance(message.get("content"), str):
-                            message["content"] = [{"type": "image"}, {"type": "text", "text": message["content"]}]
-                        break
+        # has_images = "image" in inputs[0]
+        # if has_images:
+        #     images = [example.get("image") for example in inputs]
+        #     kwargs = {"images": [[img] for img in images]}
+        #     if isinstance(prompt, list):
+        #         for message in prompt:
+        #             if isinstance(message, dict) and message.get("role") == "user":
+        #                 if isinstance(message.get("content"), str):
+        #                     message["content"] = [{"type": "image"}, {"type": "text", "text": message["content"]}]
+        #                 break
                         
         prompt_ids: list[int] = processing_class(prompt,**kwargs)
         rollout_consumed = prompt
