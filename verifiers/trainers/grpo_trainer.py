@@ -441,9 +441,8 @@ class GRPOTrainer(Trainer):
             )
             max_length = self.max_prompt_length  # Capture for closure
 
-            def filter_by_prompt_length(example, processing_class, max_length):
+            def filter_by_prompt_length(example, processing_class):
                 prompt = example["prompt"]
-                
                 if isinstance(prompt, list):
                     prompt_text = processing_class.apply_chat_template(
                         prompt, tokenize=False, add_generation_prompt=True
@@ -457,6 +456,7 @@ class GRPOTrainer(Trainer):
                     kwargs = {}
                     if "image" in example:
                         kwargs["images"] = [example["image"]]
+
                     inputs = processing_class(
                         text=prompt_text,
                         return_tensors="pt",
