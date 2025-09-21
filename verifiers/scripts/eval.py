@@ -7,11 +7,13 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from datasets import Dataset
 
 import verifiers as vf
+from verifiers.types import Endpoints
 from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
@@ -52,7 +54,12 @@ def eval_environment(
             assert spec and spec.loader
             endpoints_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(endpoints_module)
-            ENDPOINTS = endpoints_module.ENDPOINTS
+            # check that module exposes ENDPOINTS
+            if not hasattr(endpoints_module, "ENDPOINTS"):
+                raise AttributeError(
+                    f"Module '{endpoints_file}' does not have a 'ENDPOINTS' attribute"
+                )
+            ENDPOINTS = cast(Endpoints, endpoints_module.ENDPOINTS)
             logger.debug(
                 f"Successfully loaded {len(ENDPOINTS)} endpoints from registry"
             )
@@ -65,7 +72,7 @@ def eval_environment(
             f"Error details: {str(e)}"
         )
         logger.debug("Using default empty endpoints registry")
-        ENDPOINTS = {}
+        ENDPOINTS: Endpoints = {}
 
     if model in ENDPOINTS:
         api_key_var = ENDPOINTS[model]["key"]
