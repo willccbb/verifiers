@@ -286,7 +286,7 @@ See the full [docs](https://verifiers.readthedocs.io/en/latest/) for more inform
 
 Verifiers warmly welcomes community contributions! Please open an issue or PR if you encounter bugs or other pain points during your development, or start a discussion for more open-ended questions.
 
-Please note that the core `verifiers/` library is intended to be a relatively lightweight set of reusable components rather than an exhaustive catalog of RL environments. For *applications* of `verifiers` (e.g. "an Environment for XYZ task"), you are welcome to submit a PR for a self-contained module that lives within `environments/` if it serves as a canonical example of a new pattern. Stay tuned for more info shortly about our plans for supporting community Environment contributions 🙂
+Please note that the core `verifiers/` library is intended to be a relatively lightweight set of reusable components rather than an exhaustive catalog of RL environments. Consider sharing any environments you create to the [Environments Hub](https://app.primeintellect.ai/dashboard/environments) 🙂
 
 ## Citation
 
