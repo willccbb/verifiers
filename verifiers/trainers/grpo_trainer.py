@@ -1175,6 +1175,8 @@ class GRPOTrainer(Trainer):
             # Now retrieve the batch we need for this step
             if self.accelerator.is_main_process:
                 # Get batch result
+                
+                # TODO : toute le get vllm et préparation sert à arriver ici, est-ce que les grid et pixel values sont nécessaires ? je pense que oui pour la backward
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                 processed_results = batch_result.processed_results
 
