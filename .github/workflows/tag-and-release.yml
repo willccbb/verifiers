@@ -92,7 +92,7 @@ jobs:
       - name: Publish to PyPI
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: uv publish --token "$PYPI_TOKEN" -- --yes
+        run: uv publish --token "$PYPI_TOKEN" 
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
