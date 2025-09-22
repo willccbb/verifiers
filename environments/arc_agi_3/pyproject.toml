@@ -2,13 +2,13 @@
 name = "arc-agi-3"
 description = "ARC-AGI-3 environment using the official agent API"
 tags = ["train", "eval"]
-version = "0.1.1"
+version = "0.1.2"
 requires-python = ">=3.12"
 dependencies = [
     "arc-agi-3-agents",
     "httpx>=0.27",
     "pydantic>=2.7",
-    "verifiers>=0.1.3.post0",
+    "verifiers>=0.1.4",
 ]
 
 [build-system]

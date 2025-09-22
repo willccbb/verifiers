@@ -59,16 +59,16 @@ jobs:
 
           VERSION="${TAG#v}"
           FILE_VERSION=$(python - <<'PY'
-from pathlib import Path
-import re
-import sys
+          from pathlib import Path
+          import re
+          import sys
 
-match = re.search(r'__version__\s*=\s*"([^"]+)"', Path("verifiers/__init__.py").read_text())
-if not match:
-    sys.exit("Could not find __version__ in verifiers/__init__.py")
-print(match.group(1))
-PY
-)
+          match = re.search(r'__version__\s*=\s*"([^"]+)"', Path("verifiers/__init__.py").read_text())
+          if not match:
+              sys.exit("Could not find __version__ in verifiers/__init__.py")
+          print(match.group(1))
+          PY
+          )
 
           if [ "$FILE_VERSION" != "$VERSION" ]; then
             echo "Version mismatch: tag requests '$VERSION' but verifiers/__init__.py defines '$FILE_VERSION'" >&2
@@ -98,5 +98,6 @@ PY
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
-          files: dist/*
+          files: |
+            dist/*
           generate_release_notes: true
