@@ -2,7 +2,7 @@
 
 import pytest
 
-from verifiers import Rubric, RubricGroup
+from verifiers import Rubric, RubricGroup, XMLParser
 
 
 class TestRubricGroup:
@@ -390,3 +390,29 @@ class TestRubricGroup:
         assert isinstance(group, Rubric)
         assert hasattr(group, "logger")
         assert hasattr(group, "parser")
+
+    @pytest.mark.asyncio
+    async def test_rubric_group_score_rollout_uses_rubric_parser(self):
+        """Ensure individual rubric parsers are respected during score_rollout."""
+
+        recorded_parsers: list[XMLParser] = []
+
+        def reward_func(completion, parser, answer, **_):
+            recorded_parsers.append(parser)
+            guess = parser.parse_answer(completion) or ""
+            return 1.0 if guess == answer else 0.0
+
+        xml_parser = XMLParser(fields=["answer"], answer_field="answer")
+        rubric = Rubric(funcs=[reward_func], parser=xml_parser)
+        group = RubricGroup(rubrics=[rubric])
+
+        prompt = [{"role": "user", "content": "What is 6 * 7?"}]
+        completion = [
+            {"role": "assistant", "content": "Let me think\n<answer>42</answer>"}
+        ]
+        state = {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+
+        score = await group.score_rollout(prompt, completion, "42", state)
+
+        assert score.reward == 1.0
+        assert recorded_parsers == [xml_parser]
