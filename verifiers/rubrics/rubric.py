@@ -100,19 +100,18 @@ class Rubric:
         )
         common.update(self.class_objects)
         merged = {**common, **kwargs}
+        
         if any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
-            try:
-                ans = float(await maybe_await(func, **merged))
-            except Exception as e:
-                self.logger.error(f"Error calling reward function {func.__name__}: {e}")
-                ans = 0.0
+            filtered_kwargs = {k: v for k, v in merged.items() if k in sig.parameters}
         else:
-            allowed = {k: v for k, v in merged.items() if k in sig.parameters}
-            try:
-                ans = float(await maybe_await(func, **allowed))
-            except Exception as e:
-                self.logger.error(f"Error calling reward function {func.__name__}: {e}")
-                ans = 0.0
+            filtered_kwargs = merged
+ 
+        try:
+            ans = float(await maybe_await(func, **filtered_kwargs))
+        except Exception as e:
+            self.logger.error(f"Error calling reward function {func.__name__}: {e}")
+            ans = 0.0
+
         return ans
 
     async def score_rollout_with_semaphore(
