@@ -92,6 +92,9 @@ class MultiTurnEnv(Environment):
                     message_type=self.message_type,
                 )
                 state["responses"].append(response)
+            # In case of requesting a too long completion, e.g from a too-long
+            # environment response, we rewrite the error to a truncated completion
+            # prime-rl will then decide how to mask or penalize this
             except BadRequestError as e:
                 if len(state["responses"]) == 0:
                     raise e
