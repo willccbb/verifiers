@@ -1124,7 +1124,6 @@ class GRPOTrainer(Trainer):
                     break
                 batch_offset = batch_id - batch_id_to_retrieve
                 
-                # En gros ici il faut recup les images je pense si elles existe
                 all_prompts, all_answers, all_tasks, all_infos = (
                     self._gather_batch_data(batch_offset)
                 )
@@ -1140,9 +1139,6 @@ class GRPOTrainer(Trainer):
                     "task": all_tasks,
                     "info": all_infos,
                 }
-                
-                # if len(all_images) > 0 :
-                #     env_inputs["image"] = all_images
                     
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
@@ -1190,6 +1186,8 @@ class GRPOTrainer(Trainer):
                     "all_reward_dict": batch_result.all_reward_dict,
                     "completions": batch_result.completions,
                     "prompts": batch_result.prompts,
+                    "pixel_values":processed_results.get("pixel_values"),
+                    "image_grid_thw":processed_results.get("image_grid_thw"),
                 }
             else:
                 broadcast_data = None
@@ -1219,6 +1217,8 @@ class GRPOTrainer(Trainer):
             # Now create tensors only for this process's slice
             input_ids_list = []
             attention_mask_list = []
+            pixel_values_list = []
+            image_grid_list = []
 
             for i in range(process_slice.start, process_slice.stop):
                 input_ids_list.append(
@@ -1235,6 +1235,18 @@ class GRPOTrainer(Trainer):
                         device=self.accelerator.device,
                     )
                 )
+                pixel_values_list.append(
+                    torch.tensor(
+                        broadcast_data["pixel_values"][i],
+                        device=self.accelerator.device,
+                    )
+                )
+                image_grid_list.append(
+                    torch.tensor(
+                        broadcast_data["image_grid"][i],
+                        device=self.accelerator.device,
+                    )
+                )
 
             input_ids = pad(
                 input_ids_list,
@@ -1242,6 +1254,9 @@ class GRPOTrainer(Trainer):
                 padding_side="right",
             )  # type: ignore
             attention_mask = pad(attention_mask_list, padding_side="right")  # type: ignore
+
+            pixel_values = torch.stack(pixel_values_list, dim=0)
+            image_grid = torch.stack(image_grid_list, dim=0)
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
@@ -1280,6 +1295,8 @@ class GRPOTrainer(Trainer):
                 "attention_mask": attention_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
+                "pixel_values": pixel_values,
+                "image_grid": image_grid
             }
 
             # Shuffle and split for gradient accumulation
