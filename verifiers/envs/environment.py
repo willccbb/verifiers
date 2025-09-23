@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal
 
+import torch
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 
