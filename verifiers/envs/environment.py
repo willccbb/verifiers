@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import TYPE_CHECKING, Literal
 
-import torch
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 
@@ -692,8 +691,14 @@ class Environment(ABC):
 
         cols = ["prompt", "completion", "answer", "task", "reward", "average_reward"]
 
-        rewards = torch.tensor(results.reward).reshape(-1, rollouts_per_example).float().mean(dim=1).tolist()
-        average_reward = [reward for reward in rewards for _ in range(rollouts_per_example)]
+        if rollouts_per_example > 1:
+            average_reward = []
+            for i in range(0, len(results.reward), rollouts_per_example):
+                chunk = results.reward[i:i + rollouts_per_example]
+                avg = sum(chunk) / len(chunk)
+                average_reward.extend([avg] * rollouts_per_example)
+        else:
+            average_reward = results.reward
 
         results_dict = {
             "prompt": results.prompt,
