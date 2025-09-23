@@ -987,7 +987,7 @@ class Environment(ABC):
             prompt_ids=all_prompt_ids,
             prompt_mask=all_prompt_masks,
             image_grid = all_prompt_image_grid,
-            pixel_value= all_prompt_pixel_value,
+            pixel_values= all_prompt_pixel_value,
             completion_ids=all_completion_ids,
             completion_mask=all_completion_masks,
             completion_logprobs=all_completion_logprobs,

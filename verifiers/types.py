@@ -89,7 +89,7 @@ class ProcessedOutputs(BaseModel):
     prompt_ids: list[list[int]]
     prompt_mask: list[list[int]]
     image_grid: list[list[int]]
-    pixel_values: list[list[int]]
+    pixel_values: list[list[float]]
     completion_ids: list[list[int]]
     completion_mask: list[list[int]]
     completion_logprobs: list[list[float]]
