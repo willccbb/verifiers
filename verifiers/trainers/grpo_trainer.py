@@ -236,7 +236,7 @@ def unsplit_pixel_values_by_grid(batch: dict[str, Union[torch.Tensor, list[torch
     Opposite of `split_pixel_values_by_grid`. Merges a list of tensors in `batch["pixel_values"]`
     back into a single tensor along the first dimension.
     """
-    pixel_values = batch.get("pixel_values")
+    pixel_values = batch.pixel_values
 
     if isinstance(pixel_values, list):
         merged = torch.cat(pixel_values, dim=0)
@@ -1186,8 +1186,8 @@ class GRPOTrainer(Trainer):
                     "all_reward_dict": batch_result.all_reward_dict,
                     "completions": batch_result.completions,
                     "prompts": batch_result.prompts,
-                    "pixel_values":processed_results.get("pixel_values"),
-                    "image_grid_thw":processed_results.get("image_grid_thw"),
+                    "pixel_values":processed_results.pixel_values,
+                    "image_grid_thw":processed_results.image_grid_thw,
                 }
             else:
                 broadcast_data = None
@@ -1243,20 +1243,20 @@ class GRPOTrainer(Trainer):
                 )
                 image_grid_list.append(
                     torch.tensor(
-                        broadcast_data["image_grid"][i],
+                        broadcast_data["image_grid_thw"][i],
                         device=self.accelerator.device,
                     )
                 )
 
             input_ids = pad(
                 input_ids_list,
-                padding_value=self.processing_class.pad_token_id,  # type: ignore
+                padding_value=self.pad_token_id,  # type: ignore
                 padding_side="right",
             )  # type: ignore
             attention_mask = pad(attention_mask_list, padding_side="right")  # type: ignore
 
             pixel_values = torch.stack(pixel_values_list, dim=0)
-            image_grid = torch.stack(image_grid_list, dim=0)
+            image_grid_thw = torch.stack(image_grid_list, dim=0)
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
@@ -1296,7 +1296,7 @@ class GRPOTrainer(Trainer):
                 "old_per_token_logps": None,
                 "advantages": advantages,
                 "pixel_values": pixel_values,
-                "image_grid": image_grid
+                "image_grid_thw": image_grid_thw
             }
 
             # Shuffle and split for gradient accumulation
@@ -1350,8 +1350,8 @@ class GRPOTrainer(Trainer):
             attention_mask,
             logits_to_keep,
             compute_entropy=self.top_entropy_quantile < 1.0,
-            pixel_values=inputs.get("pixel_values"),
-            image_grid_thw=inputs.get("image_grid_thw"),
+            pixel_values=inputs.pixel_values,
+            image_grid_thw=inputs.image_grid_thw,
         )
         # Compute the loss
         advantages = inputs["advantages"]
@@ -1379,12 +1379,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
+                        self.ref_model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.pixel_values,image_grid_thw=inputs.image_grid_thw,
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter():  # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
+                            self.model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.pixel_values,image_grid_thw=inputs.image_grid_thw,
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps)
@@ -1754,7 +1754,7 @@ class GRPOTrainer(Trainer):
         term_lengths = []
         for comp_ids, comp_mask in zip(all_completion_ids, all_completion_mask):
             has_eos = any(
-                token == self.processing_class.eos_token_id  # type: ignore
+                token == self.eos_token_id  # type: ignore
                 for token, mask in zip(comp_ids, comp_mask)
                 if mask
             )
