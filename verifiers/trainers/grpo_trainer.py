@@ -1047,14 +1047,21 @@ class GRPOTrainer(Trainer):
         for x in batch:
             prompt = x["prompt"]
             for message in prompt:
-                for content in message.get("content", []):
-                    if content.get("type") == "image" :
-                        img_url = pil_to_base64_url(x["image"])
-                        content.clear()
-                        content.update({
-                            "type": "image_url",
-                            "image_url": {"url":img_url}
-                        })
+                content = message.get("content", [])
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "image":
+                            img_url = pil_to_base64_url(x["image"])
+                            c.clear()
+                            c.update({
+                                "type": "image_url",
+                                "image_url": {"url": img_url}
+                            })
+                elif isinstance(content, str):
+                    pass
+                else:
+                    print("Unknown content type:", type(content))
+    
             prompts.append(prompt)
     
         answers = [x["answer"] for x in batch]
