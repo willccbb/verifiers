@@ -825,7 +825,6 @@ class GRPOTrainer(Trainer):
         attention_mask,
         logits_to_keep,
         batch_size=None,
-        compute_entropy=False,
         pixel_values=None,
         image_grid_thw=None,
     ) -> torch.Tensor:
@@ -1349,9 +1348,8 @@ class GRPOTrainer(Trainer):
             input_ids,
             attention_mask,
             logits_to_keep,
-            compute_entropy=self.top_entropy_quantile < 1.0,
-            pixel_values=inputs.pixel_values,
-            image_grid_thw=inputs.image_grid_thw,
+            pixel_values=inputs.get("pixel_values"),
+            image_grid_thw=inputs.get("image_grid_thw"),
         )
         # Compute the loss
         advantages = inputs["advantages"]
@@ -1379,12 +1377,12 @@ class GRPOTrainer(Trainer):
             with torch.no_grad():
                 if self.ref_model is not None:
                     ref_per_token_logps = self._get_per_token_logps(
-                        self.ref_model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.pixel_values,image_grid_thw=inputs.image_grid_thw,
+                        self.ref_model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
                     )
                 else:
                     with self.accelerator.unwrap_model(self.model).disable_adapter():  # type: ignore
                         ref_per_token_logps = self._get_per_token_logps(
-                            self.model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.pixel_values,image_grid_thw=inputs.image_grid_thw,
+                            self.model, input_ids, attention_mask, logits_to_keep, pixel_values=inputs.get("pixel_values"),image_grid_thw=inputs.get("image_grid_thw"),
                         )
             per_token_kl = (
                 torch.exp(ref_per_token_logps - per_token_logps)
