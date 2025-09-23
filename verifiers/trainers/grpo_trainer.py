@@ -5,6 +5,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Sized, Union
+import inspect
 
 import datasets
 import numpy as np
@@ -298,6 +299,12 @@ class GRPOTrainer(Trainer):
     ):
         self.logger = logging.getLogger(__name__)
 
+        self.model_kwarg_keys = (
+            inspect.signature(model.forward).parameters.keys()
+            if not hasattr(model, "get_base_model")
+            else inspect.signature(model.get_base_model().forward).parameters.keys()
+        )
+        
         # Models
         if peft_config is not None:
             model = get_peft_model(model, peft_config)  # type: ignore
@@ -314,7 +321,7 @@ class GRPOTrainer(Trainer):
 
         # Suppress irrelevant warning
         model.warnings_issued["estimate_tokens"] = True
-
+        
         # Handle pad token for processors or tokenizers
         if isinstance(processing_class, ProcessorMixin):
             tokenizer = processing_class.tokenizer
@@ -835,18 +842,19 @@ class GRPOTrainer(Trainer):
         for i in range(0, input_ids.size(0), batch_size):
             input_ids_batch = input_ids[i : i + batch_size]
             attention_mask_batch = attention_mask[i : i + batch_size]
+            
             # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
             model_inputs = {"input_ids": input_ids_batch, "attention_mask": attention_mask_batch}
             
             
             # TODO : check if needed there or if already robust to VLM
-            # if image_grid_thw is not None and pixel_values is not None:
-            #     model_inputs["image_grid_thw"] = image_grid_thw[start : start + batch_size]
-            #     start_pixel_idx = image_grid_thw[:start].prod(-1).sum().item()
-            #     end_pixel_idx = image_grid_thw[: start + batch_size].prod(-1).sum().item()
-            #     model_inputs["pixel_values"] = pixel_values[start_pixel_idx:end_pixel_idx]
-            # elif pixel_values is not None:
-            #     model_inputs["pixel_values"] = pixel_values[start : start + batch_size]
+            if image_grid_thw is not None and pixel_values is not None:
+                model_inputs["image_grid_thw"] = image_grid_thw[i : i + batch_size]
+                start_pixel_idx = image_grid_thw[:i].prod(-1).sum().item()
+                end_pixel_idx = image_grid_thw[: i + batch_size].prod(-1).sum().item()
+                model_inputs["pixel_values"] = pixel_values[start_pixel_idx:end_pixel_idx]
+            elif pixel_values is not None:
+                model_inputs["pixel_values"] = pixel_values[i : i + batch_size]
 
             # Only add logits_to_keep if the model supports it
             if "logits_to_keep" in self.model_kwarg_keys:
