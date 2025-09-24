@@ -1234,7 +1234,7 @@ class GRPOTrainer(Trainer):
                         device=self.accelerator.device,
                     )
                 )
-                pixel_values_list.append(
+                pixel_values_list.append( # TODO : ici je pense qu'il faut gérer si on stack ensuite sur la première dimension ou pas
                     torch.tensor(
                         broadcast_data["pixel_values"][i],
                         device=self.accelerator.device,

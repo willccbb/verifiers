@@ -86,7 +86,7 @@ def encode_chat_with_processor(
             return_tensors="pt",
             add_special_tokens=add_special_tokens,
         )
-        return inputs["input_ids"][0].tolist(), inputs["image_grid_thw"][0].tolist(), inputs["pixel_values"][0].tolist()
+        return inputs["input_ids"], inputs["image_grid_thw"], inputs["pixel_values"]
 
     else:
         raise TypeError(f"Unsupported processing_class: {type(processing_class)}")
