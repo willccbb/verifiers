@@ -130,7 +130,12 @@ class RepeatSampler(Sampler):
                         yield index
 
     def __len__(self) -> int:
-        return (self.num_samples // self.batch_size) * self.batch_size * self.mini_repeat_count * self.repeat_count
+        return (
+            (self.num_samples // self.batch_size)
+            * self.batch_size
+            * self.mini_repeat_count
+            * self.repeat_count
+        )
 
 
 # torch.nanstd doesn't exist, so we define it here
@@ -412,7 +417,7 @@ class GRPOTrainer(Trainer):
             train_dataset = train_dataset.filter(
                 filter_by_prompt_length,
                 num_proc=self.max_data_workers,
-                fn_kwargs={"processing_class": processing_class}
+                fn_kwargs={"processing_class": processing_class},
             )
             filtered_size = len(train_dataset)
             if filtered_size < original_size:
@@ -1043,8 +1048,7 @@ class GRPOTrainer(Trainer):
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                 processed_results = batch_result.processed_results
 
-
-                original_rewards =  torch.tensor(
+                original_rewards = torch.tensor(
                     processed_results.rewards, device=self.accelerator.device
                 )
                 original_reward_dict = (
@@ -1053,33 +1057,53 @@ class GRPOTrainer(Trainer):
                     else {}
                 )
 
-
-                rewards_tensor = torch.tensor(processed_results.rewards, device=self.accelerator.device)
+                rewards_tensor = torch.tensor(
+                    processed_results.rewards, device=self.accelerator.device
+                )
                 num_groups = rewards_tensor.numel() // self.num_generations
-                top_n = int(min(self.rollout_filter_ratio*num_groups, num_groups))
+                top_n = int(min(self.rollout_filter_ratio * num_groups, num_groups))
 
                 if top_n == num_groups:
                     keep_mask_cpu = [True] * len(processed_results.rewards)
                 if top_n < num_groups:
-                    group_stds = rewards_tensor.view(num_groups, self.num_generations).std(dim=1)
+                    group_stds = rewards_tensor.view(
+                        num_groups, self.num_generations
+                    ).std(dim=1)
                     _, top_idx = torch.topk(group_stds, top_n)
-                    keep_mask = torch.zeros(num_groups, dtype=torch.bool, device=rewards_tensor.device)
+                    keep_mask = torch.zeros(
+                        num_groups, dtype=torch.bool, device=rewards_tensor.device
+                    )
                     keep_mask[top_idx] = True
                     keep_mask = keep_mask.repeat_interleave(self.num_generations)
                     keep_mask_cpu = keep_mask.cpu().tolist()
 
-
-                def _select(lst, mask): return [x for x, keep in zip(lst, mask) if keep]
+                def _select(lst, mask):
+                    return [x for x, keep in zip(lst, mask) if keep]
 
                 broadcast_data = {
-                    "prompt_ids":       _select(processed_results.prompt_ids, keep_mask_cpu),
-                    "prompt_mask":      _select(processed_results.prompt_mask, keep_mask_cpu),
-                    "completion_ids":   _select(processed_results.completion_ids, keep_mask_cpu),
-                    "completion_mask":  _select(processed_results.completion_mask, keep_mask_cpu),
-                    "rewards":          _select(processed_results.rewards, keep_mask_cpu),
-                    "all_reward_dict":  {k: _select(v, keep_mask_cpu) for k, v in (batch_result.all_reward_dict or {}).items()} if batch_result.all_reward_dict else {},
-                    "completions":      _select(batch_result.completions, keep_mask_cpu) if batch_result.completions else [],
-                    "prompts":          _select(batch_result.prompts, keep_mask_cpu) if batch_result.prompts else [],
+                    "prompt_ids": _select(processed_results.prompt_ids, keep_mask_cpu),
+                    "prompt_mask": _select(
+                        processed_results.prompt_mask, keep_mask_cpu
+                    ),
+                    "completion_ids": _select(
+                        processed_results.completion_ids, keep_mask_cpu
+                    ),
+                    "completion_mask": _select(
+                        processed_results.completion_mask, keep_mask_cpu
+                    ),
+                    "rewards": _select(processed_results.rewards, keep_mask_cpu),
+                    "all_reward_dict": {
+                        k: _select(v, keep_mask_cpu)
+                        for k, v in (batch_result.all_reward_dict or {}).items()
+                    }
+                    if batch_result.all_reward_dict
+                    else {},
+                    "completions": _select(batch_result.completions, keep_mask_cpu)
+                    if batch_result.completions
+                    else [],
+                    "prompts": _select(batch_result.prompts, keep_mask_cpu)
+                    if batch_result.prompts
+                    else [],
                 }
 
             else:
@@ -1091,11 +1115,13 @@ class GRPOTrainer(Trainer):
             broadcast_object_list(broadcast_list, from_process=0)
             broadcast_data = broadcast_list[0]
             self.accelerator.wait_for_everyone()
-            
+
             # Each process takes its slice
             process_slice = slice(
-                self.accelerator.process_index * int(len(inputs) * self.rollout_filter_ratio),
-                (self.accelerator.process_index + 1) * int(len(inputs) * self.rollout_filter_ratio),
+                self.accelerator.process_index
+                * int(len(inputs) * self.rollout_filter_ratio),
+                (self.accelerator.process_index + 1)
+                * int(len(inputs) * self.rollout_filter_ratio),
             )
 
             # Create rewards tensor and compute advantages using full batch
@@ -1529,8 +1555,6 @@ class GRPOTrainer(Trainer):
             self._textual_logs["completion"].clear()
             for key in self._textual_logs["rewards"]:
                 self._textual_logs["rewards"][key].clear()
-
-
 
     def _log_filtered_reward_metrics_primary(
         self,

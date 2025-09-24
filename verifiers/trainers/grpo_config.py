@@ -345,7 +345,6 @@ class GRPOConfig(TrainingArguments):
         },
     )
 
-
     def __post_init__(self):
         super().__post_init__()
 
@@ -404,13 +403,14 @@ class GRPOConfig(TrainingArguments):
                 f"the number of generations are: {possible_values}."
             )
 
-
         if not (0 < self.rollout_filter_ratio <= 1.0):
             raise ValueError(
                 f"rollout_filter_ratio must be in (0, 1], got {self.rollout_filter_ratio}."
             )
 
-        groups = self.generation_batch_size // self.num_generations # prompts per step (since each prompt has G generations)
+        groups = (
+            self.generation_batch_size // self.num_generations
+        )  # prompts per step (since each prompt has G generations)
 
         top_n = int(self.rollout_filter_ratio * groups)
 
@@ -441,7 +441,6 @@ class GRPOConfig(TrainingArguments):
                 "Per-process kept batch size must be divisible by gradient_accumulation_steps. "
                 f"Got K_per_proc={K_per_proc}, gradient_accumulation_steps={self.gradient_accumulation_steps}. "
             )
-
 
         if self.eval_strategy != "no":
             global_eval_batch_size = self.per_device_eval_batch_size * num_processes
