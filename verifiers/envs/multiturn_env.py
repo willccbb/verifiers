@@ -1,3 +1,4 @@
+import time
 from abc import abstractmethod
 
 from openai import AsyncOpenAI
@@ -53,6 +54,7 @@ class MultiTurnEnv(Environment):
         info = info or {}
         is_completed = False
         state = {
+            "id": 0,  # TODO: add id
             "prompt": prompt,
             "completion": [],
             "answer": answer,
@@ -60,7 +62,13 @@ class MultiTurnEnv(Environment):
             "info": info,
             "responses": [],
             "turn": 0,
+            "timing": {
+                "generation_ms": 0.0,
+                "scoring_ms": 0.0,
+                "total_ms": 0.0,
+            },
         }
+        start_time = time.time()
         state = await maybe_await(self.setup_state, state, **kwargs)
         if self.message_type == "chat":
             assert isinstance(prompt, list)
@@ -111,6 +119,9 @@ class MultiTurnEnv(Environment):
                 state["turn"] >= self.max_turns and self.max_turns > 0
             ):
                 is_completed = True
+                end_time = time.time()
+                state["timing"]["generation_ms"] = (end_time - start_time) * 1000
+                state["timing"]["total_ms"] = (end_time - start_time) * 1000
             else:
                 env_msgs, state = await maybe_await(
                     self.env_response, rollout, state, **kwargs
