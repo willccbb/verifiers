@@ -15,14 +15,14 @@ Verifiers: Environments for LLM Reinforcement Learning
 ---
 
 <p align="center">
-  <a href="https://github.com/willccbb/verifiers/actions/workflows/style.yml">
-    <img src="https://github.com/willccbb/verifiers/actions/workflows/style.yml/badge.svg" alt="Style" />
+  <a href="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/style.yml">
+    <img src="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/style.yml/badge.svg" alt="Style" />
   </a>
-  <a href="https://github.com/willccbb/verifiers/actions/workflows/test.yml">
-    <img src="https://github.com/willccbb/verifiers/actions/workflows/test.yml/badge.svg" alt="Test" />
+  <a href="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/test.yml">
+    <img src="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/test.yml/badge.svg" alt="Test" />
   </a>
-  <a href="https://github.com/willccbb/verifiers/actions/workflows/publish-environments.yml">
-    <img src="https://github.com/willccbb/verifiers/actions/workflows/publish-environments.yml/badge.svg" alt="Envs" />
+  <a href="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/publish-environments.yml">
+    <img src="https://github.com/PrimeIntellect-ai/verifiers/actions/workflows/publish-environments.yml/badge.svg" alt="Envs" />
   </a>
 </p>
 
@@ -57,14 +57,14 @@ uv add 'verifiers[train]' && uv pip install flash-attn --no-build-isolation
 
 To use the latest `main` branch, do:
 ```bash
-uv add verifiers @ git+https://github.com/willccbb/verifiers.git
+uv add verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git
 ```
 
 To use with `prime-rl`, see [here](https://github.com/PrimeIntellect-ai/prime-rl).
 
 To install `verifiers` from source for core library development, do:
 ```bash
-git clone https://github.com/willccbb/verifiers.git
+git clone https://github.com/PrimeIntellect-ai/verifiers.git
 cd verifiers
 
 # for CPU-only dev:
@@ -118,9 +118,9 @@ The core elements of Environments are:
 - Rubrics: an encapsulation for one or more reward functions
 - Parsers: optional; an encapsulation for reusable parsing logic
 
-We support both `/v1/chat/completions`-style and `/v1/completions`-style inference via OpenAI clients, though we generally recommend `/v1/chat/completions`-style inference for the vast majority of applications. Both the included `GRPOTrainer` as well as `prime-rl` support the full set of [SamplingParams](https://docs.vllm.ai/en/v0.6.0/dev/sampling_params.html) exposed by vLLM (via their OpenAI-compatible [server](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) interface), and leveraging this will often be the appropriate way to implement rollout strategies requiring finer-grained control, such as interrupting and resuming generations for interleaved tool use, or enforcing reasoning budgets.
+We support both `/v1/chat/completions`-style and `/v1/completions`-style inference via OpenAI clients, though we generally recommend `/v1/chat/completions`-style inference for the vast majority of applications. Both the included `GRPOTrainer` as well as `prime-rl` support the full set of [SamplingParams](https://docs.vllm.ai/en/stable/api/vllm/sampling_params.html#vllm.sampling_params.SamplingParams) exposed by vLLM (via their OpenAI-compatible [server](https://docs.vllm.ai/en/stable/serving/openai_compatible_server.html) interface), and leveraging this will often be the appropriate way to implement rollout strategies requiring finer-grained control, such as interrupting and resuming generations for interleaved tool use, or enforcing reasoning budgets.
 
-The primary constraint we impose on rollout logic is that token sequences must be *increasing*, i.e. once a token has been added to a model's context in a rollout, it must remain as the rollout progresses. Note that this causes issues with some popular reasoning models such as the Qwen3 and DeepSeek-R1-Distill series; see [Footguns](#footguns) for guidance on adapting these models to support multi-turn rollouts.  
+The primary constraint we impose on rollout logic is that token sequences must be *increasing*, i.e. once a token has been added to a model's context in a rollout, it must remain as the rollout progresses. Note that this causes issues with some popular reasoning models such as the Qwen3 and DeepSeek-R1-Distill series; see [Troubleshooting](https://verifiers.readthedocs.io/en/latest/training.html#common-issues) for guidance on adapting these models to support multi-turn rollouts.  
 
 ### SingleTurnEnv
 
@@ -270,7 +270,7 @@ uv run rl \
 - Ensure your `wandb` and `huggingface-cli` logins are set up (or set `report_to=None` in `training_args`). You should also have something set as your `OPENAI_API_KEY` in your environment (can be a dummy key for vLLM). 
 - If using high max concurrency, increase the number of allowed open sockets (e.g. `ulimit -n 4096`)
 - On some setups, inter-GPU communication can [hang](https://github.com/huggingface/trl/issues/2923) or crash during vLLM weight syncing. This can usually be alleviated by setting (or unsetting) `NCCL_P2P_DISABLE=1` in your environment (or potentially `NCCL_CUMEM_ENABLE=1`). Try this as your first step if you experience NCCL-related issues.
-- If problems persist, please open an [issue](https://github.com/willccbb/verifiers/issues).
+- If problems persist, please open an [issue](https://github.com/PrimeIntellect-ai/verifiers/issues).
 
 ### Resource Requirements
 `GRPOTrainer` is optimized for setups with at least 2 GPUs, scaling up to multiple nodes. 2-GPU setups with sufficient memory to enable small-scale experimentation can be [rented](https://app.primeintellect.ai/dashboard/create-cluster?image=ubuntu_22_cuda_12) for <$1/hr.

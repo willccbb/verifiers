@@ -32,7 +32,7 @@ source .venv/bin/activate
 
 For PRs to `verifiers` core (e.g. `verifiers/verifiers/`):
 ```bash
-git clone https://github.com/willccbb/verifiers.git
+git clone https://github.com/PrimeIntellect-ai/verifiers.git
 cd verifiers
 
 # CPU-only development:
