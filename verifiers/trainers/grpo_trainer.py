@@ -846,7 +846,7 @@ class GRPOTrainer(Trainer):
             # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
             model_inputs = {"input_ids": input_ids_batch, "attention_mask": attention_mask_batch}
             
-            
+            print("_get_per_token_logps",pixel_values.shape)
             # TODO : check if needed there or if already robust to VLM
             if image_grid_thw is not None and pixel_values is not None:
                 model_inputs["image_grid_thw"] = image_grid_thw[i : i + batch_size]
