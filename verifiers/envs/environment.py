@@ -54,6 +54,8 @@ class Environment(ABC):
         message_type: MessageType = "chat",
         oai_tools: list[ChatCompletionToolParam] | None = None,
         max_workers: int = 512,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ):
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
@@ -61,6 +63,8 @@ class Environment(ABC):
         self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
         self.oai_tools: list[ChatCompletionToolParam] | None = oai_tools
+        self.save_intermediate = save_intermediate
+        self.interleave_rewards = interleave_rewards
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         self.parser = parser or Parser()
@@ -320,17 +324,24 @@ class Environment(ABC):
         infos: list[Info],
         sampling_args: SamplingArgs | None = None,
         max_concurrent: int = -1,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> list[tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
+
+        Args:
+            save_intermediate: If True, save intermediate results during rollout
+            interleave_rewards: If True, compute rewards after each rollout instead of batching
         """
         from tqdm.asyncio import tqdm_asyncio
 
+        results: list[tuple[Messages, State]] = []
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
-            rollout_tasks = [
-                self.run_rollout_with_semaphore(
+            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+                result = await self.run_rollout_with_semaphore(
                     semaphore,
                     client,
                     model,
@@ -341,18 +352,77 @@ class Environment(ABC):
                     sampling_args,
                     **kwargs,
                 )
-                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-            ]
+                results.append(result)
+                
+                if save_intermediate:
+                    # Save intermediate results
+                    intermediate_results = GenerateOutputs(
+                        prompt=[prompt],
+                        answer=[answer],
+                        task=[task],
+                        info=[info],
+                        completion=[result[0]],
+                        state=[result[1]],
+                        reward=[],
+                        metrics={},
+                    )
+                    
+                    if interleave_rewards:
+                        # Compute rewards for this single result
+                        rollout_scores = await self.rubric.score_rollouts(
+                            prompts=[prompt],
+                            completions=[result[0]],
+                            answers=[answer],
+                            states=[result[1]],
+                            tasks=[task],
+                            infos=[info],
+                            max_concurrent=1,
+                            apply_weights=True,
+                        )
+                        intermediate_results.reward = rollout_scores.reward
+                        intermediate_results.metrics = rollout_scores.metrics
+                    
+                    # Save intermediate results (you can customize this part)
+                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
         else:
-            rollout_tasks = [
-                self.rollout(
+            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+                result = await self.rollout(
                     client, model, prompt, answer, task, info, sampling_args, **kwargs
                 )
-                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-            ]
-        return await tqdm_asyncio.gather(
-            *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
-        )
+                results.append(result)
+                
+                if save_intermediate:
+                    # Save intermediate results
+                    intermediate_results = GenerateOutputs(
+                        prompt=[prompt],
+                        answer=[answer],
+                        task=[task],
+                        info=[info],
+                        completion=[result[0]],
+                        state=[result[1]],
+                        reward=[],
+                        metrics={},
+                    )
+                    
+                    if interleave_rewards:
+                        # Compute rewards for this single result
+                        rollout_scores = await self.rubric.score_rollouts(
+                            prompts=[prompt],
+                            completions=[result[0]],
+                            answers=[answer],
+                            states=[result[1]],
+                            tasks=[task],
+                            infos=[info],
+                            max_concurrent=1,
+                            apply_weights=True,
+                        )
+                        intermediate_results.reward = rollout_scores.reward
+                        intermediate_results.metrics = rollout_scores.metrics
+                    
+                    # Save intermediate results (you can customize this part)
+                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
+        
+        return results
 
     async def a_generate(
         self,
@@ -362,6 +432,8 @@ class Environment(ABC):
         sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> GenerateOutputs:
         """
@@ -439,6 +511,8 @@ class Environment(ABC):
             model=model,
             sampling_args=gen_sampling_args,
             max_concurrent=max_concurrent,
+            save_intermediate=save_intermediate,
+            interleave_rewards=interleave_rewards,
             **kwargs,
         )
         results.completion = [rollout[0] for rollout in rollouts]
@@ -516,6 +590,8 @@ class Environment(ABC):
         rollouts_per_example: int = 1,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> GenerateOutputs:
         """
@@ -537,6 +613,8 @@ class Environment(ABC):
             sampling_args,
             score_rollouts,
             max_concurrent,
+            save_intermediate=save_intermediate,
+            interleave_rewards=interleave_rewards,
             **kwargs,
         )
         return results
