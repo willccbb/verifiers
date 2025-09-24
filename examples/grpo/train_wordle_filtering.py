@@ -49,7 +49,7 @@ def main(args):
         max_tokens=1024,
         per_device_train_batch_size=8,
         num_generations=8,
-        rollout_filter_ratio=1,
+        rollout_filter_ratio=0.5,
         gradient_accumulation_steps=8,
         gradient_checkpointing=True,
         mask_env_responses=True,
