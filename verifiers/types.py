@@ -1,4 +1,5 @@
 from typing import (
+    Annotated,
     Any,
     Awaitable,
     Callable,
@@ -25,7 +26,7 @@ from openai.types.shared_params import (  # noqa: F401
 from pydantic import BaseModel, Field, SkipValidation
 
 # typing aliases
-ChatMessage = ChatCompletionMessageParam
+ChatMessage = Annotated[ChatCompletionMessageParam, SkipValidation]
 MessageType = Literal["chat", "completion"]
 ModelResponse = Completion | ChatCompletion | None
 
