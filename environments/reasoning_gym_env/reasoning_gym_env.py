@@ -17,7 +17,6 @@ class ReasoningGymEnv(SingleTurnEnv):
         num_train_examples: int = 1000,
         num_eval_examples: int = 100,
         seed: int = 0,
-        **kwargs,
     ):
         self.gym = gym
         self.num_train_examples = num_train_examples
@@ -45,7 +44,6 @@ class ReasoningGymEnv(SingleTurnEnv):
             parser=parser,
             rubric=rubric,
             message_type="chat",
-            **kwargs,
         )
         self.parser = parser
         self.rubric = rubric
@@ -92,13 +90,11 @@ def load_environment(
     num_train_examples: int = 2000,
     num_eval_examples: int = 2000,
     seed: int = 0,
-    **kwargs,
 ):
     vf_env = ReasoningGymEnv(
         gym=gym,
         num_train_examples=num_train_examples,
         num_eval_examples=num_eval_examples,
         seed=seed,
-        **kwargs,
     )
     return vf_env
