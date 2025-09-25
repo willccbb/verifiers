@@ -12,7 +12,7 @@ This guide covers development setup, testing, and contributing to the verifiers 
 
 ```bash
 # Clone and install for development
-git clone https://github.com/willccbb/verifiers.git
+git clone https://github.com/PrimeIntellect-ai/verifiers.git
 cd verifiers
 uv sync --all-extras
 uv run pre-commit install
