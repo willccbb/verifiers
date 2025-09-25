@@ -42,6 +42,8 @@ class Environment(ABC):
 
     def __init__(
         self,
+        client: AsyncOpenAI | None = None,
+        model: str | None = None,
         dataset: Dataset | None = None,
         eval_dataset: Dataset | None = None,
         system_prompt: str | None = None,
@@ -52,11 +54,17 @@ class Environment(ABC):
         message_type: MessageType = "chat",
         oai_tools: list[ChatCompletionToolParam] | None = None,
         max_workers: int = 512,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ):
         self.logger = logging.getLogger(f"verifiers.envs.{self.__class__.__name__}")
+        self.client = client
+        self.model = model
         self.message_type: Literal["chat", "completion"] = message_type
         self.oai_tools: list[ChatCompletionToolParam] | None = oai_tools
+        self.save_intermediate = save_intermediate
+        self.interleave_rewards = interleave_rewards
         self.system_prompt = system_prompt
         self.few_shot = few_shot
         self.parser = parser or Parser()
@@ -128,8 +136,8 @@ class Environment(ABC):
         answer_key: str = "answer",
     ) -> Dataset:
         # skip if "prompt" already exists
-        if "id" not in dataset.column_names:
-            dataset = dataset.add_column("id", range(len(dataset)))  # type: ignore
+        if "prompt" in dataset.column_names:
+            return dataset
 
         # extract format_prompt as a standalone function to avoid capturing self
         def format_prompt_fn(prompt_str: str) -> list[ChatMessage]:
@@ -141,23 +149,19 @@ class Environment(ABC):
             messages.append({"role": "user", "content": prompt_str})
             return messages
 
-        if "prompt" not in dataset.column_names:
-            if answer_key == "answer":
-                dataset = dataset.map(
-                    lambda x: {
-                        "prompt": format_prompt_fn(x[question_key]),
-                    }
-                )
-            else:
-                dataset = dataset.map(
-                    lambda x: {
-                        "prompt": format_prompt_fn(x[question_key]),
-                        "answer": x[answer_key],
-                    }
-                )
-        assert "id" in dataset.column_names
-        assert "prompt" in dataset.column_names
-        return dataset
+        if answer_key == "answer":
+            return dataset.map(
+                lambda x: {
+                    "prompt": format_prompt_fn(x[question_key]),
+                }
+            )
+        else:
+            return dataset.map(
+                lambda x: {
+                    "prompt": format_prompt_fn(x[question_key]),
+                    "answer": x[answer_key],
+                }
+            )
 
     def get_dataset(self, n: int = -1, seed: int | None = None) -> Dataset:
         if self.dataset is None:
@@ -234,9 +238,7 @@ class Environment(ABC):
                         c = m.get("content")  # type: ignore[assignment]
                         if isinstance(c, list):
                             for p in c:
-                                if isinstance(p, dict) and str(
-                                    p.get("type", "")
-                                ).startswith("input_audio"):
+                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
                                     has_audio = True
                                     break
                         if has_audio:
@@ -244,10 +246,7 @@ class Environment(ABC):
                 except Exception:
                     has_audio = False
                 if has_audio and "modalities" not in clean_sampling_args:
-                    clean_sampling_args = {
-                        **clean_sampling_args,
-                        "modalities": ["text"],
-                    }
+                    clean_sampling_args = {**clean_sampling_args, "modalities": ["text"]}
 
                 if oai_tools:
                     response = await client.chat.completions.create(
@@ -325,17 +324,24 @@ class Environment(ABC):
         infos: list[Info],
         sampling_args: SamplingArgs | None = None,
         max_concurrent: int = -1,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> list[tuple[Messages, State]]:
         """
         Run rollouts for a given list of prompts and return the completions.
+
+        Args:
+            save_intermediate: If True, save intermediate results during rollout
+            interleave_rewards: If True, compute rewards after each rollout instead of batching
         """
         from tqdm.asyncio import tqdm_asyncio
 
+        results: list[tuple[Messages, State]] = []
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
-            rollout_tasks = [
-                self.run_rollout_with_semaphore(
+            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+                result = await self.run_rollout_with_semaphore(
                     semaphore,
                     client,
                     model,
@@ -346,30 +352,88 @@ class Environment(ABC):
                     sampling_args,
                     **kwargs,
                 )
-                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-            ]
+                results.append(result)
+                
+                if save_intermediate:
+                    # Save intermediate results
+                    intermediate_results = GenerateOutputs(
+                        prompt=[prompt],
+                        answer=[answer],
+                        task=[task],
+                        info=[info],
+                        completion=[result[0]],
+                        state=[result[1]],
+                        reward=[],
+                        metrics={},
+                    )
+                    
+                    if interleave_rewards:
+                        # Compute rewards for this single result
+                        rollout_scores = await self.rubric.score_rollouts(
+                            prompts=[prompt],
+                            completions=[result[0]],
+                            answers=[answer],
+                            states=[result[1]],
+                            tasks=[task],
+                            infos=[info],
+                            max_concurrent=1,
+                            apply_weights=True,
+                        )
+                        intermediate_results.reward = rollout_scores.reward
+                        intermediate_results.metrics = rollout_scores.metrics
+                    
+                    # Save intermediate results (you can customize this part)
+                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
         else:
-            rollout_tasks = [
-                self.rollout(
+            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+                result = await self.rollout(
                     client, model, prompt, answer, task, info, sampling_args, **kwargs
                 )
-                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
-            ]
-        return await tqdm_asyncio.gather(
-            *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
-        )
+                results.append(result)
+                
+                if save_intermediate:
+                    # Save intermediate results
+                    intermediate_results = GenerateOutputs(
+                        prompt=[prompt],
+                        answer=[answer],
+                        task=[task],
+                        info=[info],
+                        completion=[result[0]],
+                        state=[result[1]],
+                        reward=[],
+                        metrics={},
+                    )
+                    
+                    if interleave_rewards:
+                        # Compute rewards for this single result
+                        rollout_scores = await self.rubric.score_rollouts(
+                            prompts=[prompt],
+                            completions=[result[0]],
+                            answers=[answer],
+                            states=[result[1]],
+                            tasks=[task],
+                            infos=[info],
+                            max_concurrent=1,
+                            apply_weights=True,
+                        )
+                        intermediate_results.reward = rollout_scores.reward
+                        intermediate_results.metrics = rollout_scores.metrics
+                    
+                    # Save intermediate results (you can customize this part)
+                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
+        
+        return results
 
     async def a_generate(
         self,
         inputs: GenerateInputs | Dataset | dict,
-        client: AsyncOpenAI,
-        model: str,
+        client: AsyncOpenAI | None = None,
+        model: str | None = None,
         sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
-        max_concurrent_generation: int | None = None,
-        max_concurrent_scoring: int | None = None,
-        interleave_scoring: bool = True,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> GenerateOutputs:
         """
@@ -377,6 +441,13 @@ class Environment(ABC):
         """
         if isinstance(inputs, GenerateInputs):
             inputs = inputs.model_dump()
+        # use class-level client and model if not provided
+        if client is None:
+            assert self.client is not None
+            client = self.client
+        if model is None:
+            assert self.model is not None
+            model = self.model
         gen_sampling_args = deepcopy(self.sampling_args)
         if sampling_args is not None:
             gen_sampling_args.update(sampling_args)
@@ -406,11 +477,11 @@ class Environment(ABC):
                 "but reward functions requiring ground truth data may return 0.0. "
                 "Proceeding with empty values."
             )
-        if not results_dict.get("answer"):
+        if "answer" not in results_dict:
             results_dict["answer"] = [""] * len(results_dict["prompt"])
-        if not results_dict.get("task"):
+        if "task" not in results_dict:
             results_dict["task"] = ["default"] * len(results_dict["prompt"])
-        if not results_dict.get("info"):
+        if "info" not in results_dict:
             results_dict["info"] = [{}] * len(results_dict["prompt"])
         for i, info in enumerate(results_dict["info"]):
             if isinstance(info, str):
@@ -431,151 +502,44 @@ class Environment(ABC):
             reward=[],
             metrics={},
         )
-        n = len(results.prompt)
-
-        # Resolve concurrency knobs
-        gen_limit = max_concurrent_generation
-        score_limit = max_concurrent_scoring
-        if gen_limit is None:
-            gen_limit = max_concurrent
-        if score_limit is None:
-            score_limit = max_concurrent
-
-        if interleave_scoring and score_rollouts:
-            # Interleaved pipeline: generate and score per rollout with separate semaphores
-            results_completion: list[Messages] = [None] * n  # type: ignore[assignment]
-            results_state: list[State] = [None] * n  # type: ignore[assignment]
-            rewards: list[float] = [0.0] * n
-            # Pre-allocate metrics using known reward function names
-            reward_func_names = self.rubric.get_reward_func_names()
-            metrics: dict[str, list[float]] = {
-                name: [0.0] * n for name in reward_func_names
-            }
-
-            gen_semaphore = (
-                asyncio.Semaphore(gen_limit) if gen_limit and gen_limit > 0 else None
-            )
-            score_semaphore = (
-                asyncio.Semaphore(score_limit)
-                if score_limit and score_limit > 0
-                else None
-            )
-
-            async def run_one(i: int) -> None:
-                prompt_i = results.prompt[i]
-                answer_i = results.answer[i]
-                task_i = results.task[i]
-                info_i = results.info[i]
-                # Generation stage
-                if gen_semaphore is not None:
-                    async with gen_semaphore:
-                        comp_i, state_i = await self.rollout(
-                            client,
-                            model,
-                            prompt_i,
-                            answer_i,
-                            task_i,
-                            info_i,
-                            gen_sampling_args,
-                            **kwargs,
-                        )
-                else:
-                    comp_i, state_i = await self.rollout(
-                        client,
-                        model,
-                        prompt_i,
-                        answer_i,
-                        task_i,
-                        info_i,
-                        gen_sampling_args,
-                        **kwargs,
-                    )
-                results_completion[i] = comp_i
-                results_state[i] = state_i
-                # Scoring stage
-                if score_semaphore is not None:
-                    async with score_semaphore:
-                        rs = await self.rubric.score_rollout(
-                            prompt=prompt_i,
-                            completion=comp_i,
-                            answer=answer_i,
-                            state=state_i,
-                            task=task_i,
-                            info=info_i,
-                            **kwargs,
-                        )
-                else:
-                    rs = await self.rubric.score_rollout(
-                        prompt=prompt_i,
-                        completion=comp_i,
-                        answer=answer_i,
-                        state=state_i,
-                        task=task_i,
-                        info=info_i,
-                        **kwargs,
-                    )
-                rewards[i] = rs.reward
-                for k, v in rs.metrics.items():
-                    # Ensure key exists in case of EnvGroup/RubricGroup dynamics
-                    if k not in metrics:
-                        metrics[k] = [0.0] * n
-                    metrics[k][i] = v
-
-            tasks = [run_one(i) for i in range(n)]
-            from tqdm.asyncio import tqdm_asyncio
-
-            await tqdm_asyncio.gather(
-                *tasks, total=n, desc=f"Running {n} rollouts (interleaved)"
-            )
-
-            results.completion = results_completion  # type: ignore[assignment]
-            results.state = results_state  # type: ignore[assignment]
-            results.reward = rewards
-            results.metrics = metrics
-            return results
-        else:
-            # Non-interleaved: generate all then score all
-            rollouts = await self.run_rollouts(
+        rollouts = await self.run_rollouts(
+            prompts=results.prompt,
+            answers=results.answer,
+            tasks=results.task,
+            infos=results.info,
+            client=client,
+            model=model,
+            sampling_args=gen_sampling_args,
+            max_concurrent=max_concurrent,
+            save_intermediate=save_intermediate,
+            interleave_rewards=interleave_rewards,
+            **kwargs,
+        )
+        results.completion = [rollout[0] for rollout in rollouts]
+        results.state = [rollout[1] for rollout in rollouts]
+        if score_rollouts:
+            rollout_scores = await self.rubric.score_rollouts(
                 prompts=results.prompt,
+                completions=results.completion,
                 answers=results.answer,
+                states=results.state,
                 tasks=results.task,
                 infos=results.info,
-                client=client,
-                model=model,
-                sampling_args=gen_sampling_args,
-                max_concurrent=gen_limit if gen_limit is not None else max_concurrent,
-                **kwargs,
+                max_concurrent=max_concurrent,
+                apply_weights=True,
             )
-            results.completion = [rollout[0] for rollout in rollouts]
-            results.state = [rollout[1] for rollout in rollouts]
-            if score_rollouts:
-                rollout_scores = await self.rubric.score_rollouts(
-                    prompts=results.prompt,
-                    completions=results.completion,
-                    answers=results.answer,
-                    states=results.state,
-                    tasks=results.task,
-                    infos=results.info,
-                    max_concurrent=score_limit
-                    if score_limit is not None
-                    else max_concurrent,
-                    apply_weights=True,
-                )
-                results.reward = rollout_scores.reward
-                results.metrics = rollout_scores.metrics
-            return results
+            results.reward = rollout_scores.reward
+            results.metrics = rollout_scores.metrics
+        return results
 
     def generate(
         self,
         inputs: GenerateInputs | Dataset,
         client: AsyncOpenAI | OpenAI,
-        model: str,
+        model: str | None = None,
         sampling_args: SamplingArgs | None = None,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
-        max_concurrent_generation: int | None = None,
-        max_concurrent_scoring: int | None = None,
-        interleave_scoring: bool = True,
         **kwargs,
     ) -> GenerateOutputs:
         if isinstance(client, OpenAI):
@@ -587,9 +551,6 @@ class Environment(ABC):
             sampling_args,
             score_rollouts,
             max_concurrent,
-            max_concurrent_generation,
-            max_concurrent_scoring,
-            interleave_scoring,
             **kwargs,
         )
 
@@ -629,9 +590,8 @@ class Environment(ABC):
         rollouts_per_example: int = 1,
         score_rollouts: bool = True,
         max_concurrent: int = -1,
-        max_concurrent_generation: int | None = None,
-        max_concurrent_scoring: int | None = None,
-        interleave_scoring: bool = True,
+        save_intermediate: bool = False,
+        interleave_rewards: bool = False,
         **kwargs,
     ) -> GenerateOutputs:
         """
@@ -653,9 +613,8 @@ class Environment(ABC):
             sampling_args,
             score_rollouts,
             max_concurrent,
-            max_concurrent_generation,
-            max_concurrent_scoring,
-            interleave_scoring,
+            save_intermediate=save_intermediate,
+            interleave_rewards=interleave_rewards,
             **kwargs,
         )
         return results
@@ -663,29 +622,19 @@ class Environment(ABC):
     def make_dataset(
         self,
         results: GenerateOutputs,
-        push_to_hf_hub: bool = False,
+        push_to_hub: bool = False,
         hub_name: str | None = None,
         state_columns: list[str] | None = None,
         **kwargs,
     ) -> Dataset:
         """
         Make a dataset from the evaluation results.
-
-        Args:
-            results: The evaluation results to convert to a dataset
-            push_to_hf_hub: Whether to push the dataset to the Hugging Face Hub
-            hub_name: The name of the dataset on the Hugging Face Hub
-            state_columns: List of state columns to include in the dataset
-            concatenate_safe: Whether to ensure the dataset can be concatenated with others
-                          by standardizing column types (useful for combining results from
-                          different environments). Defaults to True for consistent schemas.
-            **kwargs: Additional arguments passed to Dataset creation
         """
         # TODO: enable saving of multimodal datasets
         state_columns = state_columns or []
 
-        if push_to_hf_hub and hub_name is None:
-            raise ValueError("hub_name must be provided if push_to_hf_hub is True")
+        if push_to_hub and hub_name is None:
+            raise ValueError("hub_name must be provided if push_to_hub is True")
 
         cols = ["prompt", "completion", "answer", "task", "reward"]
 
@@ -715,7 +664,7 @@ class Environment(ABC):
                         f"Column {col} not found in state, skipping from dataset."
                     )
         dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
-        if push_to_hf_hub:
+        if push_to_hub:
             assert hub_name is not None
             dataset.push_to_hub(hub_name)
         return dataset
