@@ -37,7 +37,7 @@ Verifiers is also the native library used by Prime Intellect's [Environments Hub
 
 ## Setup
 
-We recommend using `verifiers` with along [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
+We recommend using `verifiers` along with [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependency management in your own project:
 ```bash
 # install uv (first time only)
 curl -LsSf https://astral.sh/uv/install.sh | sh
