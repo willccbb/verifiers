@@ -86,8 +86,7 @@ def encode_chat_with_processor(
             return_tensors="pt",
             add_special_tokens=add_special_tokens,
         )
-        print("encode_chat_with_processor",inputs["pixel_values"].shape)
-        return inputs["input_ids"], inputs["image_grid_thw"], inputs["pixel_values"]
+        return inputs["input_ids"][0].tolist(), inputs["image_grid_thw"][0].tolist(), inputs["pixel_values"].tolist()
 
     else:
         raise TypeError(f"Unsupported processing_class: {type(processing_class)}")
@@ -529,7 +528,6 @@ class Environment(ABC):
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
 
-        print("inputs",inputs)
         coro = self.a_generate(
             inputs,
             client,
@@ -985,7 +983,6 @@ class Environment(ABC):
             else:
                 all_rewards.append(reward)
                 
-        print("process_env_results_vllm",all_prompt_pixel_value.shape)
         return ProcessedOutputs(
             prompt_ids=all_prompt_ids,
             prompt_mask=all_prompt_masks,

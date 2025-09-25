@@ -32,7 +32,7 @@ from verifiers import Environment
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.trainers.grpo_config import GRPOConfig
-from verifiers.utils.logging_utils import print_prompt_completions_sample
+from verifiers.utils.logging_utils import print_prompt_completions_sample, serialize_for_wandb
 
 
 class RepeatSampler(Sampler):
@@ -415,8 +415,6 @@ class GRPOTrainer(Trainer):
 
         eval_dataset = env.get_eval_dataset()
 
-        print("data", train_dataset)
-        print(train_dataset.column_names)
         if "prompt" not in train_dataset.column_names:
             raise ValueError("Train dataset must contain a 'prompt' column")
         if "answer" not in train_dataset.column_names:
@@ -846,8 +844,6 @@ class GRPOTrainer(Trainer):
             # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
             model_inputs = {"input_ids": input_ids_batch, "attention_mask": attention_mask_batch}
             
-            print("_get_per_token_logps",pixel_values.shape)
-            # TODO : check if needed there or if already robust to VLM
             if image_grid_thw is not None and pixel_values is not None:
                 model_inputs["image_grid_thw"] = image_grid_thw[i : i + batch_size]
                 start_pixel_idx = image_grid_thw[:i].prod(-1).sum().item()
@@ -862,8 +858,10 @@ class GRPOTrainer(Trainer):
                 model_inputs["logits_to_keep"] = logits_to_keep + 1
 
             logits = model(**model_inputs).logits
+
             # Exclude the last value: it corresponds to the next token pred
             logits = logits[:, :-1, :]  # (B, L-1, H)
+            input_ids_batch = input_ids_batch[:, -logits_to_keep:]
             # Only keep the last logits_to_keep. For model that support logits_to_keep, this is a no-op.
             logits = logits[:, -logits_to_keep:, :]  # (B, logits_to_keep, H)
             # Divide logits by sampling temperature.
@@ -1029,7 +1027,6 @@ class GRPOTrainer(Trainer):
         """
         Gather batch data from all processes and convert PIL images in prompts to base64 image_url.
         """
-        print("GATHERING BATCH DATA")
         batches = self._async_dataloader.peek_ahead(batch_offset)
     
         if batch_offset == 0:
@@ -1152,8 +1149,7 @@ class GRPOTrainer(Trainer):
                     "answer": all_answers,
                     "task": all_tasks,
                     "info": all_infos,
-                }
-                    
+                }    
                 # Submit batch (main process only)
                 if self.accelerator.is_main_process:
                     request = BatchRequest(
@@ -1186,7 +1182,6 @@ class GRPOTrainer(Trainer):
             if self.accelerator.is_main_process:
                 # Get batch result
                 
-                # TODO : toute le get vllm et préparation sert à arriver ici, est-ce que les grid et pixel values sont nécessaires ? je pense que oui pour la backward
                 batch_result = self.async_generator.get_batch(batch_id_to_retrieve)
                 processed_results = batch_result.processed_results
 
@@ -1633,8 +1628,7 @@ class GRPOTrainer(Trainer):
                 print_prompt_completions_sample(
                     self._logs["prompt"],
                     self._logs["completion"],
-                    self._logs["rewards"],
-                    self._logs["advantages"],
+                    self._logs["rewards"]["reward"],
                     self.state.global_step,
                 )
 
@@ -1666,9 +1660,14 @@ class GRPOTrainer(Trainer):
                             table["image"].append(None)
                             
                 if len(table["prompt"]) > 0:
+                    table["prompt"] = [serialize_for_wandb(p) for p in table["prompt"]]
+                    table["completion"] = [serialize_for_wandb(c) for c in table["completion"]]
+                
                     df = pd.DataFrame(table)
+                
                     if self.wandb_log_unique_prompts:
                         df = df.drop_duplicates(subset=["prompt"])
+                
                     wandb.log({"completions": wandb.Table(dataframe=df)})
 
             # Clear the textual logs after logging
@@ -1731,6 +1730,20 @@ class GRPOTrainer(Trainer):
                 else reward_values
             )
 
+    def _log_image_data_primary(self, all_images: List[Any]) -> None:
+        """
+        Log images for wandb (PRIMARY PROCESS ONLY).
+        Converts each image to wandb.Image and stores it in the _logs deque.
+        """
+        if "image" not in self._logs:
+            self._logs["image"] = deque(maxlen=self._logs_maxlen)
+    
+        for img in all_images:
+            if img is not None:
+                self._logs["image"].append(wandb.Image(img))
+            else:
+                self._logs["image"].append(None)
+            
     def _log_completion_metrics_primary(
         self,
         mode: str,
