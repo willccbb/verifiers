@@ -22,7 +22,7 @@ from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SkipValidation
 
 # typing aliases
 ChatMessage = ChatCompletionMessageParam
