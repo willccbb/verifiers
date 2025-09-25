@@ -663,6 +663,7 @@ class Environment(ABC):
     def make_dataset(
         self,
         results: GenerateOutputs,
+        rollouts_per_example: int = 1,
         push_to_hf_hub: bool = False,
         hub_name: str | None = None,
         state_columns: list[str] | None = None,
@@ -673,6 +674,7 @@ class Environment(ABC):
 
         Args:
             results: The evaluation results to convert to a dataset
+            rollouts_per_example: The number of rollouts per example
             push_to_hf_hub: Whether to push the dataset to the Hugging Face Hub
             hub_name: The name of the dataset on the Hugging Face Hub
             state_columns: List of state columns to include in the dataset
@@ -687,7 +689,16 @@ class Environment(ABC):
         if push_to_hf_hub and hub_name is None:
             raise ValueError("hub_name must be provided if push_to_hf_hub is True")
 
-        cols = ["prompt", "completion", "answer", "task", "reward"]
+        cols = ["prompt", "completion", "answer", "task", "reward", "average_reward"]
+
+        if rollouts_per_example > 1:
+            average_reward = []
+            for i in range(0, len(results.reward), rollouts_per_example):
+                chunk = results.reward[i:i + rollouts_per_example]
+                avg = sum(chunk) / len(chunk)
+                average_reward.extend([avg] * rollouts_per_example)
+        else:
+            average_reward = results.reward
 
         results_dict = {
             "prompt": results.prompt,
@@ -695,6 +706,7 @@ class Environment(ABC):
             "answer": results.answer,
             "task": results.task,
             "reward": results.reward,
+            "average_reward": average_reward,
         }
         if results.info[0] != {}:
             results_dict["info"] = results.info
