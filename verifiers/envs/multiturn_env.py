@@ -1,7 +1,9 @@
 import time
 from abc import abstractmethod
+from copy import deepcopy
 
 from openai import AsyncOpenAI
+from transformers import PreTrainedTokenizerBase
 
 from verifiers.envs.environment import Environment
 from verifiers.types import (
@@ -14,12 +16,19 @@ from verifiers.types import (
     State,
 )
 from verifiers.utils.async_utils import maybe_await
+from verifiers.utils.message_utils import deserialize_tool_calls
 
 
 class MultiTurnEnv(Environment):
-    def __init__(self, max_turns: int = -1, **kwargs):
+    def __init__(
+        self,
+        max_turns: int = -1,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.max_turns = max_turns
+        self.tokenizer = tokenizer
 
     async def setup_state(self, state: State, **kwargs) -> State:
         return state
@@ -53,6 +62,8 @@ class MultiTurnEnv(Environment):
         """
         info = info or {}
         is_completed = False
+        sampling_args = deepcopy(sampling_args)
+        max_tokens = sampling_args.get("max_tokens") if sampling_args else None
         state = {
             "id": 0,  # TODO: add id
             "prompt": prompt,
@@ -82,6 +93,22 @@ class MultiTurnEnv(Environment):
             if await maybe_await(self.is_completed, rollout, state, **kwargs):
                 is_completed = True
                 break
+
+            if max_tokens is not None:
+                assert sampling_args is not None and self.tokenizer is not None
+                rollout_len = len(
+                    self.tokenizer.apply_chat_template(
+                        deserialize_tool_calls(rollout),
+                        tokenize=True,
+                        add_generation_prompt=True,
+                        tools=info.get("oai_tools", None),
+                    )
+                )
+                if rollout_len > max_tokens:
+                    is_completed = True
+                    break
+                sampling_args["max_tokens"] = max_tokens - rollout_len
+
             response = await self.get_model_response(
                 client=client,
                 model=model,
