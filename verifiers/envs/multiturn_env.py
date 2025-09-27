@@ -21,12 +21,12 @@ class MultiTurnEnv(Environment):
     def __init__(
         self,
         max_turns: int = -1,
-        processing_class: PreTrainedTokenizerBase | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.max_turns = max_turns
-        self.processing_class = processing_class
+        self.tokenizer = tokenizer
 
     async def setup_state(self, state: State, **kwargs) -> State:
         return state
@@ -92,9 +92,9 @@ class MultiTurnEnv(Environment):
                 break
 
             if max_tokens is not None:
-                assert self.processing_class is not None and sampling_args is not None
+                assert self.tokenizer is not None and sampling_args is not None
                 len_rollout = len(
-                    self.processing_class.apply_chat_template(
+                    self.tokenizer.apply_chat_template(
                         rollout, tokenize=True, tools=info.get("oai_tools", None)
                     )
                 )
