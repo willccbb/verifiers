@@ -215,13 +215,10 @@ class Environment(ABC):
         if message_type is None:
             message_type = self.message_type
         # Normalize sampling args:
-        # - If max_tokens is provided for chat, rename to max_completion_tokens
         # - Drop any None-valued entries to avoid sending them to the client
         if "max_tokens" in sampling_args:
             if sampling_args["max_tokens"] is None:
                 sampling_args.pop("max_tokens")
-            elif message_type == "chat":
-                sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
         if (
             "max_completion_tokens" in sampling_args
             and sampling_args["max_completion_tokens"] is None
