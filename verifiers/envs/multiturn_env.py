@@ -104,7 +104,7 @@ class MultiTurnEnv(Environment):
                         tools=info.get("oai_tools", None),
                     )
                 )
-                if rollout_len > max_tokens:
+                if rollout_len >= max_tokens:
                     is_completed = True
                     break
                 sampling_args["max_tokens"] = max_tokens - rollout_len
