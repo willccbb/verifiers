@@ -15,6 +15,7 @@ from verifiers.types import (
     State,
 )
 from verifiers.utils.async_utils import maybe_await
+from verifiers.utils.message_utils import deserialize_tool_calls
 
 
 class MultiTurnEnv(Environment):
@@ -95,7 +96,9 @@ class MultiTurnEnv(Environment):
                 assert self.tokenizer is not None and sampling_args is not None
                 len_rollout = len(
                     self.tokenizer.apply_chat_template(
-                        rollout, tokenize=True, tools=info.get("oai_tools", None)
+                        deserialize_tool_calls(rollout),
+                        tokenize=True,
+                        tools=info.get("oai_tools", None),
                     )
                 )
                 if len_rollout > max_tokens:
