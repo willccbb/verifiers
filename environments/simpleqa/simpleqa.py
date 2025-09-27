@@ -123,16 +123,14 @@ Just return the letters "A", "B", or "C", with no text around it.
     def incorrect_answer_reward_func(
         prompt, completion, answer, state, **kwargs
     ) -> float:
-        judge_response = rubric.judge(prompt, completion, answer, state, **kwargs)
-        match = re.search(r"(A|B|C)", judge_response)
+        match = re.search(r"(A|B|C)", state["judge_response"])
         result = match.group(0) if match else "C"
         return 1.0 if result == "B" else 0.0
 
     def not_attempted_answer_reward_func(
         prompt, completion, answer, state, **kwargs
     ) -> float:
-        judge_response = rubric.judge(prompt, completion, answer, state, **kwargs)
-        match = re.search(r"(A|B|C)", judge_response)
+        match = re.search(r"(A|B|C)", state["judge_response"])
         result = match.group(0) if match else "C"
         return 1.0 if result == "C" else 0.0
 
