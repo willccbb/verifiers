@@ -1,5 +1,6 @@
 import time
 from abc import abstractmethod
+from copy import deepcopy
 
 from openai import AsyncOpenAI
 from transformers import PreTrainedTokenizerBase
@@ -61,6 +62,7 @@ class MultiTurnEnv(Environment):
         """
         info = info or {}
         is_completed = False
+        sampling_args = deepcopy(sampling_args)
         max_tokens = sampling_args.get("max_tokens") if sampling_args else None
         state = {
             "id": 0,  # TODO: add id
