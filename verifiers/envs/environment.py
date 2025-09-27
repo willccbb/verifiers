@@ -62,15 +62,21 @@ class Environment(ABC):
         self.parser = parser or Parser()
         self.rubric = rubric or Rubric()
         if self.parser.__class__ != self.rubric.parser.__class__:
-            self.logger.warning("The parser and rubric parser are different. This may cause unexpected behavior.")
+            self.logger.warning(
+                "The parser and rubric parser are different. This may cause unexpected behavior."
+            )
 
         if self.message_type == "chat":
             if dataset is not None:
-                self.dataset = self.format_dataset(dataset, self.system_prompt, self.few_shot)
+                self.dataset = self.format_dataset(
+                    dataset, self.system_prompt, self.few_shot
+                )
             else:
                 self.dataset = None
             if eval_dataset is not None:
-                self.eval_dataset = self.format_dataset(eval_dataset, self.system_prompt, self.few_shot)
+                self.eval_dataset = self.format_dataset(
+                    eval_dataset, self.system_prompt, self.few_shot
+                )
             else:
                 self.eval_dataset = None
         else:
@@ -166,7 +172,9 @@ class Environment(ABC):
 
     def get_eval_dataset(self, n: int = -1, seed: int | None = None) -> Dataset | None:
         if self.eval_dataset is None:
-            self.logger.warning("eval_dataset is not set, falling back to train dataset")
+            self.logger.warning(
+                "eval_dataset is not set, falling back to train dataset"
+            )
             return self.get_dataset(n, seed)
         if seed is not None:
             self.eval_dataset = self.eval_dataset.shuffle(seed=seed)
@@ -210,7 +218,10 @@ class Environment(ABC):
                 sampling_args.pop("max_tokens")
             elif message_type == "chat":
                 sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
-        if "max_completion_tokens" in sampling_args and sampling_args["max_completion_tokens"] is None:
+        if (
+            "max_completion_tokens" in sampling_args
+            and sampling_args["max_completion_tokens"] is None
+        ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
         try:
@@ -223,7 +234,9 @@ class Environment(ABC):
                         c = m.get("content")  # type: ignore[assignment]
                         if isinstance(c, list):
                             for p in c:
-                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
+                                if isinstance(p, dict) and str(
+                                    p.get("type", "")
+                                ).startswith("input_audio"):
                                     has_audio = True
                                     break
                         if has_audio:
@@ -252,9 +265,13 @@ class Environment(ABC):
                 return response
             elif message_type == "completion":
                 if oai_tools:
-                    raise ValueError("oai_tools are not supported for completion tasks.")
+                    raise ValueError(
+                        "oai_tools are not supported for completion tasks."
+                    )
                 assert isinstance(prompt, str)
-                response = await client.completions.create(model=model, prompt=prompt, **clean_sampling_args)
+                response = await client.completions.create(
+                    model=model, prompt=prompt, **clean_sampling_args
+                )
                 return response
         except Exception as e:
             self.logger.error(f"Error getting model response: {e} \n\nExiting...")
@@ -294,7 +311,9 @@ class Environment(ABC):
         Run a rollout with a semaphore.
         """
         async with semaphore:
-            return await self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs)
+            return await self.rollout(
+                client, model, prompt, answer, task, info, sampling_args, **kwargs
+            )
 
     async def run_rollouts(
         self,
@@ -330,8 +349,15 @@ class Environment(ABC):
                 for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
             ]
         else:
-            rollout_tasks = [self.rollout(client, model, prompt, answer, task, info, sampling_args, **kwargs) for prompt, answer, task, info in zip(prompts, answers, tasks, infos)]
-        return await tqdm_asyncio.gather(*rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts")
+            rollout_tasks = [
+                self.rollout(
+                    client, model, prompt, answer, task, info, sampling_args, **kwargs
+                )
+                for prompt, answer, task, info in zip(prompts, answers, tasks, infos)
+            ]
+        return await tqdm_asyncio.gather(
+            *rollout_tasks, total=len(prompts), desc=f"Running {len(prompts)} rollouts"
+        )
 
     async def a_generate(
         self,
@@ -422,10 +448,18 @@ class Environment(ABC):
             rewards: list[float] = [0.0] * n
             # Pre-allocate metrics using known reward function names
             reward_func_names = self.rubric.get_reward_func_names()
-            metrics: dict[str, list[float]] = {name: [0.0] * n for name in reward_func_names}
+            metrics: dict[str, list[float]] = {
+                name: [0.0] * n for name in reward_func_names
+            }
 
-            gen_semaphore = asyncio.Semaphore(gen_limit) if gen_limit and gen_limit > 0 else None
-            score_semaphore = asyncio.Semaphore(score_limit) if score_limit and score_limit > 0 else None
+            gen_semaphore = (
+                asyncio.Semaphore(gen_limit) if gen_limit and gen_limit > 0 else None
+            )
+            score_semaphore = (
+                asyncio.Semaphore(score_limit)
+                if score_limit and score_limit > 0
+                else None
+            )
 
             async def run_one(i: int) -> None:
                 prompt_i = results.prompt[i]
@@ -490,7 +524,9 @@ class Environment(ABC):
             tasks = [run_one(i) for i in range(n)]
             from tqdm.asyncio import tqdm_asyncio
 
-            await tqdm_asyncio.gather(*tasks, total=n, desc=f"Running {n} rollouts (interleaved)")
+            await tqdm_asyncio.gather(
+                *tasks, total=n, desc=f"Running {n} rollouts (interleaved)"
+            )
 
             results.completion = results_completion  # type: ignore[assignment]
             results.state = results_state  # type: ignore[assignment]
@@ -520,7 +556,9 @@ class Environment(ABC):
                     states=results.state,
                     tasks=results.task,
                     infos=results.info,
-                    max_concurrent=score_limit if score_limit is not None else max_concurrent,
+                    max_concurrent=score_limit
+                    if score_limit is not None
+                    else max_concurrent,
                     apply_weights=True,
                 )
                 results.reward = rollout_scores.reward
@@ -662,7 +700,9 @@ class Environment(ABC):
             results_dict["info"] = results.info
             cols.append("info")
         for i in range(len(results.completion)):
-            results_dict["completion"].append(sanitize_tool_calls(results.completion[i]))
+            results_dict["completion"].append(
+                sanitize_tool_calls(results.completion[i])
+            )
         results_dict.update(results.metrics)
         cols.extend(results.metrics.keys())
         if results.state[0] is not None:
@@ -671,7 +711,9 @@ class Environment(ABC):
                     results_dict[col] = [state[col] for state in results.state]
                     cols.append(col)
                 else:
-                    self.logger.warning(f"Column {col} not found in state, skipping from dataset.")
+                    self.logger.warning(
+                        f"Column {col} not found in state, skipping from dataset."
+                    )
         dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
         if push_to_hf_hub:
             assert hub_name is not None
@@ -682,32 +724,48 @@ class Environment(ABC):
     # Optional helper functions for parsing vLLM completions
     #########################################################
 
-    def parse_chat_completion_logprobs(self, chat_completion: ChatCompletion) -> list[float]:
+    def parse_chat_completion_logprobs(
+        self, chat_completion: ChatCompletion
+    ) -> list[float]:
         """Parses the completion logprobs from a vLLM chat completion"""
-        assert len(chat_completion.choices) == 1, "Response should always have one choice"
-        assert chat_completion.choices[0].logprobs is not None, "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
-        assert (
-            chat_completion.choices[0].logprobs.content is not None
-        ), "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
-        logprobs = [logprob.logprob for logprob in chat_completion.choices[0].logprobs.content]
+        assert len(chat_completion.choices) == 1, (
+            "Response should always have one choice"
+        )
+        assert chat_completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        assert chat_completion.choices[0].logprobs.content is not None, (
+            "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        logprobs = [
+            logprob.logprob for logprob in chat_completion.choices[0].logprobs.content
+        ]
         return logprobs
 
     def parse_completion_logprobs(self, completion: Completion) -> list[float]:
         """Parses the completion logprobs from a vLLM chat completion"""
         assert len(completion.choices) == 1, "Response should always have one choice"
-        assert completion.choices[0].logprobs is not None, "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
-        assert (
-            completion.choices[0].logprobs.token_logprobs is not None
-        ), "Logprob token_logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        assert completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        assert completion.choices[0].logprobs.token_logprobs is not None, (
+            "Logprob token_logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
         return completion.choices[0].logprobs.token_logprobs
 
-    def parse_chat_completion_tokens(self, chat_completion: ChatCompletion) -> list[int]:
+    def parse_chat_completion_tokens(
+        self, chat_completion: ChatCompletion
+    ) -> list[int]:
         """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
-        assert len(chat_completion.choices) == 1, "Response should always have one choice"
-        assert chat_completion.choices[0].logprobs is not None, "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
-        assert (
-            chat_completion.choices[0].logprobs.content is not None
-        ), "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        assert len(chat_completion.choices) == 1, (
+            "Response should always have one choice"
+        )
+        assert chat_completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
+        assert chat_completion.choices[0].logprobs.content is not None, (
+            "Logprob content should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/chat/completions"
+        )
         tokens = [
             # tokens are token_id:<int> because we request `return_tokens_as_token_ids` from vllm in GRPOTrainer
             int(token.token.split(":")[-1])
@@ -718,8 +776,12 @@ class Environment(ABC):
     def parse_completion_tokens(self, completion: Completion) -> list[int]:
         """Parses the output token ids from a list of chat completions returned by vLLM OAI server."""
         assert len(completion.choices) == 1, "Response should always have one choice"
-        assert completion.choices[0].logprobs is not None, "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
-        assert completion.choices[0].logprobs.tokens is not None, "Logprob tokens should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        assert completion.choices[0].logprobs is not None, (
+            "Logprobs should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
+        assert completion.choices[0].logprobs.tokens is not None, (
+            "Logprob tokens should not be None. Make sure to set logprobs=True in the extra body when making the request to /v1/completions"
+        )
         tokens = [
             # tokens are token_id:<int> because we request `return_tokens_as_token_ids` from vllm in GRPOTrainer
             int(token.split(":")[-1])
@@ -781,11 +843,17 @@ class Environment(ABC):
                 while j < len(zipped) and zipped[j][0]["role"] != "assistant":
                     consecutive_messages.append(zipped[j][0])
                     j += 1
-                token_prefix: list[int] = processing_class.apply_chat_template(conversation=messages_consumed)  # type: ignore
-                token_prefix_with_turn: list[int] = processing_class.apply_chat_template(
-                    conversation=messages_consumed + consecutive_messages,  # type: ignore
+                token_prefix: list[int] = processing_class.apply_chat_template(
+                    conversation=messages_consumed  # type: ignore
                 )
-                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                token_prefix_with_turn: list[int] = (
+                    processing_class.apply_chat_template(
+                        conversation=messages_consumed + consecutive_messages,  # type: ignore
+                    )
+                )
+                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
+                    f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                )
                 completion_turn_ids = token_prefix_with_turn[len(token_prefix) :]
                 if mask_env_responses:
                     completion_turn_mask = [0] * len(completion_turn_ids)
@@ -818,7 +886,9 @@ class Environment(ABC):
         """
         responses: list[Completion] = state["responses"]
         responses_start_idx: list[int] = state["responses_start_idx"]
-        assert len(responses) == len(responses_start_idx), "Should have an index for each completion response"
+        assert len(responses) == len(responses_start_idx), (
+            "Should have an index for each completion response"
+        )
 
         idx = 0
         zipped: list[tuple[str, Completion | None]] = []
@@ -853,8 +923,12 @@ class Environment(ABC):
             # non-model-generated (user/tool case) -- use text
             else:
                 token_prefix: list[int] = processing_class.encode(rollout_consumed)
-                token_prefix_with_turn: list[int] = processing_class.encode(rollout_consumed + text)
-                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                token_prefix_with_turn: list[int] = processing_class.encode(
+                    rollout_consumed + text
+                )
+                assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
+                    f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
+                )
                 completion_turn_ids = token_prefix_with_turn[len(token_prefix) :]
                 if mask_env_responses:
                     completion_turn_mask = [0] * len(completion_turn_ids)
@@ -897,7 +971,9 @@ class Environment(ABC):
         all_completion_masks = []
         all_completion_logprobs = []
         all_rewards = []
-        for i, (prompt, completion, state, reward) in enumerate(zip(prompts, completions, states, rewards)):
+        for i, (prompt, completion, state, reward) in enumerate(
+            zip(prompts, completions, states, rewards)
+        ):
             # Format-specific processing
             if is_chat_format:
                 assert isinstance(prompt, list) and isinstance(completion, list)
@@ -907,7 +983,9 @@ class Environment(ABC):
                     completion_ids,
                     completion_mask,
                     completion_logprobs,
-                ) = self.process_chat_format_vllm(prompt, completion, state, processing_class, mask_env_responses)
+                ) = self.process_chat_format_vllm(
+                    prompt, completion, state, processing_class, mask_env_responses
+                )
             else:
                 assert isinstance(prompt, str) and isinstance(completion, str)
                 (
@@ -916,7 +994,9 @@ class Environment(ABC):
                     completion_ids,
                     completion_mask,
                     completion_logprobs,
-                ) = self.process_completion_format_vllm(prompt, completion, state, processing_class, mask_env_responses)
+                ) = self.process_completion_format_vllm(
+                    prompt, completion, state, processing_class, mask_env_responses
+                )
             is_truncated = False
             if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
                 if len(prompt_ids) > max_seq_len:
@@ -924,15 +1004,23 @@ class Environment(ABC):
                     prompt_mask = prompt_mask[:max_seq_len]
                 completion_ids = completion_ids[: max_seq_len - len(prompt_ids)]
                 completion_mask = completion_mask[: max_seq_len - len(prompt_ids)]
-                completion_logprobs = completion_logprobs[: max_seq_len - len(prompt_ids)]
+                completion_logprobs = completion_logprobs[
+                    : max_seq_len - len(prompt_ids)
+                ]
                 is_truncated = True
             if is_truncated and mask_truncated_completions:
                 completion_mask = [0] * len(completion_ids)
-            assert len(prompt_ids) == len(prompt_mask), f"Prompt ids: {len(prompt_ids)}, prompt mask: {len(prompt_mask)}"
-            assert len(completion_ids) == len(completion_mask), f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
+            assert len(prompt_ids) == len(prompt_mask), (
+                f"Prompt ids: {len(prompt_ids)}, prompt mask: {len(prompt_mask)}"
+            )
+            assert len(completion_ids) == len(completion_mask), (
+                f"Completion ids: {len(completion_ids)}, completion mask: {len(completion_mask)}"
+            )
             assert (
                 len(completion_mask) == len(completion_ids) == len(completion_logprobs)
-            ), f"completion mask: {len(completion_mask)}, completion ids: {len(completion_ids)}, completion logprobs: {len(completion_logprobs)}"
+            ), (
+                f"completion mask: {len(completion_mask)}, completion ids: {len(completion_ids)}, completion logprobs: {len(completion_logprobs)}"
+            )
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
             all_completion_ids.append(completion_ids)
