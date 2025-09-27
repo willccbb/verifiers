@@ -93,18 +93,19 @@ class MultiTurnEnv(Environment):
                 break
 
             if max_tokens is not None:
-                assert self.tokenizer is not None and sampling_args is not None
-                len_rollout = len(
+                assert sampling_args is not None and self.tokenizer is not None
+                rollout_len = len(
                     self.tokenizer.apply_chat_template(
                         deserialize_tool_calls(rollout),
                         tokenize=True,
+                        add_generation_prompt=True,
                         tools=info.get("oai_tools", None),
                     )
                 )
-                if len_rollout > max_tokens:
+                if rollout_len > max_tokens:
                     is_completed = True
                     break
-                sampling_args["max_tokens"] = max_tokens - len_rollout
+                sampling_args["max_tokens"] = max_tokens - rollout_len
 
             response = await self.get_model_response(
                 client=client,
