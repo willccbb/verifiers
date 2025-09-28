@@ -1229,6 +1229,11 @@ class GRPOTrainer(Trainer):
             attention_mask_list = []
             pixel_values_list = []
             image_grid_list = []
+            
+            has_images = any(
+                broadcast_data["pixel_values"][i] is not None
+                for i in range(process_slice.start, process_slice.stop)
+            )
 
             for i in range(process_slice.start, process_slice.stop):
                 input_ids_list.append(
@@ -1245,18 +1250,18 @@ class GRPOTrainer(Trainer):
                         device=self.accelerator.device,
                     )
                 )
-                pixel_values_list.append( # TODO : ici je pense qu'il faut gérer si on stack ensuite sur la première dimension ou pas
-                    torch.tensor(
-                        broadcast_data["pixel_values"][i],
-                        device=self.accelerator.device,
-                    )
-                )
-                image_grid_list.append(
-                    torch.tensor(
-                        broadcast_data["image_grid_thw"][i],
-                        device=self.accelerator.device,
-                    )
-                )
+                if has_images:
+                    if broadcast_data["pixel_values"][i] is not None:
+                        pixel_values_list.append(
+                            torch.tensor(broadcast_data["pixel_values"][i], device=self.accelerator.device)
+                        )
+                        image_grid_list.append(
+                            torch.tensor(broadcast_data["image_grid_thw"][i], device=self.accelerator.device)
+                        )
+                    else:
+                        # If some examples have no image insert dummy with correct shape
+                        pixel_values_list.append(torch.zeros_like(pixel_values_list[0]))
+                        image_grid_list.append(torch.zeros_like(image_grid_list[0]))
 
             input_ids = pad(
                 input_ids_list,
@@ -1265,8 +1270,9 @@ class GRPOTrainer(Trainer):
             )  # type: ignore
             attention_mask = pad(attention_mask_list, padding_side="right")  # type: ignore
 
-            pixel_values = torch.stack(pixel_values_list, dim=0)
-            image_grid_thw = torch.stack(image_grid_list, dim=0)
+            if has_images:
+                pixel_values = torch.stack(pixel_values_list, dim=0)
+                image_grid_thw = torch.stack(image_grid_list, dim=0)
 
             # Truncate if needed
             if self.max_seq_len is not None and input_ids.size(1) > self.max_seq_len:
@@ -1305,9 +1311,10 @@ class GRPOTrainer(Trainer):
                 "attention_mask": attention_mask,
                 "old_per_token_logps": None,
                 "advantages": advantages,
-                "pixel_values": pixel_values,
-                "image_grid_thw": image_grid_thw
             }
+            if has_images:
+                full_batch["pixel_values"] = pixel_values
+                full_batch["image_grid_thw"] = image_grid_thw
 
             # Shuffle and split for gradient accumulation
             full_batch = shuffle_tensor_dict(full_batch)
