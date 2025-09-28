@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "datasets",
     "jinja2>=3.1.6",
-    "openai",
+    "openai>=1.108.1",
     "openai-agents>=0.0.7",
     "nest-asyncio>=1.6.0", # for jupyter notebooks
     "requests",

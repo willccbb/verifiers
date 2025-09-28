@@ -19,8 +19,18 @@ class ToolEnv(MultiTurnEnv):
         self.max_turns = max_turns
         self.error_formatter = error_formatter
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
-        self.tool_map = {tool.__name__: tool for tool in self.tools}
+        self.tool_map = {
+            getattr(tool, "__name__", tool.__class__.__name__): tool
+            for tool in self.tools
+        }
         super().__init__(oai_tools=self.oai_tools, max_turns=max_turns, **kwargs)
+
+    def add_tool(self, tool: Callable):
+        self.tools.append(tool)
+        if self.oai_tools is None:
+            self.oai_tools = []
+        self.oai_tools.append(convert_func_to_oai_tool(tool))
+        self.tool_map[getattr(tool, "__name__", tool.__class__.__name__)] = tool
 
     async def is_completed(
         self, messages: Messages, state: State, **kwargs: Any

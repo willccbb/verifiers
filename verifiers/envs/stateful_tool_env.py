@@ -2,6 +2,8 @@ import json
 from abc import abstractmethod
 from typing import Callable
 
+from openai.types.chat import ChatCompletionFunctionToolParam
+
 from verifiers.envs.tool_env import ToolEnv
 from verifiers.types import ChatCompletionMessageToolCall, Message, Messages, State
 from verifiers.utils.async_utils import maybe_await
@@ -22,11 +24,42 @@ class StatefulToolEnv(ToolEnv):
             error_formatter=error_formatter,
             **kwargs,
         )
-        self.tools = tools or []
-        self.max_turns = max_turns
-        self.error_formatter = error_formatter
-        self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
-        self.tool_map = {tool.__name__: tool for tool in self.tools}
+        self.tools: list[Callable] = tools or []
+        self.oai_tools: list[ChatCompletionFunctionToolParam] = [
+            convert_func_to_oai_tool(tool) for tool in self.tools
+        ]
+        self.tool_map: dict[str, Callable] = {
+            getattr(tool, "__name__", tool.__class__.__name__): tool
+            for tool in self.tools
+        }
+        self.skipped_args: dict[str, list[str]] = {}
+        self.max_turns: int = max_turns
+        self.error_formatter: Callable[[Exception], str] = error_formatter
+
+    def add_tool(self, tool: Callable, args_to_skip: list[str] = []):
+        self.tools.append(tool)
+        oai_tool = convert_func_to_oai_tool(tool)
+        for arg in args_to_skip:
+            assert "function" in oai_tool
+            assert "parameters" in oai_tool["function"]
+            if (
+                "properties" in oai_tool["function"]["parameters"]
+                and isinstance(oai_tool["function"]["parameters"]["properties"], dict)
+                and arg in oai_tool["function"]["parameters"]["properties"]
+            ):
+                oai_tool["function"]["parameters"]["properties"].pop(arg)
+            if (
+                "required" in oai_tool["function"]["parameters"]
+                and isinstance(oai_tool["function"]["parameters"]["required"], list)
+                and arg in oai_tool["function"]["parameters"]["required"]
+            ):
+                oai_tool["function"]["parameters"]["required"].remove(arg)
+        if self.oai_tools is None:
+            self.oai_tools = []
+        self.oai_tools.append(oai_tool)
+        tool_name = getattr(tool, "__name__", tool.__class__.__name__)
+        self.tool_map[tool_name] = tool
+        self.skipped_args[tool_name] = args_to_skip
 
     @abstractmethod
     def update_tool_args(

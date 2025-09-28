@@ -9,6 +9,7 @@ uv.lock
 .cursorrules
 .cursor/
 .ropeproject/
+.scratch/
 
 # artifacts
 core.* 
