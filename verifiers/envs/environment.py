@@ -918,6 +918,8 @@ class Environment(ABC):
         all_completion_masks = []
         all_completion_logprobs = []
         all_rewards = []
+        all_images=[]
+        all_answers=[]
         for i, (prompt, completion, state, reward) in enumerate(
             zip(prompts, completions, states, rewards)
         ):
@@ -978,6 +980,7 @@ class Environment(ABC):
             all_completion_ids.append(completion_ids)
             all_completion_masks.append(completion_mask)
             all_completion_logprobs.append(completion_logprobs)
+            
             if zero_truncated_completions and is_truncated:
                 all_rewards.append(0)
             else:
@@ -992,7 +995,6 @@ class Environment(ABC):
             completion_mask=all_completion_masks,
             completion_logprobs=all_completion_logprobs,
             rewards=all_rewards,
-            
         )
 
     # alias for process_env_results_vllm

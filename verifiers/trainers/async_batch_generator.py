@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,7 @@ class BatchResult(BaseModel):
         default_factory=list
     )  # Store completions for logging
     prompts: list[Any] = Field(default_factory=list)  # Store prompts for logging
+    answers : list[Any]
 
 
 class AsyncBatchGenerator:
@@ -292,7 +293,7 @@ class AsyncBatchGenerator:
             mask_env_responses=request.mask_env_responses,
             mask_truncated_completions=request.mask_truncated_completions,
             zero_truncated_completions=request.zero_truncated_completions,
-        )
+        )          
 
         return BatchResult(
             batch_id=request.batch_id,
@@ -300,6 +301,7 @@ class AsyncBatchGenerator:
             all_reward_dict=all_reward_dict,
             completions=env_results.completion,
             prompts=env_results.prompt,
+            answers=request.env_inputs.answer
         )
 
     async def _evaluate_async(self, num_samples: int = -1) -> GenerateOutputs:

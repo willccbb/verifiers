@@ -11,6 +11,38 @@ from rich.text import Text
 from verifiers.types import Messages
 from collections.abc import Mapping
 
+import base64
+from io import BytesIO
+from PIL import Image
+
+
+def extract_images(obj):
+    """
+    Extract and decode Base64 images into a list of PIL.Image objects.
+    """
+    images = []
+
+    def _extract(o):
+        if isinstance(o, dict):
+            for v in o.values():
+                _extract(v)
+            if "image_url" in o and isinstance(o["image_url"], dict):
+                url = o["image_url"].get("url")
+                if isinstance(url, str) and url.startswith("data:image/"):
+                    try:
+                        header, b64_data = url.split(",", 1)
+                        image_data = base64.b64decode(b64_data)
+                        image = Image.open(BytesIO(image_data))
+                        images.append(image)
+                    except Exception:
+                        pass
+        elif isinstance(o, list):
+            for v in o:
+                _extract(v)
+
+    _extract(obj)
+    return images
+
 def sanitize_and_serialize(obj):
     """
     Sanitize Base64 images and convert nested dict/list to string for WandB.

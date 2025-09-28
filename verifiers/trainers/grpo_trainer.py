@@ -32,7 +32,7 @@ from verifiers import Environment
 from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.trainers.grpo_config import GRPOConfig
-from verifiers.utils.logging_utils import print_prompt_completions_sample, serialize_for_wandb
+from verifiers.utils.logging_utils import print_prompt_completions_sample, serialize_for_wandb, extract_images
 
 
 class RepeatSampler(Sampler):
@@ -1197,6 +1197,7 @@ class GRPOTrainer(Trainer):
                     "prompts": batch_result.prompts,
                     "pixel_values":processed_results.pixel_values,
                     "image_grid_thw":processed_results.image_grid_thw,
+                    "answer": batch_result.answers,
                 }
             else:
                 broadcast_data = None
@@ -1629,6 +1630,7 @@ class GRPOTrainer(Trainer):
                     self._logs["prompt"],
                     self._logs["completion"],
                     self._logs["rewards"]["reward"],
+                    self._logs["answer"],
                     self.state.global_step,
                 )
 
@@ -1647,6 +1649,7 @@ class GRPOTrainer(Trainer):
                         self._sanitize_tool_calls(c)
                         for c in self._logs["completion"]
                     ],
+                    "answer" : list(self._logs["answers"])
                     **{k: list(v) for k, v in self._logs["rewards"].items()},
                 }
                 
@@ -1654,27 +1657,30 @@ class GRPOTrainer(Trainer):
                     table["image"] = []
                     for img in self._logs["image"]:
                         if img is not None:
-                            # Convert images to wandb Image objects for proper visualization
                             table["image"].append(wandb.Image(img))
                         else:
                             table["image"].append(None)
                             
                 if len(table["prompt"]) > 0:
+                    all_images = [extract_images(p) for p in table["prompt"]]  # list of lists
+                    wandb_images = [[wandb.Image(img) for img in imgs] for imgs in all_images]
+                    
+                    if any(len(imgs) > 0 for imgs in wandb_images):
+                        table["images"] = wandb_images
+
                     table["prompt"] = [serialize_for_wandb(p) for p in table["prompt"]]
                     table["completion"] = [serialize_for_wandb(c) for c in table["completion"]]
-                
+
                     df = pd.DataFrame(table)
-                
+
                     if self.wandb_log_unique_prompts:
                         df = df.drop_duplicates(subset=["prompt"])
-                
+                        
                     wandb.log({"completions": wandb.Table(dataframe=df)})
 
             # Clear the textual logs after logging
             self._logs["prompt"].clear()
             self._logs["completion"].clear()
-            if self._logs["image"] :
-                self._logs["image"].clear()
             for key in self._logs["rewards"]:
                 self._logs["rewards"][key].clear()
 
@@ -1713,6 +1719,7 @@ class GRPOTrainer(Trainer):
         all_prompts: List[Union[str, List[Dict[str, Any]]]],
         all_completions: List[Union[str, List[Dict[str, Any]]]],
         all_reward_dict: Dict[str, Any],
+        all_answers : List[Any]
     ) -> None:
         """
         Log textual data for wandb (PRIMARY PROCESS ONLY).
@@ -1720,6 +1727,7 @@ class GRPOTrainer(Trainer):
         """
         self._logs["prompt"].extend(all_prompts)
         self._logs["completion"].extend(all_completions)
+        self._logs["answers"].extend(all_answers)
 
         # Log all reward scores - both individual functions and consolidated
         for reward_key in all_reward_dict:
