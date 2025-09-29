@@ -16,6 +16,7 @@ import verifiers as vf
 from verifiers.types import Endpoints
 from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
+from verifiers.utils.report_utils import compute_grouped_summary
 
 # Setup logger for eval script using verifiers logging format
 logger = logging.getLogger("verifiers.scripts.eval")
@@ -39,6 +40,9 @@ def eval_environment(
     save_dataset: bool,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
+    group_by_task: bool,
+    grouping_keys: list[str] | None,
+    grouped_html_report: bool = False,
 ):
     logger.setLevel("DEBUG" if verbose else "INFO")
     try:
@@ -152,6 +156,36 @@ def eval_environment(
             out = f"r{i + 1}: {trials}"
             print(out)
 
+    # Group rewards by task/subset if available and requested
+    if group_by_task and results.task and len(set(results.task)) > 1:
+        logger.info("--- Grouped Rewards by Task ---")
+        grouped_summary = compute_grouped_summary(results)
+        group_key = "grouped_by_task"
+        if group_key in grouped_summary:
+            for task, summary in grouped_summary[group_key].items():
+                reward_stats = summary["reward"]
+                logger.info(f"Task '{task}': avg - {reward_stats['mean']:.3f}, std - {reward_stats['std']:.3f}, count - {reward_stats['n']}")
+                
+                # Group metrics by task as well
+                for metric_name, metric_stats in summary["metrics"].items():
+                    logger.info(f"  {metric_name}: avg - {metric_stats['mean']:.3f}, std - {metric_stats['std']:.3f}")
+
+    # Enhanced grouping by multiple keys if specified
+    if grouping_keys:
+        logger.info("--- Grouped Rewards by Specified Keys ---")
+        grouped_summary = compute_grouped_summary(results, grouping_keys)
+        for grouping_key in grouping_keys:
+            group_key = f"grouped_by_{grouping_key}"
+            if group_key in grouped_summary:
+                logger.info(f"--- Grouped by {grouping_key} ---")
+                for group_value, summary in grouped_summary[group_key].items():
+                    reward_stats = summary["reward"]
+                    logger.info(f"{grouping_key} '{group_value}': avg - {reward_stats['mean']:.3f}, std - {reward_stats['std']:.3f}, count - {reward_stats['n']}")
+                    
+                    # Group metrics by the same key
+                    for metric_name, metric_stats in summary["metrics"].items():
+                        logger.info(f"  {metric_name}: avg - {metric_stats['mean']:.3f}, std - {metric_stats['std']:.3f}")
+
     if save_dataset or save_to_hf_hub:
         ids = [i // rollouts_per_example for i in range(n * rollouts_per_example)]
         rewards = results.reward
@@ -204,7 +238,32 @@ def eval_environment(
             with open(results_path / "metadata.json", "w") as f:
                 json.dump(metadata, f)
 
-            logger.info(f"Saved dataset to {results_path}")
+            # Generate HTML report
+            try:
+                from verifiers.utils.report_utils import ReportMeta, write_html_report
+                
+                report_meta = ReportMeta(
+                    env_id=env,
+                    env_version="0.0.0",  # TODO: Get actual version
+                    model=model,
+                    num_examples=n,
+                    rollouts_per_example=rollouts_per_example,
+                    api_base_url=api_base_url,
+                    sampling_args=merged_sampling_args or {},
+                    env_args=env_args,
+                )
+                
+                write_html_report(
+                    report_dir=results_path / "reports",
+                    meta=report_meta,
+                    results=results,
+                    group_by_task=grouped_html_report,
+                    grouping_keys=grouping_keys,
+                )
+                logger.info(f"Saved dataset to {results_path}")
+            except Exception as e:
+                logger.warning(f"Failed to generate HTML report: {e}")
+
         if save_to_hf_hub:
             if hf_hub_dataset_name == "":
                 dataset_name = (
@@ -328,6 +387,27 @@ def main():
         default="",
         help="Name of dataset to save to Hugging Face Hub",
     )
+    parser.add_argument(
+        "--group-by-task",
+        "-g",
+        default=False,
+        action="store_true",
+        help="Group rewards by task/subset when displaying results",
+    )
+    parser.add_argument(
+        "--grouping-keys",
+        "-G",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Group rewards by specified keys (e.g., task difficulty category)",
+    )
+    parser.add_argument(
+        "--grouped-html-report",
+        default=False,
+        action="store_true",
+        help="Generate HTML report with grouped rewards by task/subset",
+    )
     args = parser.parse_args()
 
     eval_environment(
@@ -348,6 +428,9 @@ def main():
         save_dataset=args.save_dataset,
         save_to_hf_hub=args.save_to_hf_hub,
         hf_hub_dataset_name=args.hf_hub_dataset_name,
+        group_by_task=args.group_by_task,
+        grouping_keys=args.grouping_keys,
+        grouped_html_report=args.grouped_html_report,
     )
 
 

@@ -200,26 +200,49 @@ _TEMPLATE = """<!DOCTYPE html>
       </tr>
     </table>
 
-    {% if metrics %}
-    <h2>Metrics</h2>
-    <table>
-      <tr>
-        <th>metric</th><th>mean</th><th>std</th><th>n</th><th>p5</th><th>p25</th><th>p50</th><th>p75</th><th>p95</th>
-      </tr>
-      {% for name, m in metrics.items() %}
-      <tr>
-        <td>{{ name }}</td>
-        <td>{{ m.mean | round(4) }}</td>
-        <td>{{ m.std | round(4) }}</td>
-        <td>{{ m.n }}</td>
-        <td>{{ m.p5 | round(4) }}</td>
-        <td>{{ m.p25 | round(4) }}</td>
-        <td>{{ m.p50 | round(4) }}</td>
-        <td>{{ m.p75 | round(4) }}</td>
-        <td>{{ m.p95 | round(4) }}</td>
-      </tr>
-      {% endfor %}
-    </table>
+    {% if grouped_summary %}
+    <h2>Grouped Rewards</h2>
+    {% for group_type, groups in grouped_summary.items() %}
+        {% if group_type != "overall" %}
+        <h3>Grouped by {{ group_type.replace('grouped_by_', '')|title }}</h3>
+        {% for group_name, group_summary in groups.items() %}
+        <h4>{{ group_type.replace('grouped_by_', '')|title }}: {{ group_name }}</h4>
+        <table>
+          <tr><th>mean</th><th>std</th><th>n</th><th>p5</th><th>p25</th><th>p50</th><th>p75</th><th>p95</th></tr>
+          <tr>
+            <td>{{ group_summary.reward.mean | round(4) }}</td>
+            <td>{{ group_summary.reward.std | round(4) }}</td>
+            <td>{{ group_summary.reward.n }}</td>
+            <td>{{ group_summary.reward.p5 | round(4) }}</td>
+            <td>{{ group_summary.reward.p25 | round(4) }}</td>
+            <td>{{ group_summary.reward.p50 | round(4) }}</td>
+            <td>{{ group_summary.reward.p75 | round(4) }}</td>
+            <td>{{ group_summary.reward.p95 | round(4) }}</td>
+          </tr>
+        </table>
+        {% if group_summary.metrics %}
+        <table>
+          <tr>
+            <th>metric</th><th>mean</th><th>std</th><th>n</th><th>p5</th><th>p25</th><th>p50</th><th>p75</th><th>p95</th>
+          </tr>
+          {% for name, m in group_summary.metrics.items() %}
+          <tr>
+            <td>{{ name }}</td>
+            <td>{{ m.mean | round(4) }}</td>
+            <td>{{ m.std | round(4) }}</td>
+            <td>{{ m.n }}</td>
+            <td>{{ m.p5 | round(4) }}</td>
+            <td>{{ m.p25 | round(4) }}</td>
+            <td>{{ m.p50 | round(4) }}</td>
+            <td>{{ m.p75 | round(4) }}</td>
+            <td>{{ m.p95 | round(4) }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+    {% endfor %}
     {% endif %}
 
     <h2>Examples <span class="muted">(showing up to {{ examples|length }} of {{ total_examples }})</span></h2>
@@ -253,6 +276,7 @@ def render_html(
     summary: Dict[str, Any],
     examples: List[Dict[str, Any]],
     total_examples: int,
+    grouped_summary: Dict[str, Any] | None = None,
 ) -> str:
     template = _env.from_string(_TEMPLATE)
     return template.render(
@@ -272,6 +296,7 @@ def render_html(
         metrics=summary.get("metrics", {}),
         examples=examples,
         total_examples=total_examples,
+        grouped_summary=grouped_summary,
     )
 
 
@@ -279,22 +304,96 @@ def write_html_report(
     report_dir: Path,
     meta: ReportMeta,
     results: GenerateOutputs,
+    group_by_task: bool = False,
+    grouping_keys: List[str] = None,
 ) -> Path:
     """Render and write the HTML report next to the environment under `reports/`.
 
-    Returns the path to the written HTML file.
+    Args:
+        report_dir: Directory to write the report to
+        meta: Report metadata
+        results: GenerateOutputs containing evaluation results
+        group_by_task: Whether to group by task (backward compatibility)
+        grouping_keys: List of column names to group by (e.g., ['task', 'difficulty'])
+
+    Returns:
+        Path to the written HTML file.
     """
     report_dir.mkdir(parents=True, exist_ok=True)
 
     summary = compute_summary(results)
     examples = build_examples(results, cap=DETAILED_EXAMPLES_CAP)
+    
+    # Compute grouped summary if requested
+    grouped_summary = None
+    if group_by_task or grouping_keys:
+        # For backward compatibility, if group_by_task is True but no grouping_keys provided,
+        # default to grouping by task
+        if group_by_task and not grouping_keys:
+            grouping_keys = ["task"]
+        grouped_summary = compute_grouped_summary(results, grouping_keys)
+    
     html = render_html(
         meta=meta,
         summary=summary,
         examples=examples,
         total_examples=len(results.reward),
+        grouped_summary=grouped_summary,
     )
     filename = build_report_filename(meta)
     out_path = report_dir / filename
     out_path.write_text(html, encoding="utf-8")
     return out_path
+
+
+def compute_grouped_summary(results: GenerateOutputs, grouping_keys: List[str] = None) -> Dict[str, Any]:
+    """Compute grouped aggregated statistics from GenerateOutputs by specified subset keys.
+    
+    Args:
+        results: GenerateOutputs containing evaluation results
+        grouping_keys: List of column names to group by (e.g., ['task', 'difficulty'])
+                  If None, defaults to ['task'] for backward compatibility
+    
+    Returns:
+        Dictionary with overall summary and grouped summaries by specified keys.
+    """
+    summary: Dict[str, Any] = {}
+    
+    # Overall summary
+    summary["overall"] = compute_summary(results)
+    
+    # Default to task grouping for backward compatibility
+    if grouping_keys is None:
+        grouping_keys = ["task"]
+    
+    # Grouped summaries by specified keys
+    for grouping_key in grouping_keys:
+        if hasattr(results, grouping_key) and getattr(results, grouping_key):
+            key_values = getattr(results, grouping_key)
+            # Only proceed if we have multiple unique values
+            if len(set(key_values)) > 1:
+                key_groups = {}
+                for i, key_value in enumerate(key_values):
+                    if key_value not in key_groups:
+                        key_groups[key_value] = []
+                    key_groups[key_value].append(i)
+                
+                grouped_summaries = {}
+                for key_value, indices in key_groups.items():
+                    # Create a subset of results for this group
+                    subset_results = GenerateOutputs(
+                        prompt=[results.prompt[i] for i in indices],
+                        completion=[results.completion[i] for i in indices],
+                        answer=[results.answer[i] for i in indices],
+                        state=[results.state[i] for i in indices],
+                        info=[results.info[i] for i in indices],
+                        task=[results.task[i] for i in indices],
+                        reward=[results.reward[i] for i in indices],
+                        metrics={k: [results.metrics[k][i] for i in indices] for k in results.metrics}
+                    )
+                    grouped_summaries[key_value] = compute_summary(subset_results)
+                
+                # Add grouped summaries with the key name to avoid conflicts
+                summary[f"grouped_by_{grouping_key}"] = grouped_summaries
+    
+    return summary
