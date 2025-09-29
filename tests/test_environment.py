@@ -1,9 +1,13 @@
 """Tests for the base Environment class."""
 
-from unittest.mock import AsyncMock, Mock
+import json
+import logging
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 from datasets import Dataset
+from openai import BadRequestError
 
 from verifiers import Environment, Parser, Rubric, ThinkParser
 from verifiers.types import ChatCompletion, Completion, GenerateOutputs, RolloutScores
@@ -215,6 +219,181 @@ class TestEnvironmentBase:
         assert len(response.choices) > 0
         assert hasattr(response.choices[0], "text")
         mock_openai_client.completions.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_model_response_chat_context_length_guard(
+        self, mock_openai_client
+    ):
+        """Ensure chat responses gracefully handle context length errors."""
+
+        mock_openai_client.base_url = "https://api.openai.com/v1"
+        env = SimpleEnvironment(
+            client=mock_openai_client,
+            model="gpt-test",
+            eval_dataset=Dataset.from_dict({"question": ["test"], "answer": ["test"]}),
+            parser=Parser(),
+            rubric=Rubric(),
+        )
+
+        error_message = (
+            "This model's maximum context length is 4097 tokens. "
+            "However, you requested 4120 tokens (4020 in the messages, 100 in the completion). "
+            "Please reduce the length of the messages or completion."
+        )
+        error_body = {
+            "error": {
+                "message": error_message,
+                "type": "invalid_request_error",
+                "code": "context_length_exceeded",
+            }
+        }
+        mock_openai_client.chat.completions.create.side_effect = BadRequestError(
+            message=f"Error code: 400 - {json.dumps(error_body)}",
+            response=httpx.Response(
+                status_code=400,
+                request=httpx.Request(
+                    "POST", "https://api.openai.com/v1/chat/completions"
+                ),
+            ),
+            body=error_body,
+        )
+
+        prompt = [{"role": "user", "content": "Hello"}]
+        with patch.object(env.logger, "warning") as mock_warning:
+            response = await env.get_model_response(
+                prompt=prompt,
+                client=mock_openai_client,
+                model="gpt-test",
+                message_type="chat",
+            )
+
+        assert isinstance(response, ChatCompletion)
+        assert response.choices[0].message.content == ""
+        assert response.choices[0].finish_reason == "length"
+        assert response.usage.prompt_tokens == 4020
+        assert response.usage.completion_tokens == 100
+        assert response.usage.total_tokens == 4120
+        assert mock_openai_client.chat.completions.create.await_count == 1
+        mock_warning.assert_called_once()
+        warning_text = mock_warning.call_args.args[0]
+        assert "Context length exceeded" in warning_text
+        assert "requested 4120 tokens" in warning_text
+
+    @pytest.mark.asyncio
+    async def test_get_model_response_completion_context_length_guard_vllm(
+        self, mock_openai_client
+    ):
+        """Ensure completion responses handle vLLM-style context length errors."""
+
+        mock_openai_client.base_url = "http://localhost:8000/v1"
+        env = SimpleEnvironment(
+            client=mock_openai_client,
+            model="vllm-model",
+            eval_dataset=Dataset.from_dict({"prompt": ["test"], "answer": ["test"]}),
+            message_type="completion",
+            parser=Parser(),
+            rubric=Rubric(),
+        )
+
+        error_message = (
+            "'max_tokens' or 'max_completion_tokens' is too large: 400. "
+            "This model's maximum context length is 8192 tokens and your request has "
+            "8000 input tokens (400 > 8192 - 8000)."
+        )
+        error_body = {
+            "error": {
+                "message": error_message,
+                "type": "context_length_exceeded",
+                "code": "context_length_exceeded",
+            }
+        }
+        mock_openai_client.completions.create.side_effect = BadRequestError(
+            message=f"Error code: 400 - {json.dumps(error_body)}",
+            response=httpx.Response(
+                status_code=400,
+                request=httpx.Request("POST", "http://localhost:8000/v1/completions"),
+            ),
+            body=error_body,
+        )
+
+        with patch.object(env.logger, "warning") as mock_warning:
+            response = await env.get_model_response(
+                prompt="Hello",
+                client=mock_openai_client,
+                model="vllm-model",
+                message_type="completion",
+            )
+
+        assert isinstance(response, Completion)
+        assert response.choices[0].text == ""
+        assert response.choices[0].finish_reason == "length"
+        assert response.usage.prompt_tokens == 8000
+        assert response.usage.completion_tokens == 400
+        assert response.usage.total_tokens == 8400
+        assert mock_openai_client.completions.create.await_count == 1
+        mock_warning.assert_called_once()
+        warning_text = mock_warning.call_args.args[0]
+        assert "Context length exceeded" in warning_text
+        assert "limit 8192" in warning_text
+        assert "over by 208 tokens" in warning_text
+
+    @pytest.mark.asyncio
+    async def test_get_model_response_completion_context_length_guard_vllm_prompt(
+        self, mock_openai_client
+    ):
+        """Prompt-only vLLM context limits should gracefully truncate."""
+
+        mock_openai_client.base_url = "http://localhost:8000/v1"
+        env = SimpleEnvironment(
+            client=mock_openai_client,
+            model="vllm-model",
+            eval_dataset=Dataset.from_dict({"prompt": ["test"], "answer": ["test"]}),
+            message_type="completion",
+            parser=Parser(),
+            rubric=Rubric(),
+        )
+
+        error_message = (
+            "This model's maximum context length is 8192 tokens. "
+            "However, your request has 9000 input tokens. "
+            "Please reduce the length of the input messages."
+        )
+        error_body = {
+            "error": {
+                "message": error_message,
+                "type": "context_length_exceeded",
+                "code": "context_length_exceeded",
+            }
+        }
+        mock_openai_client.completions.create.side_effect = BadRequestError(
+            message=f"Error code: 400 - {json.dumps(error_body)}",
+            response=httpx.Response(
+                status_code=400,
+                request=httpx.Request("POST", "http://localhost:8000/v1/completions"),
+            ),
+            body=error_body,
+        )
+
+        with patch.object(env.logger, "warning") as mock_warning:
+            response = await env.get_model_response(
+                prompt="Hello",
+                client=mock_openai_client,
+                model="vllm-model",
+                message_type="completion",
+            )
+
+        assert isinstance(response, Completion)
+        assert response.choices[0].text == ""
+        assert response.choices[0].finish_reason == "length"
+        assert response.usage.prompt_tokens == 9000
+        assert response.usage.completion_tokens == 0
+        assert response.usage.total_tokens == 9000
+        assert mock_openai_client.completions.create.await_count == 1
+        mock_warning.assert_called_once()
+        warning_text = mock_warning.call_args.args[0]
+        assert "Context length exceeded" in warning_text
+        assert "limit 8192" in warning_text
+        assert "prompt 9000 tokens" in warning_text
 
     def test_process_chat_format(self, mock_openai_client, sample_dataset):
         """Test processing chat format conversations."""
