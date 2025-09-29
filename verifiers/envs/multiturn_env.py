@@ -96,10 +96,8 @@ class MultiTurnEnv(Environment):
             # environment response, we rewrite the error to a truncated completion
             # prime-rl will then decide how to mask or penalize this
             except BadRequestError as e:
-                if len(state["responses"]) == 0:
-                    raise e
-                elif e.message.startswith("This model's maximum context length is"):
-                    print(f"rewriting {e} to truncation")
+                if (len(state["responses"]) != 0 
+                    and e.message.startswith("This model's maximum context length is")):
                     state["responses"][-1].choices[0].finish_reason = "length"
                     is_completed = True
                     end_time = time.time()
