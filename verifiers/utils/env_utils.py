@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import importlib
 import inspect
 import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import Callable, Literal, Protocol
 
-from openai import BadRequestError
+from openai import AsyncOpenAI, BadRequestError
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion import Choice as ChatCompletionChoice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -16,9 +18,8 @@ from openai.types.completion_usage import CompletionUsage
 
 from verifiers.types import MessageType, ModelResponse
 
-if TYPE_CHECKING:
-    from openai import AsyncOpenAI
-    from verifiers.envs.environment import Environment
+class Environment(Protocol):
+    ...
 
 
 @dataclass(slots=True)
@@ -59,7 +60,7 @@ _VLLM_MAX_TOKENS_RE = re.compile(
 )
 
 
-def load_environment(env_id: str, **env_args) -> "Environment":
+def load_environment(env_id: str, **env_args) -> Environment:
     logger = logging.getLogger("verifiers.utils.env_utils")
     logger.info(f"Loading environment: {env_id}")
 
@@ -76,7 +77,9 @@ def load_environment(env_id: str, **env_args) -> "Environment":
                 f"3. Check that you've installed the correct environment package"
             )
 
-        env_load_func: Callable[..., "Environment"] = getattr(
+        from verifiers.envs.environment import Environment as EnvironmentImpl
+
+        env_load_func: Callable[..., Environment] = getattr(
             module, "load_environment"
         )
         sig = inspect.signature(env_load_func)
@@ -121,7 +124,12 @@ def load_environment(env_id: str, **env_args) -> "Environment":
             if default_values:
                 logger.info(f"Using default args: {', '.join(default_values)}")
 
-        env_instance: "Environment" = env_load_func(**env_args)
+        env_instance = env_load_func(**env_args)
+
+        if not isinstance(env_instance, EnvironmentImpl):
+            raise TypeError(
+                f"Environment '{env_id}' returned {type(env_instance)} which is not a verifiers Environment"
+            )
 
         logger.info(f"Successfully loaded environment '{env_id}'")
 
@@ -141,7 +149,7 @@ def load_environment(env_id: str, **env_args) -> "Environment":
         raise RuntimeError(f"Failed to load environment '{env_id}': {str(e)}") from e
 
 
-def infer_provider_name(client: "AsyncOpenAI") -> str:
+def infer_provider_name(client: AsyncOpenAI) -> str:
     base_url = getattr(client, "base_url", "")
     base_url_str = str(base_url)
     if "api.openai.com" in base_url_str:
