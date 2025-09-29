@@ -1,7 +1,6 @@
 """Tests for the base Environment class."""
 
 import json
-import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx

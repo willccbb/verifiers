@@ -76,7 +76,9 @@ def load_environment(env_id: str, **env_args) -> "Environment":
                 f"3. Check that you've installed the correct environment package"
             )
 
-        env_load_func: Callable[..., "Environment"] = getattr(module, "load_environment")
+        env_load_func: Callable[..., "Environment"] = getattr(
+            module, "load_environment"
+        )
         sig = inspect.signature(env_load_func)
         defaults_info = []
         for param_name, param in sig.parameters.items():
@@ -144,13 +146,15 @@ def infer_provider_name(client: "AsyncOpenAI") -> str:
     base_url_str = str(base_url)
     if "api.openai.com" in base_url_str:
         return "OpenAI"
-    if any(host in base_url_str for host in ("localhost", "127.0.0.1", "0.0.0.0", "vllm")):
+    if any(
+        host in base_url_str for host in ("localhost", "127.0.0.1", "0.0.0.0", "vllm")
+    ):
         return "vLLM"
     return "OpenAI-compatible endpoint"
 
 
 def _match_openai_context_length(message: str) -> dict[str, int] | None:
-    match = _OPENAI_CONTEXT_LENGTH_RE.search(message)
+    match = _OPENAI_CONTEXT_LENGTH_RE.fullmatch(message)
     if not match:
         return None
     details = {key: int(value) for key, value in match.groupdict().items()}
@@ -164,18 +168,17 @@ def _match_openai_context_length(message: str) -> dict[str, int] | None:
 
 def _match_vllm_context_length(message: str) -> dict[str, int] | None:
     for pattern in (_VLLM_PROMPT_ONLY_RE, _VLLM_OPERATION_INPUT_RE):
-        match = pattern.search(message)
+        match = pattern.fullmatch(message)
         if not match:
             continue
         details = {key: int(value) for key, value in match.groupdict().items()}
         prompt_tokens = details["prompt_tokens"]
         limit = details["limit"]
         details.setdefault("completion_tokens", 0)
-        details["requested"] = prompt_tokens
         details["over"] = max(prompt_tokens - limit, 0)
         return details
 
-    match = _VLLM_MAX_TOKENS_RE.search(message)
+    match = _VLLM_MAX_TOKENS_RE.fullmatch(message)
     if not match:
         return None
     details = {key: int(value) for key, value in match.groupdict().items()}
@@ -239,9 +242,8 @@ def format_context_length_warning(
         fragments.append("input prompt was too long")
 
     fragments.append("returning synthetic length-finish response")
-    return (
-        f"Context length exceeded for model '{model}' via {provider} - "
-        + "; ".join(fragments)
+    return f"Context length exceeded for model '{model}' via {provider} - " + "; ".join(
+        fragments
     )
 
 

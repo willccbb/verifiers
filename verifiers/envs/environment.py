@@ -126,7 +126,6 @@ class Environment(ABC):
         messages.append({"role": "user", "content": prompt_str})
         return messages
 
-
     def format_dataset(
         self,
         dataset: Dataset,
@@ -290,9 +289,7 @@ class Environment(ABC):
                 )
                 message_text = context_error.message
                 if message_text and message_text not in warning_message:
-                    warning_message = (
-                        f"{warning_message} - upstream: {message_text}"
-                    )
+                    warning_message = f"{warning_message} - upstream: {message_text}"
                 self.logger.warning(warning_message)
                 return build_context_length_stub_response(
                     message_type, model, context_error.details
