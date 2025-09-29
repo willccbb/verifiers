@@ -24,7 +24,7 @@ from .utils.data_utils import (
     extract_hash_answer,
     load_example_dataset,
 )
-from .utils.env_utils import load_environment
+from .loader import load_environment
 from .utils.logging_utils import print_prompt_completions_sample
 
 
