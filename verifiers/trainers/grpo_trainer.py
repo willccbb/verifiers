@@ -414,7 +414,7 @@ class GRPOTrainer(Trainer):
         assert train_dataset is not None
 
         eval_dataset = env.get_eval_dataset()
-
+        
         if "prompt" not in train_dataset.column_names:
             raise ValueError("Train dataset must contain a 'prompt' column")
         if "answer" not in train_dataset.column_names:
@@ -591,6 +591,7 @@ class GRPOTrainer(Trainer):
             "prompt": deque(maxlen=maxlen),
             "completion": deque(maxlen=maxlen),
             "rewards": defaultdict(lambda: deque(maxlen=maxlen)),
+            "answers": deque(maxlen=maxlen),
         }
 
         # OpenAI client for Environment generation (using vLLM server)
@@ -1197,7 +1198,7 @@ class GRPOTrainer(Trainer):
                     "prompts": batch_result.prompts,
                     "pixel_values":processed_results.pixel_values,
                     "image_grid_thw":processed_results.image_grid_thw,
-                    "answer": batch_result.answers,
+                    "answers": batch_result.answers,
                 }
             else:
                 broadcast_data = None
@@ -1295,6 +1296,7 @@ class GRPOTrainer(Trainer):
                     all_prompts=broadcast_data["prompts"],
                     all_completions=broadcast_data["completions"],
                     all_reward_dict=broadcast_data["all_reward_dict"],
+                    all_answers=broadcast_data["answers"],
                 )
 
                 # Log completion metrics using full batch data on CPU to save memory
@@ -1637,7 +1639,7 @@ class GRPOTrainer(Trainer):
                     self._logs["prompt"],
                     self._logs["completion"],
                     self._logs["rewards"]["reward"],
-                    self._logs["answer"],
+                    self._logs["answers"],
                     self.state.global_step,
                 )
 
@@ -1656,7 +1658,7 @@ class GRPOTrainer(Trainer):
                         self._sanitize_tool_calls(c)
                         for c in self._logs["completion"]
                     ],
-                    "answer" : list(self._logs["answers"])
+                    "answer" : list(self._logs["answers"]),
                     **{k: list(v) for k, v in self._logs["rewards"].items()},
                 }
                 

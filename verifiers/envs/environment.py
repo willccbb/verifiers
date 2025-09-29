@@ -125,7 +125,6 @@ class Environment(ABC):
             self.logger.warning(
                 "The parser and rubric parser are different. This may cause unexpected behavior."
             )
-
         if self.message_type == "chat":
             if dataset is not None:
                 self.dataset = self.format_dataset(

@@ -301,7 +301,7 @@ class AsyncBatchGenerator:
             all_reward_dict=all_reward_dict,
             completions=env_results.completion,
             prompts=env_results.prompt,
-            answers=request.env_inputs.answer
+            answers=request.env_inputs.get("answer")
         )
 
     async def _evaluate_async(self, num_samples: int = -1) -> GenerateOutputs:
