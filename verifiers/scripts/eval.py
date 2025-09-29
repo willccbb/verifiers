@@ -265,7 +265,6 @@ def main():
         default="https://api.openai.com/v1",
         help="Base URL for API",
     )
-    # Arbitrary request headers (repeatable)
     parser.add_argument(
         "--header",
         action="append",
