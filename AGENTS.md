@@ -5,7 +5,6 @@ This guide covers best practices for contributing to the core `verifiers` librar
 Other relevant `AGENTS.md` files:
 - `tests/AGENTS.md`
 - `verifiers/envs/AGENTS.md`
-- `verifiers/trainers/AGENTS.md`
 
 ## Setup
 
