@@ -37,6 +37,9 @@ jobs:
 
     - name: Install dependencies
       run: uv sync
+
+    - name: Install prime
+      run: uv pip install prime
     
     - name: Run tests
       run: |
