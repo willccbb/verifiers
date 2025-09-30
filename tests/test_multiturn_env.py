@@ -107,6 +107,17 @@ class TestMultiTurnEnv:
         assert len(state["responses"]) == 2  # Two assistant responses
 
     @pytest.mark.asyncio
+    async def test_max_turns_helper(self, mock_multiturn_env):
+        """max_turns_reached returns True only when limit exceeded and limit is active."""
+
+        mock_multiturn_env.max_turns = -1
+        assert not await mock_multiturn_env.max_turns_reached({"turn": 100})
+
+        mock_multiturn_env.max_turns = 2
+        assert not await mock_multiturn_env.max_turns_reached({"turn": 1})
+        assert await mock_multiturn_env.max_turns_reached({"turn": 2})
+
+    @pytest.mark.asyncio
     async def test_state_initialization(self, mock_multiturn_env):
         """Test that state is properly initialized with all required fields."""
         mock_multiturn_env.client.add_chat_response(

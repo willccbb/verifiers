@@ -5,6 +5,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from datasets import Dataset
 
+try:
+    from openai.types.chat import ChatCompletionFunctionToolParam  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - runtime patch for older openai stubs
+    from openai.types import chat as _chat_module
+
+    class ChatCompletionFunctionToolParam(dict):
+        """Fallback stub for older openai-python versions used in tests."""
+
+        pass
+
+    _chat_module.ChatCompletionFunctionToolParam = ChatCompletionFunctionToolParam  # type: ignore[attr-defined]
+
 from verifiers import (
     MultiTurnEnv,
     Parser,
@@ -257,20 +269,23 @@ class SimpleMultiTurnEnv(MultiTurnEnv):
         )
         self.env_response_count = 0
 
-    def is_completed(self, messages, state, **kwargs):
-        """Simple completion logic for testing."""
+    async def is_completed(self, messages, state, **kwargs):
+        """Simple completion logic for testing that honors the base max-turn check."""
         if self.completion_condition == "answer":
             # Complete when assistant says "DONE"
             if messages and messages[-1].get("role") == "assistant":
-                return "DONE" in messages[-1].get("content", "")
+                if "DONE" in messages[-1].get("content", ""):
+                    return True
         elif self.completion_condition == "max_turns":
-            # Never complete naturally (test max_turns)
-            return False
+            # Defer entirely to the base-class max turn handling
+            return await super().is_completed(messages, state, **kwargs)
         elif self.completion_condition == "error":
             # Complete on any error
             if messages and messages[-1].get("role") == "assistant":
-                return messages[-1].get("content", "").startswith("[ERROR]")
-        return False
+                if messages[-1].get("content", "").startswith("[ERROR]"):
+                    return True
+        # Fall back to the base implementation so max_turns is still enforced
+        return await super().is_completed(messages, state, **kwargs)
 
     def env_response(self, messages, state, **kwargs):
         """Simple environment response for testing."""
