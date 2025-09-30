@@ -43,13 +43,13 @@ class ToolEnv(MultiTurnEnv):
     async def is_completed(
         self, messages: Messages, state: State, **kwargs: Any
     ) -> bool:
-        max_turns_reached = await super().is_completed(messages, state, **kwargs)
+        completed = await super().is_completed(messages, state, **kwargs)
         assert isinstance(messages, list)
         is_assistant_message = messages[-1]["role"] == "assistant"
         no_tool_calls = (
             "tool_calls" not in messages[-1] or messages[-1]["tool_calls"] is None
         )
-        return max_turns_reached or (is_assistant_message and no_tool_calls)
+        return completed or (is_assistant_message and no_tool_calls)
 
     async def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
