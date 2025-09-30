@@ -2,6 +2,10 @@
 
 This guide covers best practices for contributing to the core `verifiers` library and for and developing new environments (e.g. in `environments/`).
 
+Other relevant `AGENTS.md` files:
+- `tests/AGENTS.md`
+- `verifiers/envs/AGENTS.md`
+
 ## Setup
 
 We strongly recommend using `uv` for developing `verifiers`.
@@ -32,7 +36,7 @@ source .venv/bin/activate
 
 For PRs to `verifiers` core (e.g. `verifiers/verifiers/`):
 ```bash
-git clone https://github.com/willccbb/verifiers.git
+git clone https://github.com/PrimeIntellect-ai/verifiers.git
 cd verifiers
 
 # CPU-only development:

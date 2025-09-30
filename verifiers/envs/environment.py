@@ -238,7 +238,9 @@ class Environment(ABC):
                         c = m.get("content")  # type: ignore[assignment]
                         if isinstance(c, list):
                             for p in c:
-                                if isinstance(p, dict) and str(p.get("type", "")).startswith("input_audio"):
+                                if isinstance(p, dict) and str(
+                                    p.get("type", "")
+                                ).startswith("input_audio"):
                                     has_audio = True
                                     break
                         if has_audio:
@@ -246,7 +248,10 @@ class Environment(ABC):
                 except Exception:
                     has_audio = False
                 if has_audio and "modalities" not in clean_sampling_args:
-                    clean_sampling_args = {**clean_sampling_args, "modalities": ["text"]}
+                    clean_sampling_args = {
+                        **clean_sampling_args,
+                        "modalities": ["text"],
+                    }
 
                 if oai_tools:
                     response = await client.chat.completions.create(
@@ -335,12 +340,13 @@ class Environment(ABC):
             save_intermediate: If True, save intermediate results during rollout
             interleave_rewards: If True, compute rewards after each rollout instead of batching
         """
-        from tqdm.asyncio import tqdm_asyncio
 
         results: list[tuple[Messages, State]] = []
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
-            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+            for i, (prompt, answer, task, info) in enumerate(
+                zip(prompts, answers, tasks, infos)
+            ):
                 result = await self.run_rollout_with_semaphore(
                     semaphore,
                     client,
@@ -353,7 +359,7 @@ class Environment(ABC):
                     **kwargs,
                 )
                 results.append(result)
-                
+
                 if save_intermediate:
                     # Save intermediate results
                     intermediate_results = GenerateOutputs(
@@ -366,7 +372,7 @@ class Environment(ABC):
                         reward=[],
                         metrics={},
                     )
-                    
+
                     if interleave_rewards:
                         # Compute rewards for this single result
                         rollout_scores = await self.rubric.score_rollouts(
@@ -381,16 +387,20 @@ class Environment(ABC):
                         )
                         intermediate_results.reward = rollout_scores.reward
                         intermediate_results.metrics = rollout_scores.metrics
-                    
+
                     # Save intermediate results (you can customize this part)
-                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
+                    self.logger.info(
+                        f"Saved intermediate result {i + 1}/{len(prompts)}"
+                    )
         else:
-            for i, (prompt, answer, task, info) in enumerate(zip(prompts, answers, tasks, infos)):
+            for i, (prompt, answer, task, info) in enumerate(
+                zip(prompts, answers, tasks, infos)
+            ):
                 result = await self.rollout(
                     client, model, prompt, answer, task, info, sampling_args, **kwargs
                 )
                 results.append(result)
-                
+
                 if save_intermediate:
                     # Save intermediate results
                     intermediate_results = GenerateOutputs(
@@ -403,7 +413,7 @@ class Environment(ABC):
                         reward=[],
                         metrics={},
                     )
-                    
+
                     if interleave_rewards:
                         # Compute rewards for this single result
                         rollout_scores = await self.rubric.score_rollouts(
@@ -418,10 +428,12 @@ class Environment(ABC):
                         )
                         intermediate_results.reward = rollout_scores.reward
                         intermediate_results.metrics = rollout_scores.metrics
-                    
+
                     # Save intermediate results (you can customize this part)
-                    self.logger.info(f"Saved intermediate result {i+1}/{len(prompts)}")
-        
+                    self.logger.info(
+                        f"Saved intermediate result {i + 1}/{len(prompts)}"
+                    )
+
         return results
 
     async def a_generate(
@@ -622,21 +634,42 @@ class Environment(ABC):
     def make_dataset(
         self,
         results: GenerateOutputs,
-        push_to_hub: bool = False,
+        rollouts_per_example: int = 1,
+        push_to_hf_hub: bool = False,
         hub_name: str | None = None,
         state_columns: list[str] | None = None,
         **kwargs,
     ) -> Dataset:
         """
         Make a dataset from the evaluation results.
+
+        Args:
+            results: The evaluation results to convert to a dataset
+            rollouts_per_example: The number of rollouts per example
+            push_to_hf_hub: Whether to push the dataset to the Hugging Face Hub
+            hub_name: The name of the dataset on the Hugging Face Hub
+            state_columns: List of state columns to include in the dataset
+            concatenate_safe: Whether to ensure the dataset can be concatenated with others
+                          by standardizing column types (useful for combining results from
+                          different environments). Defaults to True for consistent schemas.
+            **kwargs: Additional arguments passed to Dataset creation
         """
         # TODO: enable saving of multimodal datasets
         state_columns = state_columns or []
 
-        if push_to_hub and hub_name is None:
-            raise ValueError("hub_name must be provided if push_to_hub is True")
+        if push_to_hf_hub and hub_name is None:
+            raise ValueError("hub_name must be provided if push_to_hf_hub is True")
 
-        cols = ["prompt", "completion", "answer", "task", "reward"]
+        cols = ["prompt", "completion", "answer", "task", "reward", "average_reward"]
+
+        if rollouts_per_example > 1:
+            average_reward = []
+            for i in range(0, len(results.reward), rollouts_per_example):
+                chunk = results.reward[i : i + rollouts_per_example]
+                avg = sum(chunk) / len(chunk)
+                average_reward.extend([avg] * rollouts_per_example)
+        else:
+            average_reward = results.reward
 
         results_dict = {
             "prompt": results.prompt,
@@ -644,6 +677,7 @@ class Environment(ABC):
             "answer": results.answer,
             "task": results.task,
             "reward": results.reward,
+            "average_reward": average_reward,
         }
         if results.info[0] != {}:
             results_dict["info"] = results.info
@@ -664,7 +698,7 @@ class Environment(ABC):
                         f"Column {col} not found in state, skipping from dataset."
                     )
         dataset = Dataset.from_dict({col: results_dict[col] for col in cols})
-        if push_to_hub:
+        if push_to_hf_hub:
             assert hub_name is not None
             dataset.push_to_hub(hub_name)
         return dataset
@@ -772,6 +806,38 @@ class Environment(ABC):
         i = 0
         while i < len(zipped):
             message, response = zipped[i]
+
+            def deserialize_tool_calls(message: dict) -> dict:
+                """
+                Deserialize tool calls in messages, if any are present. Iterates
+                over all messages in a message list and tries to find
+                "tool_calls" key. If found, assumes it is a OAI format and has
+                key "function" with "arguments" key which is stringified. It
+                will then deserialize the argument so that chat tmeplates like
+                Qwen3's can be used.
+                """
+
+                def deserialize_tool_call(tool_call) -> dict:
+                    tool_call = dict(tool_call)
+                    function = dict(tool_call["function"])
+                    return {
+                        **tool_call,
+                        "function": {
+                            **function,
+                            "arguments": json.loads(function["arguments"]),
+                        },
+                    }
+
+                return {
+                    **message,
+                    "tool_calls": [
+                        deserialize_tool_call(tool_call)
+                        for tool_call in message.get("tool_calls", []) or []
+                    ],
+                }
+
+            message = deserialize_tool_calls(message)
+
             # assistant case -- use response
             if message["role"] == "assistant":
                 assert response is not None, "Response should not be None"
@@ -950,6 +1016,7 @@ class Environment(ABC):
             if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
                 if len(prompt_ids) > max_seq_len:
                     prompt_ids = prompt_ids[:max_seq_len]
+                    prompt_mask = prompt_mask[:max_seq_len]
                 completion_ids = completion_ids[: max_seq_len - len(prompt_ids)]
                 completion_mask = completion_mask[: max_seq_len - len(prompt_ids)]
                 completion_logprobs = completion_logprobs[
