@@ -48,6 +48,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
+    "prime>=0.3.34",
+    "textarena",
+    "nltk",
+    "math-verify>=0.8.0",
 ]
 
 [project.optional-dependencies]
