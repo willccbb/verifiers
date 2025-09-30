@@ -2,7 +2,7 @@
 
 ### Overview
 - **Environment ID**: `math-python`
-- **Short description**: Tool-using math environment requiring Python tool calls to compute answers; graded by symbolic equivalence.
+- **Short description**: Tool-using math environment requiring Python tool calls to compute answers (via `PythonEnv` + `prime` sandboxes); graded by symbolic equivalence.
 - **Tags**: math, tools, python, single-turn, boxed-answer
 
 ### Datasets
@@ -33,7 +33,6 @@ uv run vf-eval math-python \
 
 Notes:
 - Use `-a` / `--env-args` to pass environment-specific configuration as a JSON object.
-- Reports are written under `./environments/math_python/reports/` and auto-embedded below.
 
 ### Environment Arguments
 | Arg | Type | Default | Description |
