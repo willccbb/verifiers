@@ -16,7 +16,7 @@ uv add 'verifiers[all]' && uv pip install flash-attn --no-build-isolation
 To use latest `main`:
 
 ```bash
-uv add verifiers @ git+https://github.com/willccbb/verifiers.git
+uv add verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git
 ```
 
 ### Quick Start (Python)

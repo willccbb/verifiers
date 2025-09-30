@@ -290,29 +290,23 @@ class MyGameEnv(vf.MultiTurnEnv):
 
     async def env_response(self, messages: Messages, state: State) -> Tuple[Messages, State]:
         """Define how the environment responds."""
-        # Get the last message from the assistant
         last_msg = messages[-1]
-        if last_msg["role"] == "assistant":
-            player_action = last_msg["content"]
-        else:
-            return [], state  # No response if not assistant message
-        
-        # Check game state
+        if last_msg["role"] != "assistant":
+            return [], state
+
+        player_action = last_msg["content"]
         if self.is_game_over(state):
-            response = [{"role": "user", "content": "Game over!"}]
             state["done"] = True
-            return response, state
-        
-        # Update game state
+            return [{"role": "user", "content": "Game over!"}], state
+
         state = self.update_state(state, player_action)
         feedback = self.get_game_feedback(state)
-        
-        # Return list of ChatMessage dicts
-        response = [{"role": "user", "content": feedback}]
-        return response, state
+        return [{"role": "user", "content": feedback}], state
 
-def load_environment(**kwargs):
-    return MyGameEnv(dataset=dataset, **kwargs)
+    async def is_completed(self, messages: Messages, state: State) -> bool:
+        if await super().is_completed(messages, state):
+            return True
+        return state.get("solved", False) or state.get("failed", False)
 ```
 
 ### ToolEnv
@@ -333,6 +327,29 @@ def load_environment(**kwargs):
         **kwargs
     )
 ```
+
+Tool functions should be deterministic and free of hidden side effects. A rollout ends when the model produces an assistant turn with no tool calls, so store per-session context in `state` rather than globals. Use `StatefulToolEnv` if you need to inject extra arguments or secrets into each tool invocation.
+
+#### StatefulToolEnv
+
+For stateful workflows, extend `vf.StatefulToolEnv`:
+
+```python
+class SandboxAwareEnv(vf.StatefulToolEnv):
+    async def setup_state(self, state: State, **kwargs) -> State:
+        state = await super().setup_state(state, **kwargs)
+        state["sandbox_id"] = await provision_sandbox_async()
+        return state
+
+    def update_tool_args(self, tool_name: str, tool_args: dict, messages: Messages, state: State, **kwargs) -> dict:
+        return {**tool_args, "sandbox_id": state["sandbox_id"]}
+```
+
+Keep heavy provisioning asynchronous and defer expensive await calls until a tool actually needs the resource. Remove sensitive args from the tool schema via `add_tool(..., args_to_skip=[...])` so the model never sees them.
+
+#### SandboxEnv & PythonEnv
+
+`vf.SandboxEnv` packages the pattern above for Prime sandboxes: it kicks off container startup in `setup_state` and injects handles into tool calls once ready. `vf.PythonEnv` is the canonical example—review it when building similar sandboxes or remote runtimes.
 
 ## Advanced Patterns
 
