@@ -6,6 +6,7 @@ def load_environment(
     dataset_name: str = "math",
     dataset_split: str = "train",
     num_train_examples: int = -1,
+    max_turns: int = 100,
     **kwargs,
 ):
     dataset = load_example_dataset(dataset_name, dataset_split, n=num_train_examples)
@@ -20,7 +21,7 @@ def load_environment(
         system_prompt=system_prompt,
         parser=parser,
         rubric=math_rubric,
-        max_turns=100,
+        max_turns=max_turns,
         **kwargs,
     )
     assert vf_env.tools is not None
