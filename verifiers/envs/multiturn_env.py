@@ -1,7 +1,7 @@
 import time
 from abc import abstractmethod
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from verifiers.envs.environment import Environment
 from verifiers.types import (
@@ -21,6 +21,9 @@ class MultiTurnEnv(Environment):
         super().__init__(**kwargs)
         self.max_turns = max_turns
 
+    async def prompt_too_long(self, state: State) -> bool:
+        return state.get("prompt_too_long", False)
+
     async def max_turns_reached(self, state: State) -> bool:
         """Check if the maximum number of turns has been reached."""
         return state["turn"] >= self.max_turns and self.max_turns > 0
@@ -31,7 +34,8 @@ class MultiTurnEnv(Environment):
     async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
         """When overriding, call self.max_turns_reached(state) to check if turn limit reached."""
         max_turns_reached = await self.max_turns_reached(state)
-        return max_turns_reached
+        prompt_too_long = await self.prompt_too_long(state)
+        return max_turns_reached or prompt_too_long
 
     @abstractmethod
     async def env_response(
@@ -87,15 +91,27 @@ class MultiTurnEnv(Environment):
             if await maybe_await(self.is_completed, rollout, state, **kwargs):
                 is_completed = True
                 break
-            response = await self.get_model_response(
-                client=client,
-                model=model,
-                prompt=rollout,
-                oai_tools=info.get("oai_tools", None),
-                sampling_args=sampling_args,
-                message_type=self.message_type,
-            )
-            state["responses"].append(response)
+            try:
+                response = await self.get_model_response(
+                    client=client,
+                    model=model,
+                    prompt=rollout,
+                    oai_tools=info.get("oai_tools", None),
+                    sampling_args=sampling_args,
+                    message_type=self.message_type,
+                )
+                state["responses"].append(response)
+            # In case of requesting a too-long completion, e.g from a too-long
+            # environment response, we set the prompt_too_long flag to True, which
+            # will trigger the is_completed check to exit.
+            except BadRequestError as e:
+                if len(state["responses"]) != 0 and e.message.startswith(
+                    "This model's maximum context length is"
+                ):
+                    state["prompt_too_long"] = True
+                    break
+                else:
+                    raise e
             if self.message_type == "chat":
                 assert isinstance(rollout, list)
                 assert isinstance(completion, list)

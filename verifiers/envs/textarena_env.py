@@ -77,11 +77,11 @@ class TextArenaEnv(MultiTurnEnv):
     async def is_completed(
         self, messages: Messages, state: State, **kwargs: Any
     ) -> bool:
-        max_turns_reached = await super().is_completed(messages, state, **kwargs)
+        completed = await super().is_completed(messages, state, **kwargs)
         if "is_completed" in state and state["is_completed"]:
             state.pop("ta_env")
             return state["is_completed"]
-        return False or max_turns_reached
+        return False or completed
 
     async def env_response(
         self, messages: Messages, state: State, **kwargs: Any
