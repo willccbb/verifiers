@@ -2,6 +2,10 @@
 
 This guide covers best practices for contributing to the core `verifiers` library and for and developing new environments (e.g. in `environments/`).
 
+Other relevant `AGENTS.md` files:
+- `tests/AGENTS.md`
+- `verifiers/envs/AGENTS.md`
+
 ## Setup
 
 We strongly recommend using `uv` for developing `verifiers`.

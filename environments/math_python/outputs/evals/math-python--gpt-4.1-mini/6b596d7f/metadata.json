@@ -1,1 +1,0 @@
-{"env": "math-python", "model": "gpt-4.1-mini", "num_examples": 5, "rollouts_per_example": 3, "sampling_args": {"max_tokens": null}, "date": "2025-09-01", "time": "01:00:56", "avg_reward": 0.0, "avg_total_tool_calls": 1.0666666666666667, "avg_python_calls": 1.0666666666666667, "avg_correct_answer_reward_func": 0.0}

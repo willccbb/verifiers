@@ -186,7 +186,8 @@ Use `vf-eval -s` to save outputs as dataset-formatted JSON, and view all locally
 
 ### ToolEnv
 
-For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools can be specified as generic Python functions (with type hints and docstrings), which will then be passed in JSON schema form to each inference request.
+For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools must be stateless and idempotent—each call should be fully determined by the provided arguments—because the environment will automatically terminate once the assistant responds without tool calls. Tools can be specified as generic Python functions (with type hints and docstrings), which will then be passed in JSON schema form to each inference request.
+
 
 ```python
 import verifiers as vf
@@ -198,13 +199,22 @@ vf_env = vf.ToolEnv(
 )
 ```
 
-In cases where your tools require heavy computational resources, we recommend hosting your tools as standalone servers (e.g. MCP servers) and creating lightweight wrapper functions to pass to `ToolEnv`. Parallel tool call support is enabled by default. 
+In cases where your tools require heavy computational resources, we recommend hosting your tools as standalone servers (e.g. MCP servers) and creating lightweight wrapper functions to pass to `ToolEnv`. Parallel tool call support is enabled by default. If you need to inject per-rollout or cross-call state (IDs, credentials, cached resources), promote the environment to `StatefulToolEnv` and populate that state through `setup_state`/`update_tool_args` instead of hiding globals.
+
+#### StatefulToolEnv
+
+`StatefulToolEnv` extends `ToolEnv` for workflows where tool calls must incorporate dynamic state (for example, sandbox handles or per-user secrets). Implement `setup_state` to seed the state dict and override `update_tool_args` to merge state into each tool invocation. Any arguments you strip from the OpenAI schema via `args_to_skip` should be tracked in `skipped_args` so the model never sees sensitive parameters. Avoid storing global state; keep everything in the provided `state` dict.
+
+#### SandboxEnv & PythonEnv
+
+`SandboxEnv` builds on `StatefulToolEnv` to coordinate long-running sandboxes. Queue heavyweight provisioning inside `setup_state` (without awaiting) and gate tool execution on readiness inside `update_tool_args` or the tools themselves. `PythonEnv` is a concrete sandboxed executor that demonstrates the pattern: it spins up a Prime sandbox, injects the sandbox ID into each tool call, and tears down resources when the rollout finishes. Treat both environments as references when building similar stateful tool workflows.
 
 For training, or self-hosted endpoints, you'll want to enable auto tool choice in [vLLM](https://docs.vllm.ai/en/stable/features/tool_calling.html#automatic-function-calling) with the appropriate parser. If your model does not support native tool calling, you may find the `XMLParser` abstraction useful for rolling your own tool call parsing on top of `MultiTurnEnv`; see `environments/xml_tool_env` for an example.
 
 ### MultiTurnEnv
 
-Both `SingleTurnEnv` and `ToolEnv` are instances of `MultiTurnEnv`, which exposes an interface for writing custom Environment interaction protocols. The two methods you must override are
+Both `SingleTurnEnv` and `ToolEnv` are instances of `MultiTurnEnv`, which exposes an interface for writing custom Environment interaction protocols. Override `is_completed` and `env_response`, and make sure any custom completion logic defers to the base class so turn limits and other shared guards keep working.
+
 
 ```python
 from typing import Tuple
@@ -218,7 +228,11 @@ class YourMultiTurnEnv(vf.MultiTurnEnv):
                  **kwargs):
 	
   async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
+    # Always call the base check so max_turns and shared guards are respected
+    if await super().is_completed(messages, state, **kwargs):
+        return True
     # return whether or not a rollout is completed
+    return state.get("task_complete", False)
 
   async def env_response(self, messages: Messages, state: State, **kwargs) -> Tuple[Messages, State]:
     # return new environment message(s) + updated state
@@ -226,6 +240,13 @@ class YourMultiTurnEnv(vf.MultiTurnEnv):
 
 If your application requires more fine-grained control than is allowed by `MultiTurnEnv`, you may want to inherit from the base `Environment` functionality directly and override the `rollout` method.
 
+### ToolEnv
+For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools must be stateless and idempotent—each call should be fully determined by the provided arguments—because the environment will automatically terminate once the assistant responds without tool calls.
+
+#### StatefulToolEnv
+`StatefulToolEnv` extends `ToolEnv` for workflows where tool calls must incorporate dynamic state ...
+#### SandboxEnv & PythonEnv
+`SandboxEnv` builds on `StatefulToolEnv` to coordinate long-running sandboxes ... `PythonEnv` is a concrete sandboxed executor that demonstrates the pattern ...
 
 ## Training
 
