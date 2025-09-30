@@ -188,6 +188,7 @@ Use `vf-eval -s` to save outputs as dataset-formatted JSON, and view all locally
 
 For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools must be stateless and idempotent—each call should be fully determined by the provided arguments—because the environment will automatically terminate once the assistant responds without tool calls. Tools can be specified as generic Python functions (with type hints and docstrings), which will then be passed in JSON schema form to each inference request.
 
+
 ```python
 import verifiers as vf
 vf_env = vf.ToolEnv(
@@ -214,6 +215,7 @@ For training, or self-hosted endpoints, you'll want to enable auto tool choice i
 
 Both `SingleTurnEnv` and `ToolEnv` are instances of `MultiTurnEnv`, which exposes an interface for writing custom Environment interaction protocols. Override `is_completed` and `env_response`, and make sure any custom completion logic defers to the base class so turn limits and other shared guards keep working.
 
+
 ```python
 from typing import Tuple
 import verifiers as vf
@@ -238,6 +240,13 @@ class YourMultiTurnEnv(vf.MultiTurnEnv):
 
 If your application requires more fine-grained control than is allowed by `MultiTurnEnv`, you may want to inherit from the base `Environment` functionality directly and override the `rollout` method.
 
+### ToolEnv
+For many applications involving tool use, you can use `ToolEnv` to leverage models' native tool/function-calling capabilities in an agentic loop. Tools must be stateless and idempotent—each call should be fully determined by the provided arguments—because the environment will automatically terminate once the assistant responds without tool calls.
+
+#### StatefulToolEnv
+`StatefulToolEnv` extends `ToolEnv` for workflows where tool calls must incorporate dynamic state ...
+#### SandboxEnv & PythonEnv
+`SandboxEnv` builds on `StatefulToolEnv` to coordinate long-running sandboxes ... `PythonEnv` is a concrete sandboxed executor that demonstrates the pattern ...
 
 ## Training
 
