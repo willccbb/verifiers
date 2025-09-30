@@ -2,7 +2,7 @@
 name = "continuation-quality"
 version = "0.1.1"
 dependencies = [
-    "verifiers>=0.1.3",
+    "verifiers>=0.1.4",
 ]
 
 [build-system]

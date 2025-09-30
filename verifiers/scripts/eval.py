@@ -7,11 +7,13 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import cast, Dict
 
 import numpy as np
 from datasets import Dataset
 
 import verifiers as vf
+from verifiers.types import Endpoints
 from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
@@ -37,6 +39,7 @@ def eval_environment(
     save_dataset: bool,
     save_to_hf_hub: bool,
     hf_hub_dataset_name: str,
+    extra_headers: Dict[str, str],
 ):
     logger.setLevel("DEBUG" if verbose else "INFO")
     try:
@@ -52,7 +55,12 @@ def eval_environment(
             assert spec and spec.loader
             endpoints_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(endpoints_module)
-            ENDPOINTS = endpoints_module.ENDPOINTS
+            # check that module exposes ENDPOINTS
+            if not hasattr(endpoints_module, "ENDPOINTS"):
+                raise AttributeError(
+                    f"Module '{endpoints_file}' does not have a 'ENDPOINTS' attribute"
+                )
+            ENDPOINTS = cast(Endpoints, endpoints_module.ENDPOINTS)
             logger.debug(
                 f"Successfully loaded {len(ENDPOINTS)} endpoints from registry"
             )
@@ -65,7 +73,7 @@ def eval_environment(
             f"Error details: {str(e)}"
         )
         logger.debug("Using default empty endpoints registry")
-        ENDPOINTS = {}
+        ENDPOINTS: Endpoints = {}
 
     if model in ENDPOINTS:
         api_key_var = ENDPOINTS[model]["key"]
@@ -85,6 +93,7 @@ def eval_environment(
         max_connections=28000,  # Number of available ports
         max_keepalive_connections=28000,  # Number of available ports
         max_retries=10,  # 10 retries (w/ exponential backoffs)
+        extra_headers=extra_headers,
     )
     logger.debug(f"Initialized OpenAI client with base_url: {api_base_url}")
     vf_env = vf.load_environment(env_id=env, **env_args)
@@ -112,7 +121,6 @@ def eval_environment(
     )
     end_time = time.time()
     logger.info(f"Evaluation completed in {end_time - start_time:.2f} seconds")
-    logger.info("Evaluation completed successfully")
     print("--- Evaluation ---")
     print(f"Environment: {env}")
     print(f"Model: {model}")
@@ -258,6 +266,12 @@ def main():
         help="Base URL for API",
     )
     parser.add_argument(
+        "--header",
+        action="append",
+        default=None,
+        help="Extra HTTP header to pass to inference API. 'Name: Value'. Repeatable.",
+    )
+    parser.add_argument(
         "--num-examples",
         "-n",
         type=int,
@@ -324,6 +338,17 @@ def main():
     )
     args = parser.parse_args()
 
+    # Build headers from repeated --header flags
+    merged_headers: Dict[str, str] = {}
+    for h in args.header or []:
+        if ":" not in h:
+            raise ValueError(f"--header must be 'Name: Value', got: {h!r}")
+        k, v = h.split(":", 1)
+        k, v = k.strip(), v.strip()
+        if not k:
+            raise ValueError("--header name cannot be empty")
+        merged_headers[k] = v
+
     eval_environment(
         env=args.env,
         env_args=args.env_args,
@@ -342,6 +367,7 @@ def main():
         save_dataset=args.save_dataset,
         save_to_hf_hub=args.save_to_hf_hub,
         hf_hub_dataset_name=args.hf_hub_dataset_name,
+        extra_headers=merged_headers,
     )
 
 

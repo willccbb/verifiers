@@ -406,11 +406,11 @@ class Environment(ABC):
                 "but reward functions requiring ground truth data may return 0.0. "
                 "Proceeding with empty values."
             )
-        if "answer" not in results_dict:
+        if not results_dict.get("answer"):
             results_dict["answer"] = [""] * len(results_dict["prompt"])
-        if "task" not in results_dict:
+        if not results_dict.get("task"):
             results_dict["task"] = ["default"] * len(results_dict["prompt"])
-        if "info" not in results_dict:
+        if not results_dict.get("info"):
             results_dict["info"] = [{}] * len(results_dict["prompt"])
         for i, info in enumerate(results_dict["info"]):
             if isinstance(info, str):
@@ -663,6 +663,7 @@ class Environment(ABC):
     def make_dataset(
         self,
         results: GenerateOutputs,
+        rollouts_per_example: int = 1,
         push_to_hf_hub: bool = False,
         hub_name: str | None = None,
         state_columns: list[str] | None = None,
@@ -673,6 +674,7 @@ class Environment(ABC):
 
         Args:
             results: The evaluation results to convert to a dataset
+            rollouts_per_example: The number of rollouts per example
             push_to_hf_hub: Whether to push the dataset to the Hugging Face Hub
             hub_name: The name of the dataset on the Hugging Face Hub
             state_columns: List of state columns to include in the dataset
@@ -687,7 +689,16 @@ class Environment(ABC):
         if push_to_hf_hub and hub_name is None:
             raise ValueError("hub_name must be provided if push_to_hf_hub is True")
 
-        cols = ["prompt", "completion", "answer", "task", "reward"]
+        cols = ["prompt", "completion", "answer", "task", "reward", "average_reward"]
+
+        if rollouts_per_example > 1:
+            average_reward = []
+            for i in range(0, len(results.reward), rollouts_per_example):
+                chunk = results.reward[i:i + rollouts_per_example]
+                avg = sum(chunk) / len(chunk)
+                average_reward.extend([avg] * rollouts_per_example)
+        else:
+            average_reward = results.reward
 
         results_dict = {
             "prompt": results.prompt,
@@ -695,6 +706,7 @@ class Environment(ABC):
             "answer": results.answer,
             "task": results.task,
             "reward": results.reward,
+            "average_reward": average_reward,
         }
         if results.info[0] != {}:
             results_dict["info"] = results.info
@@ -823,6 +835,38 @@ class Environment(ABC):
         i = 0
         while i < len(zipped):
             message, response = zipped[i]
+
+            def deserialize_tool_calls(message: dict) -> dict:
+                """
+                Deserialize tool calls in messages, if any are present. Iterates
+                over all messages in a message list and tries to find
+                "tool_calls" key. If found, assumes it is a OAI format and has
+                key "function" with "arguments" key which is stringified. It
+                will then deserialize the argument so that chat tmeplates like
+                Qwen3's can be used.
+                """
+
+                def deserialize_tool_call(tool_call) -> dict:
+                    tool_call = dict(tool_call)
+                    function = dict(tool_call["function"])
+                    return {
+                        **tool_call,
+                        "function": {
+                            **function,
+                            "arguments": json.loads(function["arguments"]),
+                        },
+                    }
+
+                return {
+                    **message,
+                    "tool_calls": [
+                        deserialize_tool_call(tool_call)
+                        for tool_call in message.get("tool_calls", []) or []
+                    ],
+                }
+
+            message = deserialize_tool_calls(message)
+
             # assistant case -- use response
             if message["role"] == "assistant":
                 assert response is not None, "Response should not be None"
@@ -1001,6 +1045,7 @@ class Environment(ABC):
             if max_seq_len > 0 and len(prompt_ids) + len(completion_ids) > max_seq_len:
                 if len(prompt_ids) > max_seq_len:
                     prompt_ids = prompt_ids[:max_seq_len]
+                    prompt_mask = prompt_mask[:max_seq_len]
                 completion_ids = completion_ids[: max_seq_len - len(prompt_ids)]
                 completion_mask = completion_mask[: max_seq_len - len(prompt_ids)]
                 completion_logprobs = completion_logprobs[

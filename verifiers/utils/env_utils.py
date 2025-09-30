@@ -1,6 +1,7 @@
 import importlib
 import inspect
 import logging
+from typing import Callable
 
 from verifiers.envs.environment import Environment
 
@@ -22,7 +23,7 @@ def load_environment(env_id: str, **env_args) -> Environment:
                 f"3. Check that you've installed the correct environment package"
             )
 
-        env_load_func = getattr(module, "load_environment")
+        env_load_func: Callable[..., Environment] = getattr(module, "load_environment")
         sig = inspect.signature(env_load_func)
         defaults_info = []
         for param_name, param in sig.parameters.items():
@@ -50,9 +51,6 @@ def load_environment(env_id: str, **env_args) -> Environment:
         if provided_params:
             provided_values = []
             for param_name in provided_params:
-                assert param_name in all_params, (
-                    f"Parameter {param_name} not supported by environment {env_id}"
-                )
                 provided_values.append(f"{param_name}={env_args[param_name]}")
             logger.info(f"Using provided args: {', '.join(provided_values)}")
 
@@ -68,7 +66,7 @@ def load_environment(env_id: str, **env_args) -> Environment:
             if default_values:
                 logger.info(f"Using default args: {', '.join(default_values)}")
 
-        env_instance = module.load_environment(**env_args)
+        env_instance: Environment = env_load_func(**env_args)
 
         logger.info(f"Successfully loaded environment '{env_id}'")
 

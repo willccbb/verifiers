@@ -19,18 +19,37 @@ class ToolEnv(MultiTurnEnv):
         self.max_turns = max_turns
         self.error_formatter = error_formatter
         self.oai_tools = [convert_func_to_oai_tool(tool) for tool in self.tools]
-        self.tool_map = {tool.__name__: tool for tool in self.tools}
+        self.tool_map = {
+            getattr(tool, "__name__", tool.__class__.__name__): tool
+            for tool in self.tools
+        }
         super().__init__(oai_tools=self.oai_tools, max_turns=max_turns, **kwargs)
+
+    def add_tool(self, tool: Callable):
+        self.tools.append(tool)
+        if self.oai_tools is None:
+            self.oai_tools = []
+        self.oai_tools.append(convert_func_to_oai_tool(tool))
+        self.tool_map[getattr(tool, "__name__", tool.__class__.__name__)] = tool
+
+    def remove_tool(self, tool: Callable):
+        self.tools.remove(tool)
+        if self.oai_tools is None:
+            self.oai_tools = []
+        self.oai_tools.remove(convert_func_to_oai_tool(tool))
+        tool_name = getattr(tool, "__name__", tool.__class__.__name__)
+        self.tool_map.pop(tool_name)
 
     async def is_completed(
         self, messages: Messages, state: State, **kwargs: Any
     ) -> bool:
+        max_turns_reached = await super().is_completed(messages, state, **kwargs)
         assert isinstance(messages, list)
         is_assistant_message = messages[-1]["role"] == "assistant"
         no_tool_calls = (
             "tool_calls" not in messages[-1] or messages[-1]["tool_calls"] is None
         )
-        return is_assistant_message and no_tool_calls
+        return max_turns_reached or (is_assistant_message and no_tool_calls)
 
     async def call_tool(
         self, tool_name: str, tool_args: dict, tool_call_id: str, **kwargs
