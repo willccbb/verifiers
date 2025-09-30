@@ -36,11 +36,6 @@ dependencies = [
 ]
 
 [dependency-groups]
-docs = [
-    "sphinx",
-    "myst-parser",
-    "furo"
-]
 dev = [
     "ruff",
     "pre-commit",
@@ -90,6 +85,11 @@ all = [
     "brave-search",
     "nltk",
     "textarena",
+]
+docs = [
+    "sphinx",
+    "myst-parser",
+    "furo"
 ]
 
 [project.scripts]
