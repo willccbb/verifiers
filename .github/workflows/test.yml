@@ -47,4 +47,4 @@ jobs:
     
     - name: Run tests
       run: |
-        python -m pytest tests/ -v --cov=verifiers --cov-report=xml --cov-report=term
+        uv run pytest tests/ -v --cov=verifiers --cov-report=xml --cov-report=term
