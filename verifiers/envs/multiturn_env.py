@@ -21,12 +21,17 @@ class MultiTurnEnv(Environment):
         super().__init__(**kwargs)
         self.max_turns = max_turns
 
+    async def max_turns_reached(self, state: State) -> bool:
+        """Check if the maximum number of turns has been reached."""
+        return state["turn"] >= self.max_turns and self.max_turns > 0
+
     async def setup_state(self, state: State, **kwargs) -> State:
         return state
 
-    @abstractmethod
     async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
-        pass
+        """When overriding, call self.max_turns_reached(state) to check if turn limit reached."""
+        max_turns_reached = await self.max_turns_reached(state)
+        return max_turns_reached
 
     @abstractmethod
     async def env_response(
@@ -115,9 +120,7 @@ class MultiTurnEnv(Environment):
                 rollout += response_text
                 completion += response_text
             state["turn"] += 1
-            if await maybe_await(self.is_completed, rollout, state, **kwargs) or (
-                state["turn"] >= self.max_turns and self.max_turns > 0
-            ):
+            if await maybe_await(self.is_completed, rollout, state, **kwargs):
                 is_completed = True
                 end_time = time.time()
                 state["timing"]["generation_ms"] = (end_time - start_time) * 1000

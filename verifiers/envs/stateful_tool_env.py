@@ -61,9 +61,25 @@ class StatefulToolEnv(ToolEnv):
         self.tool_map[tool_name] = tool
         self.skipped_args[tool_name] = args_to_skip
 
+    def remove_tool(self, tool: Callable):
+        self.tools.remove(tool)
+        tool_name = getattr(tool, "__name__", tool.__class__.__name__)
+        self.oai_tools = [
+            oai_tool
+            for oai_tool in self.oai_tools
+            if oai_tool["function"]["name"] != tool_name
+        ]
+        self.tool_map.pop(tool_name)
+        self.skipped_args.pop(tool_name)
+
     @abstractmethod
     def update_tool_args(
-        self, tool_args: dict, messages: Messages, state: State, **kwargs
+        self,
+        tool_name: str,
+        tool_args: dict,
+        messages: Messages,
+        state: State,
+        **kwargs,
     ) -> dict:
         """Update tool arguments and/or state (in-place) based on messages and state."""
         pass
@@ -98,7 +114,9 @@ class StatefulToolEnv(ToolEnv):
             tool_name: str = tool_call.function.name
             tool_args: dict = json.loads(tool_call.function.arguments)
             tool_call_id: str = tool_call.id or ""
-            tool_args = self.update_tool_args(tool_args, messages, state, **kwargs)
+            tool_args = self.update_tool_args(
+                tool_name, tool_args, messages, state, **kwargs
+            )
             tool_message: Message = await self.call_tool(
                 tool_name, tool_args, tool_call_id
             )
