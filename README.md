@@ -57,7 +57,7 @@ uv add 'verifiers[train]' && uv pip install flash-attn --no-build-isolation
 
 To use the latest `main` branch, do:
 ```bash
-uv add verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git
+uv add verifiers@git+https://github.com/PrimeIntellect-ai/verifiers.git
 ```
 
 To use with `prime-rl`, see [here](https://github.com/PrimeIntellect-ai/prime-rl).
@@ -68,7 +68,7 @@ git clone https://github.com/PrimeIntellect-ai/verifiers.git
 cd verifiers
 
 # for CPU-only dev:
-uv sync --extra dev
+uv sync
 
 # or, for trainer dev:
 uv sync --all-extras && uv pip install flash-attn --no-build-isolation
