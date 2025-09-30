@@ -3,9 +3,9 @@ from typing import Any
 import verifiers as vf
 
 try:
-    from prime_cli.api.sandbox import (
-        AsyncSandboxClient,  # type: ignore[import-untyped]
-        CreateSandboxRequest,  # type: ignore[import-untyped]
+    from prime_cli.api.sandbox import (  # type: ignore[import-untyped]
+        AsyncSandboxClient,
+        CreateSandboxRequest,
     )
 except ImportError:
     raise ImportError(
