@@ -76,7 +76,8 @@ class SentenceRepeaterEnv(vf.MultiTurnEnv):
         super().__init__(**kwargs)
 
     async def is_completed(self, messages: Messages, state: State, **kwargs) -> bool:
-        return state["turn"] >= len(state["info"]["questions"])
+        max_turns_reached = await super().is_completed(messages, state, **kwargs)
+        return state["turn"] >= len(state["info"]["questions"]) or max_turns_reached
 
     async def env_response(
         self, messages: Messages, state: State, **kwargs
