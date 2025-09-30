@@ -105,8 +105,8 @@ class MultiTurnEnv(Environment):
             # environment response, we set the prompt_too_long flag to True, which
             # will trigger the is_completed check to exit.
             except BadRequestError as e:
-                if len(state["responses"]) != 0 and e.message.startswith(
-                    "This model's maximum context length is"
+                if len(state["responses"]) != 0 and e.response.text.startswith(
+                    '{"error":{"message":"This model\'s maximum context length is'
                 ):
                     state["prompt_too_long"] = True
                     break
