@@ -5,7 +5,7 @@ tags = ["reasoning-gym", "logic", "puzzles", "math", "train"]
 version = "0.1.1"
 requires-python = ">=3.11"
 dependencies = [
-    "verifiers>=0.1.2.post0",
+    "verifiers>=0.1.4",
     "reasoning-gym",
 ]
 

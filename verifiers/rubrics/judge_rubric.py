@@ -92,7 +92,7 @@ class JudgeRubric(Rubric):
         ):
             judge_args.pop("max_completion_tokens")
         judge_args = {k: v for k, v in judge_args.items() if v is not None}
-        
+
         try:
             judge_response = await maybe_await(
                 self.judge_client.chat.completions.create,
@@ -137,7 +137,7 @@ class JudgeRubric(Rubric):
                 f"Unexpected error when calling judge model '{self.judge_model}'. "
                 f"Error: {str(e)}"
             ) from e
-            
+
         if not isinstance(cached, dict):
             cached = {}
         cached[judge_prompt] = judge_response
