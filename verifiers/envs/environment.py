@@ -88,7 +88,6 @@ def encode_chat_with_processor(
 def encode_text_with_processor(
     text: str,
     processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
-    add_special_tokens: bool = False,
 ) -> tuple[list[int], Any, Any]:
     """
     Encode plain text and return token IDs, handling both tokenizer and processor.
@@ -98,7 +97,6 @@ def encode_text_with_processor(
             text=[text],
             images=None,
             return_tensors="pt",
-            add_special_tokens=add_special_tokens,
         )
         input_ids = inputs["input_ids"][0].tolist()
         image_grid = inputs.get("image_grid_thw", [None])[0].tolist()
@@ -106,7 +104,7 @@ def encode_text_with_processor(
         return input_ids, image_grid, pixel_values
     else:
         prompt_ids: list[int] = processing_class.encode(
-            text, add_special_tokens=add_special_tokens
+            text
         )
         return prompt_ids, None, None
     
@@ -857,9 +855,8 @@ class Environment(ABC):
         assert idx == len(completion), "Completion not fully consumed"
 
         prompt_ids, prompt_image_grid, prompt_pixel_value = encode_text_with_processor(
-            text=prompt,  # The prompt is a string for completion format
+            text=prompt,
             processing_class=processing_class,
-            add_special_tokens=False,
         )
         rollout_consumed = prompt
         prompt_mask: list[int] = [0] * len(prompt_ids)
