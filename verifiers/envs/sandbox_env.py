@@ -93,9 +93,7 @@ class SandboxEnv(vf.StatefulToolEnv):
             else:
                 combined = f"stderr:\n{stderr}"
         output = combined or "(no output)"
-        self.logger.debug(
-            f"Executed command in {time.time() - s:.1f}s. Got output: {output}"
-        )
+        self.logger.debug(f"Executed command in {e - s:.1f}s. Got output: {output}")
         return output
 
     async def _destroy_sandbox(self, sandbox_id: str | None) -> None:
