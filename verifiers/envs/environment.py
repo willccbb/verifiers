@@ -4,11 +4,14 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal, Union
-from transformers import ProcessorMixin
+from typing import TYPE_CHECKING, Literal, Union, List, Dict
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+import base64
+from io import BytesIO
+from PIL import Image
+from transformers import PreTrainedTokenizerBase, ProcessorMixin
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
@@ -28,12 +31,6 @@ from verifiers.types import (
     State,
 )
 from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
-
-import base64
-from io import BytesIO
-from typing import List, Dict, Union
-from PIL import Image
-from transformers import PreTrainedTokenizerBase, ProcessorMixin
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
