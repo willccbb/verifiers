@@ -213,37 +213,6 @@ def shuffle_tensor_dict(
         key: tensor[permutation] if tensor is not None else None
         for key, tensor in tensor_dict.items()
     }
-
-def split_pixel_values_by_grid(batch: dict[str, torch.Tensor]) -> dict[str, Union[torch.Tensor, list[torch.Tensor]]]:
-    """
-    Splits `batch["pixel_values"]` into a list of tensors based on the product of each row in
-    `batch["image_grid_thw"]`, while keeping other entries unchanged.
-    """
-    if "image_grid_thw" not in batch or "pixel_values" not in batch:
-        return batch
-
-    lengths = batch["image_grid_thw"].prod(dim=1).tolist()  # [batch_size]
-    pixel_values = batch["pixel_values"]  # [total, feature_dim]
-
-    if sum(lengths) != pixel_values.size(0):
-        raise ValueError(f"Mismatch: sum(lengths) = {sum(lengths)} != pixel_values.size(0) = {pixel_values.size(0)}")
-
-    split_values = list(torch.split(batch["pixel_values"], lengths, dim=0))
-    return {**batch, "pixel_values": split_values}
-
-
-def unsplit_pixel_values_by_grid(batch: dict[str, Union[torch.Tensor, list[torch.Tensor]]]) -> dict[str, torch.Tensor]:
-    """
-    Opposite of `split_pixel_values_by_grid`. Merges a list of tensors in `batch["pixel_values"]`
-    back into a single tensor along the first dimension.
-    """
-    pixel_values = batch.pixel_values
-
-    if isinstance(pixel_values, list):
-        merged = torch.cat(pixel_values, dim=0)
-        return {**batch, "pixel_values": merged}
-    else:
-        return batch
     
 def nanmin(tensor: torch.Tensor) -> torch.Tensor:
     """

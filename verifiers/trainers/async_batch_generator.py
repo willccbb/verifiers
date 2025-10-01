@@ -293,7 +293,7 @@ class AsyncBatchGenerator:
             mask_env_responses=request.mask_env_responses,
             mask_truncated_completions=request.mask_truncated_completions,
             zero_truncated_completions=request.zero_truncated_completions,
-        )          
+        )
 
         return BatchResult(
             batch_id=request.batch_id,
