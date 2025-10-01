@@ -149,27 +149,10 @@ class SandboxEnv(vf.StatefulToolEnv):
         """Delete all active sandboxes"""
         if len(self.active_sandboxes) == 0:
             return
-        self.logger.info(
-            f"Cleaning up {len(self.active_sandboxes)} remaining sandboxes"
-        )
+        self.logger.info(f"Cleaning up {len(self.active_sandboxes)} sandboxes")
         sandbox_client = SandboxClient(APIClient())
-        # TODO: Use the SandboxClient.bulk_delete method once it is more stable
-        while self.active_sandboxes:
-            successfully_deleted = set()
-            for sandbox_id in self.active_sandboxes:
-                try:
-                    sandbox_client.wait_for_creation(sandbox_id)
-                    sandbox_client.delete(sandbox_id)
-                    successfully_deleted.add(sandbox_id)
-                    self.logger.debug(f"Successfully deleted sandbox {sandbox_id}")
-                except Exception as e:
-                    self.logger.error(f"Failed to delete sandbox {sandbox_id}: {e}")
-
-            self.active_sandboxes -= successfully_deleted
-
-            # If no sandboxes were deleted in this pass, break to avoid infinite loop
-            if not successfully_deleted:
-                self.logger.error(
-                    f"Unable to delete remaining sandboxes: {self.active_sandboxes}"
-                )
-                break
+        try:
+            sandbox_client.bulk_wait_for_creation(list(self.active_sandboxes))
+            sandbox_client.bulk_delete(list(self.active_sandboxes))
+        except Exception as e:
+            self.logger.error(f"Failed to cleanup sandboxes: {e}")
