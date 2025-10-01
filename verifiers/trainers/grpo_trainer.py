@@ -383,7 +383,7 @@ class GRPOTrainer(Trainer):
         assert train_dataset is not None
 
         eval_dataset = env.get_eval_dataset()
-        
+
         if "prompt" not in train_dataset.column_names:
             raise ValueError("Train dataset must contain a 'prompt' column")
         if "answer" not in train_dataset.column_names:
@@ -764,34 +764,13 @@ class GRPOTrainer(Trainer):
         # Build model inputs - check if the model supports logits_to_keep (some models and VLMs don't)
         model_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
 
-        # TODO : check if needed or no
-        # # For Qwen models:
-        # if image_grid_thw is not None and pixel_values is not None:
-        #     model_inputs["image_grid_thw"] = image_grid_thw
-        # # For Gemma, SmolVLM2, LLaVa-Next etc.:
-        # if pixel_values is not None:
-        #     model_inputs["pixel_values"] = pixel_values
-        # # For SmolVLM2
-        # if pixel_attention_mask is not None:
-        #     model_inputs["pixel_attention_mask"] = pixel_attention_mask
-        # # For LLaVa-Next
-        # if image_sizes is not None:
-        #     model_inputs["image_sizes"] = image_sizes
-
-        # # Only add logits_to_keep if the model supports it
-        # if "logits_to_keep" in self.model_kwarg_keys:
-        #     # We add 1 to `logits_to_keep` because the last logits of the sequence is later excluded
-        #     model_inputs["logits_to_keep"] = logits_to_keep + 1
-
-        # model_inputs["use_cache"] = False  # only used in generation; set False to suppress warnings
-
         last_hidden_state = unwrapped_model.model(**model_inputs).last_hidden_state
         # Exclude the last value: it corresponds to the next token pred
         last_hidden_state = last_hidden_state[:, :-1, :]  # (B, L-1, H)
         # Only keep the last logits_to_keep. For model that support logits_to_keep, this is a no-op.
         last_hidden_state = last_hidden_state[:, -logits_to_keep:, :]  # (B, logits_to_keep, H)
         return last_hidden_state
-    
+
     # Get the per-token log probabilities for the completions for the model and the reference model
     def _get_per_token_logps(
         self,
@@ -998,18 +977,18 @@ class GRPOTrainer(Trainer):
         Gather batch data from all processes and convert PIL images in prompts to base64 image_url.
         """
         batches = self._async_dataloader.peek_ahead(batch_offset)
-    
+
         if batch_offset == 0:
             batch = batches[0] if batches else None
         else:
             batch = batches[batch_offset - 1] if batches else None
-    
+
         if batch is None:
             return [], [], [], []
-    
+
         if isinstance(batch, dict):
             batch = [batch]
-    
+
         prompts = []
         for x in batch:
             prompt = x["prompt"]
