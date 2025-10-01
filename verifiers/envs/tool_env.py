@@ -84,9 +84,8 @@ class ToolEnv(MultiTurnEnv):
                     tool_call_id: str = tool_call.id or ""
                 case _:
                     tool_name: str = tool_call["function"]["name"]
-                    tool_args: dict = tool_call["function"]["arguments"]
+                    tool_args: dict = json.loads(tool_call["function"]["arguments"])
                     tool_call_id: str = tool_call["id"]
-
             tool_message: Message = await self.call_tool(
                 tool_name, tool_args, tool_call_id
             )
