@@ -77,10 +77,15 @@ class ToolEnv(MultiTurnEnv):
         assert "tool_calls" in messages[-1]
         tool_messages = []
         for tool_call in messages[-1]["tool_calls"]:
-            assert isinstance(tool_call, ChatCompletionMessageToolCall)
-            tool_name: str = tool_call.function.name
-            tool_args: dict = json.loads(tool_call.function.arguments)
-            tool_call_id: str = tool_call.id or ""
+            match tool_call:
+                case ChatCompletionMessageToolCall():
+                    tool_name: str = tool_call.function.name
+                    tool_args: dict = json.loads(tool_call.function.arguments)
+                    tool_call_id: str = tool_call.id or ""
+                case _:
+                    tool_name: str = tool_call["function"]["name"]
+                    tool_args: dict = json.loads(tool_call["function"]["arguments"])
+                    tool_call_id: str = tool_call["id"]
             tool_message: Message = await self.call_tool(
                 tool_name, tool_args, tool_call_id
             )
