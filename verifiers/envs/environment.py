@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal, Union, List, Dict
+from typing import TYPE_CHECKING, Literal, Union, List, Dict, Any
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
 import base64
