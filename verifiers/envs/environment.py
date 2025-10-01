@@ -912,8 +912,6 @@ class Environment(ABC):
         all_completion_masks = []
         all_completion_logprobs = []
         all_rewards = []
-        all_images=[]
-        all_answers=[]
         for i, (prompt, completion, state, reward) in enumerate(
             zip(prompts, completions, states, rewards)
         ):
