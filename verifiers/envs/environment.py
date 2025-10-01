@@ -55,14 +55,8 @@ def encode_chat_with_processor(
     Apply chat template and return token IDs, handling both tokenizer and processor.
     Supports base64-encoded images in the conversation.
     """
-    if isinstance(processing_class, PreTrainedTokenizerBase):
-        prompt_ids : List[int] = processing_class.apply_chat_template(
-            conversation=conversation,
-            add_generation_prompt=add_generation_prompt,
-        )
-        return prompt_ids,None,None
 
-    elif isinstance(processing_class, ProcessorMixin):
+    if isinstance(processing_class, ProcessorMixin):
         prompt_text = processing_class.apply_chat_template(
             conversation=conversation,
             add_generation_prompt=add_generation_prompt,
@@ -85,7 +79,11 @@ def encode_chat_with_processor(
         return inputs["input_ids"][0].tolist(), inputs["image_grid_thw"][0].tolist(), inputs["pixel_values"].tolist()
 
     else:
-        raise TypeError(f"Unsupported processing_class: {type(processing_class)}")
+        prompt_ids : List[int] = processing_class.apply_chat_template(
+            conversation=conversation,
+            add_generation_prompt=add_generation_prompt,
+        )
+        return prompt_ids,None,None
     
 class Environment(ABC):
     """
