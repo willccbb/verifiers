@@ -190,7 +190,7 @@ class Environment(ABC):
     def get_reward_weights(self) -> list[float]:
         return self.rubric.get_reward_weights()
 
-    async def get_model_response(
+    async def _get_model_response(
         self,
         client: AsyncOpenAI,
         model: str,
@@ -224,58 +224,52 @@ class Environment(ABC):
         ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
-        try:
-            if message_type == "chat":
-                assert isinstance(prompt, list)
-                # --- detect audio parts and force text-only modality if caller didn't set one ---
+        if message_type == "chat":
+            assert isinstance(prompt, list)
+            # --- detect audio parts and force text-only modality if caller didn't set one ---
+            has_audio = False
+            try:
+                for m in prompt:
+                    c = m.get("content")  # type: ignore[assignment]
+                    if isinstance(c, list):
+                        for p in c:
+                            if isinstance(p, dict) and str(
+                                p.get("type", "")
+                            ).startswith("input_audio"):
+                                has_audio = True
+                                break
+                    if has_audio:
+                        break
+            except Exception:
                 has_audio = False
-                try:
-                    for m in prompt:
-                        c = m.get("content")  # type: ignore[assignment]
-                        if isinstance(c, list):
-                            for p in c:
-                                if isinstance(p, dict) and str(
-                                    p.get("type", "")
-                                ).startswith("input_audio"):
-                                    has_audio = True
-                                    break
-                        if has_audio:
-                            break
-                except Exception:
-                    has_audio = False
-                if has_audio and "modalities" not in clean_sampling_args:
-                    clean_sampling_args = {
-                        **clean_sampling_args,
-                        "modalities": ["text"],
-                    }
+            if has_audio and "modalities" not in clean_sampling_args:
+                clean_sampling_args = {
+                    **clean_sampling_args,
+                    "modalities": ["text"],
+                }
 
-                if oai_tools:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        tools=oai_tools,
-                        **clean_sampling_args,
-                    )
-                else:
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=prompt,  # type: ignore
-                        **clean_sampling_args,
-                    )
-                return response
-            elif message_type == "completion":
-                if oai_tools:
-                    raise ValueError(
-                        "oai_tools are not supported for completion tasks."
-                    )
-                assert isinstance(prompt, str)
-                response = await client.completions.create(
-                    model=model, prompt=prompt, **clean_sampling_args
+            if oai_tools:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=prompt,  # type: ignore
+                    tools=oai_tools,
+                    **clean_sampling_args,
                 )
-                return response
-        except Exception as e:
-            self.logger.error(f"Error getting model response: {e} \n\nExiting...")
-            raise e
+            else:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=prompt,  # type: ignore
+                    **clean_sampling_args,
+                )
+            return response
+        elif message_type == "completion":
+            if oai_tools:
+                raise ValueError("oai_tools are not supported for completion tasks.")
+            assert isinstance(prompt, str)
+            response = await client.completions.create(
+                model=model, prompt=prompt, **clean_sampling_args
+            )
+            return response
 
     @abstractmethod
     async def rollout(
@@ -694,7 +688,7 @@ class Environment(ABC):
         if rollouts_per_example > 1:
             average_reward = []
             for i in range(0, len(results.reward), rollouts_per_example):
-                chunk = results.reward[i:i + rollouts_per_example]
+                chunk = results.reward[i : i + rollouts_per_example]
                 avg = sum(chunk) / len(chunk)
                 average_reward.extend([avg] * rollouts_per_example)
         else:
