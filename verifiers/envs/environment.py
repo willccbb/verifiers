@@ -7,7 +7,6 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, Union, List, Dict
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import base64
 from io import BytesIO
 from PIL import Image
