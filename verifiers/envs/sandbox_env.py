@@ -4,6 +4,7 @@ import verifiers as vf
 
 try:
     from prime_cli.api.sandbox import (  # type: ignore[import-untyped]
+        AdvancedConfigs,
         AsyncSandboxClient,
         CreateSandboxRequest,
     )
@@ -19,13 +20,31 @@ class SandboxEnv(vf.StatefulToolEnv):
         sandbox_name: str = "sandbox-env",
         docker_image: str = "python:3.11-slim",
         start_command: str = "tail -f /dev/null",
+        cpu_cores: int = 1,
+        memory_gb: int = 2,
+        disk_size_gb: int = 5,
+        gpu_count: int = 0,
+        timeout_minutes: int = 60,
+        environment_vars: dict[str, str] | None = None,
+        team_id: str | None = None,
+        advanced_configs: AdvancedConfigs | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.sandbox_name = sandbox_name
-        self.docker_image = docker_image
-        self.start_command = start_command
         self.sandbox_client = AsyncSandboxClient()
+        self.sandbox_request = CreateSandboxRequest(
+            name=sandbox_name,
+            docker_image=docker_image,
+            start_command=start_command,
+            cpu_cores=cpu_cores,
+            memory_gb=memory_gb,
+            disk_size_gb=disk_size_gb,
+            gpu_count=gpu_count,
+            timeout_minutes=timeout_minutes,
+            environment_vars=environment_vars,
+            team_id=team_id,
+            advanced_configs=advanced_configs,
+        )
 
         self.add_tool(self.bash, args_to_skip=["sandbox_id"])
 
@@ -56,12 +75,7 @@ class SandboxEnv(vf.StatefulToolEnv):
 
     async def setup_state(self, state: vf.State, **kwargs) -> vf.State:
         """Create per-rollout sandbox"""
-        request = CreateSandboxRequest(
-            name=self.sandbox_name,
-            docker_image=self.docker_image,
-            start_command=self.start_command,
-        )
-        sandbox = await self.sandbox_client.create(request)
+        sandbox = await self.sandbox_client.create(self.sandbox_request)
         state["sandbox_id"] = sandbox.id
         return await super().setup_state(state, **kwargs)
 
