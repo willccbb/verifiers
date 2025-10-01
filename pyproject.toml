@@ -33,7 +33,8 @@ dependencies = [
     "rich",
     "textual",
     "openai-agents>=0.0.7",
-    "pillow>=10.0.0"
+    "pillow>=10.0.0",
+    "transformers"
 ]
 
 [project.optional-dependencies]
@@ -45,7 +46,6 @@ all = [
     "pytest-cov>=4.0.0",
     "requests",
     "torch>=2.7.0",
-    "transformers",
     "accelerate>=1.4.0",
     "deepspeed",
     "peft",
