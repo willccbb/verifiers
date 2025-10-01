@@ -85,6 +85,31 @@ def encode_chat_with_processor(
         )
         return prompt_ids,None,None
     
+def encode_text_with_processor(
+    text: str,
+    processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+    add_special_tokens: bool = False,
+) -> tuple[list[int], Any, Any]:
+    """
+    Encode plain text and return token IDs, handling both tokenizer and processor.
+    """
+    if isinstance(processing_class, ProcessorMixin):
+        inputs = processing_class(
+            text=[text],
+            images=None,
+            return_tensors="pt",
+            add_special_tokens=add_special_tokens,
+        )
+        input_ids = inputs["input_ids"][0].tolist()
+        image_grid = inputs.get("image_grid_thw", [None])[0].tolist()
+        pixel_values = inputs.get("pixel_values", [None]).tolist()
+        return input_ids, image_grid, pixel_values
+    else:
+        prompt_ids: list[int] = processing_class.encode(
+            text, add_special_tokens=add_special_tokens
+        )
+        return prompt_ids, None, None
+    
 class Environment(ABC):
     """
     Base class for all environments.
@@ -831,10 +856,10 @@ class Environment(ABC):
             idx = response_start_idx + len(response_text)
         assert idx == len(completion), "Completion not fully consumed"
 
-        prompt_ids, prompt_image_grid, prompt_pixel_value = encode_chat_with_processor(
-            conversation=prompt,
+        prompt_ids, prompt_image_grid, prompt_pixel_value = encode_text_with_processor(
+            text=prompt,  # The prompt is a string for completion format
             processing_class=processing_class,
-            add_generation_prompt=False,
+            add_special_tokens=False,
         )
         rollout_consumed = prompt
         prompt_mask: list[int] = [0] * len(prompt_ids)
