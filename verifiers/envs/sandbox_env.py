@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import verifiers as vf
@@ -51,10 +52,15 @@ class SandboxEnv(vf.StatefulToolEnv):
     async def bash(self, command: str, sandbox_id: str) -> str:
         """Execute `command` inside persistent sandbox container."""
         # sandbox_id is passed via update_tool_args, not seen by model
+        s = time.time()
         await self.sandbox_client.wait_for_creation(
             sandbox_id
         )  # wait for sandbox to be created
+        self.logger.debug(f"Waited {time.time() - s:.1f}s for sandbox to be ready")
+        s = time.time()
+        self.logger.debug(f"Executing command {command} in sandbox {sandbox_id}")
         results = await self.sandbox_client.execute_command(sandbox_id, command)
+        e = time.time()
         stdout = results.stdout.strip()
         stderr = (results.stderr or "").strip()
         combined = stdout
@@ -63,19 +69,25 @@ class SandboxEnv(vf.StatefulToolEnv):
                 combined = f"{combined}\nstderr:\n{stderr}"
             else:
                 combined = f"stderr:\n{stderr}"
-        return combined or "(no output)"
+        output = combined or "(no output)"
+        self.logger.debug(
+            f"Executed command in {time.time() - s:.1f}s. Got output: {output}"
+        )
+        return output
 
     async def _destroy_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id is None:
             return
         try:
             await self.sandbox_client.delete(sandbox_id)
+            self.logger.debug(f"Deleted sandbox {sandbox_id}")
         except Exception as e:
-            self.logger.warning("Failed to delete sandbox %s: %s", sandbox_id, e)
+            self.logger.warning(f"Failed to delete sandbox {sandbox_id}: {e}")
 
     async def setup_state(self, state: vf.State, **kwargs) -> vf.State:
         """Create per-rollout sandbox"""
         sandbox = await self.sandbox_client.create(self.sandbox_request)
+        self.logger.debug(f"Created sandbox {sandbox.id}")
         state["sandbox_id"] = sandbox.id
         return await super().setup_state(state, **kwargs)
 
