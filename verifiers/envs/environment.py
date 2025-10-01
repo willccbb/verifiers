@@ -789,7 +789,6 @@ class Environment(ABC):
                 else:
                     completion_turn_mask = [1] * len(completion_turn_ids)
                     
-                # TODO : what about images in turn ? for now we consider we hav'nt
                 completion_turn_logprobs = [0.0] * len(completion_turn_ids)
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
