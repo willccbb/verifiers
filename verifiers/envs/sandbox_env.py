@@ -1,6 +1,11 @@
+import atexit
+import signal
 import time
 from asyncio import Semaphore
 from typing import Any
+
+from prime_cli.api.client import APIClient
+from prime_cli.api.sandbox import SandboxClient
 
 import verifiers as vf
 
@@ -49,7 +54,21 @@ class SandboxEnv(vf.StatefulToolEnv):
             advanced_configs=advanced_configs,
         )
         self.logger.info(f"Using {max_concurrent_sandboxes} max concurrent sandboxes")
+        self.active_sandboxes = set()
         self.sandbox_semaphore = Semaphore(max_concurrent_sandboxes)
+
+        # Install handlers for regular exception, sigint (Ctrl-C) and sigterm (standard termination signal)
+        atexit.register(self.cleanup_sandboxes)
+        signal.signal(
+            signal.SIGINT,
+            lambda sig, frame: (
+                self.cleanup_sandboxes(),
+                signal.default_int_handler(sig, frame),
+            ),
+        )
+        signal.signal(
+            signal.SIGTERM, lambda _, __: (self.cleanup_sandboxes(), exit(143))
+        )
 
         self.add_tool(self.bash, args_to_skip=["sandbox_id"])
 
@@ -84,6 +103,7 @@ class SandboxEnv(vf.StatefulToolEnv):
             return
         try:
             await self.sandbox_client.delete(sandbox_id)
+            self.active_sandboxes.discard(sandbox_id)
             self.sandbox_semaphore.release()
             self.logger.debug(f"Deleted sandbox {sandbox_id}")
         except Exception as e:
@@ -93,6 +113,7 @@ class SandboxEnv(vf.StatefulToolEnv):
         """Create per-rollout sandbox"""
         await self.sandbox_semaphore.acquire()
         sandbox = await self.sandbox_client.create(self.sandbox_request)
+        self.active_sandboxes.add(sandbox.id)
         self.logger.debug(f"Created sandbox {sandbox.id}")
         state["sandbox_id"] = sandbox.id
         return await super().setup_state(state, **kwargs)
@@ -123,3 +144,32 @@ class SandboxEnv(vf.StatefulToolEnv):
         if completed:
             await self._destroy_sandbox(state.pop("sandbox_id"))
         return completed
+
+    def cleanup_sandboxes(self):
+        """Delete all active sandboxes"""
+        if len(self.active_sandboxes) == 0:
+            return
+        self.logger.info(
+            f"Cleaning up {len(self.active_sandboxes)} remaining sandboxes"
+        )
+        sandbox_client = SandboxClient(APIClient())
+        # TODO: Use the SandboxClient.bulk_delete method once it is more stable
+        while self.active_sandboxes:
+            successfully_deleted = set()
+            for sandbox_id in self.active_sandboxes:
+                try:
+                    sandbox_client.wait_for_creation(sandbox_id)
+                    sandbox_client.delete(sandbox_id)
+                    successfully_deleted.add(sandbox_id)
+                    self.logger.debug(f"Successfully deleted sandbox {sandbox_id}")
+                except Exception as e:
+                    self.logger.error(f"Failed to delete sandbox {sandbox_id}: {e}")
+
+            self.active_sandboxes -= successfully_deleted
+
+            # If no sandboxes were deleted in this pass, break to avoid infinite loop
+            if not successfully_deleted:
+                self.logger.error(
+                    f"Unable to delete remaining sandboxes: {self.active_sandboxes}"
+                )
+                break
