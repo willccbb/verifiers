@@ -71,7 +71,7 @@ async def test_sets_modalities_text_when_audio_and_missing():
         message_type="chat", logger=logging.getLogger("test")
     )
 
-    await Environment.get_model_response(
+    await Environment._get_model_response(
         fake_self,
         client=client,
         model="gpt-4o-audio-preview",
@@ -105,7 +105,7 @@ async def test_does_not_override_existing_modalities():
         message_type="chat", logger=logging.getLogger("test")
     )
 
-    await Environment.get_model_response(
+    await Environment._get_model_response(
         fake_self,
         client=client,
         model="gpt-4o-audio-preview",
@@ -128,7 +128,7 @@ async def test_does_not_add_modalities_when_no_audio():
         message_type="chat", logger=logging.getLogger("test")
     )
 
-    await Environment.get_model_response(
+    await Environment._get_model_response(
         fake_self,
         client=client,
         model="gpt-4.1-mini",

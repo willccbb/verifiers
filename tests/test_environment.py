@@ -25,7 +25,7 @@ class SimpleEnvironment(Environment):
         **kwargs,
     ):
         """Simple test rollout implementation."""
-        response = await self.get_model_response(
+        response = await self._get_model_response(
             prompt=prompt, client=client, model=model, sampling_args=sampling_args or {}
         )
         if self.message_type == "chat":
@@ -176,7 +176,7 @@ class TestEnvironmentBase:
         )
 
         prompt = [{"role": "user", "content": "Hello"}]
-        response = await env.get_model_response(
+        response = await env._get_model_response(
             prompt=prompt,
             client=mock_openai_client,
             model="test-model",
@@ -203,7 +203,7 @@ class TestEnvironmentBase:
         )
 
         prompt = "Complete this:"
-        response = await env.get_model_response(
+        response = await env._get_model_response(
             prompt=prompt,
             client=mock_openai_client,
             model="test-model",
