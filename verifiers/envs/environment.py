@@ -210,29 +210,25 @@ class Environment(ABC):
         Convenience function for wrapping (chat, completion) API calls.
         Returns special error messages for context length issues.
         """
+        sampling_args = sampling_args or {}
+        # Resolve message type first
+        if message_type is None:
+            message_type = self.message_type
+        # Normalize sampling args:
+        # - If max_tokens is provided for chat, rename to max_completion_tokens
+        # - Drop any None-valued entries to avoid sending them to the client
+        if "max_tokens" in sampling_args:
+            if sampling_args["max_tokens"] is None:
+                sampling_args.pop("max_tokens")
+            elif message_type == "chat":
+                sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
+        if (
+            "max_completion_tokens" in sampling_args
+            and sampling_args["max_completion_tokens"] is None
+        ):
+            sampling_args.pop("max_completion_tokens")
+        clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
         try:
-            sampling_args = sampling_args or {}
-            # Resolve message type first
-            if message_type is None:
-                message_type = self.message_type
-            # Normalize sampling args:
-            # - If max_tokens is provided for chat, rename to max_completion_tokens
-            # - Drop any None-valued entries to avoid sending them to the client
-            if "max_tokens" in sampling_args:
-                if sampling_args["max_tokens"] is None:
-                    sampling_args.pop("max_tokens")
-                elif message_type == "chat":
-                    sampling_args["max_completion_tokens"] = sampling_args.pop(
-                        "max_tokens"
-                    )
-            if (
-                "max_completion_tokens" in sampling_args
-                and sampling_args["max_completion_tokens"] is None
-            ):
-                sampling_args.pop("max_completion_tokens")
-            clean_sampling_args = {
-                k: v for k, v in sampling_args.items() if v is not None
-            }
             if message_type == "chat":
                 assert isinstance(prompt, list)
                 # --- detect audio parts and force text-only modality if caller didn't set one ---
