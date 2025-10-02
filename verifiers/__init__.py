@@ -53,6 +53,9 @@ def setup_logging(
 
     # Get the root logger for the verifiers package
     logger = logging.getLogger("verifiers")
+    # Remove any existing handlers to avoid duplicates
+    logger.handlers.clear()
+    # Add a new handler with desired log level
     logger.setLevel(level.upper())
     logger.addHandler(handler)
 

@@ -7,12 +7,13 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import cast, Dict
+from typing import Dict, cast
 
 import numpy as np
 from datasets import Dataset
 
 import verifiers as vf
+from verifiers import setup_logging
 from verifiers.types import Endpoints
 from verifiers.utils.client_utils import setup_client
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
@@ -41,7 +42,7 @@ def eval_environment(
     hf_hub_dataset_name: str,
     extra_headers: Dict[str, str],
 ):
-    logger.setLevel("DEBUG" if verbose else "INFO")
+    setup_logging("DEBUG" if verbose else "INFO")
     try:
         endpoints_path_obj = Path(endpoints_path)
         if endpoints_path_obj.is_dir():

@@ -26,11 +26,6 @@ class SandboxEnv(vf.StatefulToolEnv):
         self.docker_image = docker_image
         self.start_command = start_command
         self.sandbox_client = AsyncSandboxClient()
-        self.sandbox_request = CreateSandboxRequest(
-            name=sandbox_name,
-            docker_image=docker_image,
-            start_command=start_command,
-        )
 
         self.add_tool(self.bash, args_to_skip=["sandbox_id"])
 
