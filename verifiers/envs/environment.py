@@ -4,11 +4,13 @@ import logging
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal
-
+from typing import TYPE_CHECKING, Literal, Union, List, Dict, Any
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
-
+import base64
+from io import BytesIO
+from PIL import Image
+from transformers import PreTrainedTokenizerBase, ProcessorMixin
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
@@ -34,7 +36,78 @@ if TYPE_CHECKING:
         PreTrainedTokenizerBase,
     )
 
+def _base64_to_pil(data_uri: str) -> Image.Image:
+    """Convert a base64 data URI (data:image/...;base64,...) to a PIL Image."""
+    if not data_uri.startswith("data:image"):
+        raise ValueError(f"Expected base64 image data URI, got: {data_uri[:30]}")
+    header, b64data = data_uri.split(",", 1)
+    image_data = base64.b64decode(b64data)
+    return Image.open(BytesIO(image_data)).convert("RGB")
 
+
+def encode_chat_with_processor(
+    conversation: List[Dict],
+    processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+    add_generation_prompt: bool = False,
+    add_special_tokens: bool = False,
+) -> List[int]:
+    """
+    Apply chat template and return token IDs, handling both tokenizer and processor.
+    Supports base64-encoded images in the conversation.
+    """
+
+    if isinstance(processing_class, ProcessorMixin):
+        prompt_text = processing_class.apply_chat_template(
+            conversation=conversation,
+            add_generation_prompt=add_generation_prompt,
+            tokenize=False,
+        )
+
+        images = []
+        for msg in conversation:
+            for c in msg.get("content", []):
+                if c.get("type") == "image_url":
+                    pil_img = _base64_to_pil(c["image_url"]["url"])
+                    images.append(pil_img)
+
+        inputs = processing_class(
+            text=[prompt_text],
+            images=images if images else None,
+            return_tensors="pt",
+            add_special_tokens=add_special_tokens,
+        )
+        return inputs["input_ids"][0].tolist(), inputs["image_grid_thw"][0].tolist(), inputs["pixel_values"].tolist()
+
+    else:
+        prompt_ids : List[int] = processing_class.apply_chat_template(
+            conversation=conversation,
+            add_generation_prompt=add_generation_prompt,
+        )
+        return prompt_ids,None,None
+    
+def encode_text_with_processor(
+    text: str,
+    processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+) -> tuple[list[int], Any, Any]:
+    """
+    Encode plain text and return token IDs, handling both tokenizer and processor.
+    """
+    if isinstance(processing_class, ProcessorMixin):
+        inputs = processing_class(
+            text=[text],
+            images=None,
+            return_tensors="pt",
+        )
+        input_ids = inputs["input_ids"][0].tolist()
+        image_grid = inputs.get("image_grid_thw", [None])[0].tolist()
+        pixel_values = inputs.get("pixel_values", [None]).tolist()
+        return input_ids, image_grid, pixel_values
+    else:
+        prompt_ids: list[int] = processing_class.encode(
+            text
+        )
+        return prompt_ids, None, None
+    
 class Environment(ABC):
     """
     Base class for all environments.
@@ -65,7 +138,6 @@ class Environment(ABC):
             self.logger.warning(
                 "The parser and rubric parser are different. This may cause unexpected behavior."
             )
-
         if self.message_type == "chat":
             if dataset is not None:
                 self.dataset = self.format_dataset(
@@ -224,6 +296,7 @@ class Environment(ABC):
         ):
             sampling_args.pop("max_completion_tokens")
         clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
+
         try:
             if message_type == "chat":
                 assert isinstance(prompt, list)
@@ -580,6 +653,7 @@ class Environment(ABC):
     ) -> GenerateOutputs:
         if isinstance(client, OpenAI):
             client = AsyncOpenAI(api_key=client.api_key, base_url=client.base_url)
+
         coro = self.a_generate(
             inputs,
             client,
@@ -806,7 +880,7 @@ class Environment(ABC):
         prompt: list[ChatMessage],
         completion: list[ChatMessage],
         state: State,
-        processing_class: "PreTrainedTokenizerBase",
+        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
         mask_env_responses: bool = False,
     ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
@@ -823,10 +897,13 @@ class Environment(ABC):
                 zipped.append((turn, None))
         assert len(responses) == responses_idx, "Responses not fully consumed"
         assert len(zipped) == len(completion), "Length mismatch"
-        prompt_ids: list[int] = processing_class.apply_chat_template(
-            conversation=prompt,  # type: ignore
+        
+        prompt_ids, prompt_image_grid, prompt_pixel_value = encode_chat_with_processor(
+            conversation=prompt,
+            processing_class=processing_class,
             add_generation_prompt=True,
         )
+            
         messages_consumed = [m for m in prompt]
         prompt_mask: list[int] = [0] * len(prompt_ids)
         completion_ids: list[int] = []
@@ -887,13 +964,15 @@ class Environment(ABC):
                 while j < len(zipped) and zipped[j][0]["role"] != "assistant":
                     consecutive_messages.append(zipped[j][0])
                     j += 1
-                token_prefix: list[int] = processing_class.apply_chat_template(
-                    conversation=messages_consumed  # type: ignore
+                token_prefix, token_prefix_image_grid, token_prefix_pixel_values = encode_chat_with_processor(
+                    conversation=messages_consumed, # type: ignore
+                    processing_class=processing_class,
+                    add_generation_prompt=False,
                 )
-                token_prefix_with_turn: list[int] = (
-                    processing_class.apply_chat_template(
-                        conversation=messages_consumed + consecutive_messages,  # type: ignore
-                    )
+                token_prefix_with_turn, token_prefix_with_turn_image_grid,token_prefix_with_turn_pixel_values  = encode_chat_with_processor(
+                    conversation=messages_consumed + consecutive_messages,  # type: ignore
+                    processing_class=processing_class,
+                    add_generation_prompt=False,
                 )
                 assert token_prefix_with_turn[: len(token_prefix)] == token_prefix, (
                     f"Token prefix mismatch. Token prefix: {token_prefix}, token prefix with turn: {token_prefix_with_turn}"
@@ -903,6 +982,7 @@ class Environment(ABC):
                     completion_turn_mask = [0] * len(completion_turn_ids)
                 else:
                     completion_turn_mask = [1] * len(completion_turn_ids)
+                    
                 completion_turn_logprobs = [0.0] * len(completion_turn_ids)
                 completion_ids.extend(completion_turn_ids)
                 completion_mask.extend(completion_turn_mask)
@@ -912,6 +992,8 @@ class Environment(ABC):
         return (
             prompt_ids,
             prompt_mask,
+            prompt_image_grid, 
+            prompt_pixel_value,
             completion_ids,
             completion_mask,
             completion_logprobs,
@@ -922,7 +1004,7 @@ class Environment(ABC):
         prompt: str,
         completion: str,
         state: State,
-        processing_class: "PreTrainedTokenizerBase",
+        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
         mask_env_responses: bool = False,
     ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
@@ -945,12 +1027,16 @@ class Environment(ABC):
             idx = response_start_idx + len(response_text)
         assert idx == len(completion), "Completion not fully consumed"
 
-        prompt_ids: list[int] = processing_class.encode(prompt)
+        prompt_ids, prompt_image_grid, prompt_pixel_value = encode_text_with_processor(
+            text=prompt,
+            processing_class=processing_class,
+        )
         rollout_consumed = prompt
         prompt_mask: list[int] = [0] * len(prompt_ids)
         completion_ids: list[int] = []
         completion_mask: list[int] = []
         completion_logprobs: list[float] = []
+
         i = 0
         while i < len(zipped):
             text, response = zipped[i]
@@ -987,6 +1073,8 @@ class Environment(ABC):
         return (
             prompt_ids,
             prompt_mask,
+            prompt_image_grid,
+            prompt_pixel_value,
             completion_ids,
             completion_mask,
             completion_logprobs,
@@ -998,7 +1086,7 @@ class Environment(ABC):
         completions: list[Messages],
         states: list[State],
         rewards: list[float],
-        processing_class: "PreTrainedTokenizerBase",
+        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
         max_seq_len: int = -1,
         mask_env_responses: bool = False,
         mask_truncated_completions: bool = False,
@@ -1011,6 +1099,8 @@ class Environment(ABC):
 
         all_prompt_ids = []
         all_prompt_masks = []
+        all_prompt_image_grid = []
+        all_prompt_pixel_value = []
         all_completion_ids = []
         all_completion_masks = []
         all_completion_logprobs = []
@@ -1024,6 +1114,8 @@ class Environment(ABC):
                 (
                     prompt_ids,
                     prompt_mask,
+                    prompt_image_grid,
+                    prompt_pixel_value,
                     completion_ids,
                     completion_mask,
                     completion_logprobs,
@@ -1035,6 +1127,8 @@ class Environment(ABC):
                 (
                     prompt_ids,
                     prompt_mask,
+                    prompt_image_grid,
+                    prompt_pixel_value,
                     completion_ids,
                     completion_mask,
                     completion_logprobs,
@@ -1067,16 +1161,22 @@ class Environment(ABC):
             )
             all_prompt_ids.append(prompt_ids)
             all_prompt_masks.append(prompt_mask)
+            all_prompt_image_grid.append(prompt_image_grid)
+            all_prompt_pixel_value.append(prompt_pixel_value)
             all_completion_ids.append(completion_ids)
             all_completion_masks.append(completion_mask)
             all_completion_logprobs.append(completion_logprobs)
+            
             if zero_truncated_completions and is_truncated:
                 all_rewards.append(0)
             else:
                 all_rewards.append(reward)
+                
         return ProcessedOutputs(
             prompt_ids=all_prompt_ids,
             prompt_mask=all_prompt_masks,
+            image_grid_thw = all_prompt_image_grid,
+            pixel_values= all_prompt_pixel_value,
             completion_ids=all_completion_ids,
             completion_mask=all_completion_masks,
             completion_logprobs=all_completion_logprobs,
