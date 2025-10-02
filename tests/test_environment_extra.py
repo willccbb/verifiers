@@ -37,7 +37,7 @@ class DummyEnvironment(Environment):
         sampling_args: SamplingArgs | None = None,
         **kwargs,
     ):
-        response = await self._get_model_response(
+        response = await self.get_model_response(
             prompt=prompt, client=client, model=model, sampling_args=sampling_args
         )
         assert response is not None
@@ -81,7 +81,7 @@ async def test_get_model_response_chat_with_tools(mock_openai_client):
             "function": {"name": "echo", "description": "echo", "parameters": {}},
         }
     ]
-    resp = await env._get_model_response(
+    resp = await env.get_model_response(
         client=mock_openai_client,
         model="test-model",
         prompt=prompt,
@@ -99,7 +99,7 @@ async def test_get_model_response_chat_with_tools(mock_openai_client):
 async def test_get_model_response_completion_rejects_tools(mock_openai_client):
     env = _make_env(mock_openai_client, message_type="completion")
     with pytest.raises(ValueError, match="oai_tools are not supported for completion"):
-        await env._get_model_response(
+        await env.get_model_response(
             client=mock_openai_client,
             model="test-model",
             prompt="Complete this",
