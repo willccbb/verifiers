@@ -2,8 +2,7 @@ import logging
 import time
 from abc import abstractmethod
 
-from openai import AsyncOpenAI, BadRequestError
-from openai.types.chat import ChatCompletionToolParam
+from openai import AsyncOpenAI
 
 from verifiers.envs.environment import Environment
 from verifiers.types import (
@@ -12,8 +11,6 @@ from verifiers.types import (
     Completion,
     Info,
     Messages,
-    MessageType,
-    ModelResponse,
     SamplingArgs,
     State,
 )
@@ -26,31 +23,6 @@ class MultiTurnEnv(Environment):
     def __init__(self, max_turns: int = -1, **kwargs):
         super().__init__(**kwargs)
         self.max_turns = max_turns
-
-    async def get_model_response(
-        self,
-        client: AsyncOpenAI,
-        model: str,
-        prompt: Messages,
-        oai_tools: list[ChatCompletionToolParam] | None = None,
-        sampling_args: SamplingArgs | None = None,
-        message_type: MessageType | None = None,
-        **kwargs,
-    ) -> ModelResponse | None:
-        try:
-            return await self._get_model_response(
-                client, model, prompt, oai_tools, sampling_args, message_type, **kwargs
-            )
-        # In case of requesting a too-long completion, e.g from a too-long
-        # environment response, we set the prompt_too_long flag to True, which
-        # will trigger the is_completed check to exit.
-        except BadRequestError as e:
-            if not kwargs["initial_prompt"] and e.response.text.startswith(
-                '{"error":{"message":"This model\'s maximum context length is'
-            ):
-                self.logger.debug("Caught overlong multi-turn prompt.")
-                return
-            raise e
 
     async def prompt_too_long(self, state: State) -> bool:
         return state.get("prompt_too_long", False)
@@ -132,7 +104,7 @@ class MultiTurnEnv(Environment):
                 initial_prompt=len(state["responses"]) == 0,
                 **kwargs,
             )
-            if response is None:
+            if response is not None and response.id == "overlong-prompt":
                 state["prompt_too_long"] = True
                 break
             state["responses"].append(response)

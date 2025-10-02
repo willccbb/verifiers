@@ -7,7 +7,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Literal
 
 from datasets import Dataset
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, BadRequestError, OpenAI
 
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
@@ -27,7 +27,11 @@ from verifiers.types import (
     SamplingArgs,
     State,
 )
-from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
+from verifiers.utils.message_utils import (
+    cleanup_messages,
+    get_overlong_prompt_dummy_response,
+    sanitize_tool_calls,
+)
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -190,7 +194,7 @@ class Environment(ABC):
     def get_reward_weights(self) -> list[float]:
         return self.rubric.get_reward_weights()
 
-    async def _get_model_response(
+    async def get_model_response(
         self,
         client: AsyncOpenAI,
         model: str,
@@ -206,70 +210,89 @@ class Environment(ABC):
         Convenience function for wrapping (chat, completion) API calls.
         Returns special error messages for context length issues.
         """
-        sampling_args = sampling_args or {}
-        # Resolve message type first
-        if message_type is None:
-            message_type = self.message_type
-        # Normalize sampling args:
-        # - If max_tokens is provided for chat, rename to max_completion_tokens
-        # - Drop any None-valued entries to avoid sending them to the client
-        if "max_tokens" in sampling_args:
-            if sampling_args["max_tokens"] is None:
-                sampling_args.pop("max_tokens")
-            elif message_type == "chat":
-                sampling_args["max_completion_tokens"] = sampling_args.pop("max_tokens")
-        if (
-            "max_completion_tokens" in sampling_args
-            and sampling_args["max_completion_tokens"] is None
-        ):
-            sampling_args.pop("max_completion_tokens")
-        clean_sampling_args = {k: v for k, v in sampling_args.items() if v is not None}
-        if message_type == "chat":
-            assert isinstance(prompt, list)
-            # --- detect audio parts and force text-only modality if caller didn't set one ---
-            has_audio = False
-            try:
-                for m in prompt:
-                    c = m.get("content")  # type: ignore[assignment]
-                    if isinstance(c, list):
-                        for p in c:
-                            if isinstance(p, dict) and str(
-                                p.get("type", "")
-                            ).startswith("input_audio"):
-                                has_audio = True
-                                break
-                    if has_audio:
-                        break
-            except Exception:
+        try:
+            sampling_args = sampling_args or {}
+            # Resolve message type first
+            if message_type is None:
+                message_type = self.message_type
+            # Normalize sampling args:
+            # - If max_tokens is provided for chat, rename to max_completion_tokens
+            # - Drop any None-valued entries to avoid sending them to the client
+            if "max_tokens" in sampling_args:
+                if sampling_args["max_tokens"] is None:
+                    sampling_args.pop("max_tokens")
+                elif message_type == "chat":
+                    sampling_args["max_completion_tokens"] = sampling_args.pop(
+                        "max_tokens"
+                    )
+            if (
+                "max_completion_tokens" in sampling_args
+                and sampling_args["max_completion_tokens"] is None
+            ):
+                sampling_args.pop("max_completion_tokens")
+            clean_sampling_args = {
+                k: v for k, v in sampling_args.items() if v is not None
+            }
+            if message_type == "chat":
+                assert isinstance(prompt, list)
+                # --- detect audio parts and force text-only modality if caller didn't set one ---
                 has_audio = False
-            if has_audio and "modalities" not in clean_sampling_args:
-                clean_sampling_args = {
-                    **clean_sampling_args,
-                    "modalities": ["text"],
-                }
+                try:
+                    for m in prompt:
+                        c = m.get("content")  # type: ignore[assignment]
+                        if isinstance(c, list):
+                            for p in c:
+                                if isinstance(p, dict) and str(
+                                    p.get("type", "")
+                                ).startswith("input_audio"):
+                                    has_audio = True
+                                    break
+                        if has_audio:
+                            break
+                except Exception:
+                    has_audio = False
+                if has_audio and "modalities" not in clean_sampling_args:
+                    clean_sampling_args = {
+                        **clean_sampling_args,
+                        "modalities": ["text"],
+                    }
 
-            if oai_tools:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=prompt,  # type: ignore
-                    tools=oai_tools,
-                    **clean_sampling_args,
+                if oai_tools:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=prompt,  # type: ignore
+                        tools=oai_tools,
+                        **clean_sampling_args,
+                    )
+                else:
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=prompt,  # type: ignore
+                        **clean_sampling_args,
+                    )
+                return response
+            elif message_type == "completion":
+                if oai_tools:
+                    raise ValueError(
+                        "oai_tools are not supported for completion tasks."
+                    )
+                assert isinstance(prompt, str)
+                response = await client.completions.create(
+                    model=model, prompt=prompt, **clean_sampling_args
                 )
-            else:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=prompt,  # type: ignore
-                    **clean_sampling_args,
+                return response
+        except Exception as e:
+            # In case of making a request with an overlong prompt, e.g from a too-long
+            # environment response, we return a dummy response to with finish_reason "length"
+            if isinstance(e, BadRequestError) and e.response.text.startswith(
+                '{"error":{"message":"This model\'s maximum context length is'
+            ):
+                self.logger.debug("Caught overlong prompt.")
+                return get_overlong_prompt_dummy_response(
+                    message_type or self.message_type
                 )
-            return response
-        elif message_type == "completion":
-            if oai_tools:
-                raise ValueError("oai_tools are not supported for completion tasks.")
-            assert isinstance(prompt, str)
-            response = await client.completions.create(
-                model=model, prompt=prompt, **clean_sampling_args
-            )
-            return response
+            self.logger.error(f"Error getting model response: {e} \n\nExiting...")
+            raise e
 
     @abstractmethod
     async def rollout(
