@@ -151,7 +151,7 @@ class SandboxEnv(vf.StatefulToolEnv):
             f"Cleaning up {len(self.active_sandboxes)} remaining sandboxes"
         )
         sandbox_client = SandboxClient(APIClient())
-        # TODO: Use the SandboxClient.bulk_delete method once it is more stable
+        # TODO: Use the SandboxClient.bulk_delete method once it is more stable and faster
         while self.active_sandboxes:
             successfully_deleted = set()
             for sandbox_id in self.active_sandboxes:
