@@ -75,6 +75,10 @@ main() {
 
     log_info "Installing dependencies in virtual environment..."
     uv sync
+
+    log_info "Installing pre-commit hooks..."
+    uv run pre-commit install
+
     log_info "Installation completed!"
 }
 
