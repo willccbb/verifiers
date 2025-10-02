@@ -45,10 +45,7 @@ main() {
     sudo apt update
 
     log_info "Installing base packages..."
-    sudo apt install -y \
-    git tmux htop nvtop cmake python3-dev cgroup-tools \
-    build-essential curl ca-certificates gnupg \
-    openssh-client
+    sudo apt install -y build-essential openssh-client curl git tmux htop nvtop
 
     log_info "Configuring SSH known_hosts for GitHub..."
     ensure_known_hosts
@@ -73,7 +70,7 @@ main() {
         source $HOME/.local/bin/env
     fi
 
-    log_info "Installing dependencies in virtual environment..."
+    log_info "Syncing virtual environment..."
     uv sync
 
     log_info "Installing pre-commit hooks..."
