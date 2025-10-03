@@ -27,7 +27,14 @@ from verifiers.types import (
     SamplingArgs,
     State,
 )
+from verifiers.utils.env_utils import (
+    build_context_length_stub_response,
+    extract_context_length_error,
+    format_context_length_warning,
+    infer_provider_name,
+)
 from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
+
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
@@ -274,6 +281,19 @@ class Environment(ABC):
                 )
                 return response
         except Exception as e:
+            context_error = extract_context_length_error(e)
+            if context_error is not None:
+                provider = infer_provider_name(client)
+                warning_message = format_context_length_warning(
+                    provider, model, context_error.details
+                )
+                message_text = context_error.message
+                if message_text and message_text not in warning_message:
+                    warning_message = f"{warning_message} - upstream: {message_text}"
+                self.logger.warning(warning_message)
+                return build_context_length_stub_response(
+                    message_type, model, context_error.details
+                )
             self.logger.error(f"Error getting model response: {e} \n\nExiting...")
             raise e
 
