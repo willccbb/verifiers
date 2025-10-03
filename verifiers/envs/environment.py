@@ -10,7 +10,6 @@ from openai import AsyncOpenAI, OpenAI
 import base64
 from io import BytesIO
 from PIL import Image
-from transformers import PreTrainedTokenizerBase, ProcessorMixin
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
@@ -33,7 +32,7 @@ from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
-        PreTrainedTokenizerBase,
+        PreTrainedTokenizerBase, ProcessorMixin
     )
 
 def _base64_to_pil(data_uri: str) -> Image.Image:
