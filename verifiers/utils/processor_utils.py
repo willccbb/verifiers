@@ -1,5 +1,5 @@
 from verifiers.utils.image_utils import _base64_to_pil
-from typing import Union, List, Dict, Any, TYPE_CHECKING
+from typing import Union, List, Dict, Any, Optional, TYPE_CHECKING
 from inspect import signature
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ def encode_chat_with_processor(
     processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
     add_generation_prompt: bool = False,
     add_special_tokens: bool = False,
-) -> List[int]:
+) -> tuple[list[int], Any, Any]:
     """
     Apply chat template and return token IDs, handling both tokenizer and processor.
     Supports base64-encoded images in the conversation.
