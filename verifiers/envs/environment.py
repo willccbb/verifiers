@@ -805,7 +805,7 @@ class Environment(ABC):
         prompt: list[ChatMessage],
         completion: list[ChatMessage],
         state: State,
-        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+        processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
         mask_env_responses: bool = False,
     ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
@@ -929,7 +929,7 @@ class Environment(ABC):
         prompt: str,
         completion: str,
         state: State,
-        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+        processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
         mask_env_responses: bool = False,
     ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
         """
@@ -1011,7 +1011,7 @@ class Environment(ABC):
         completions: list[Messages],
         states: list[State],
         rewards: list[float],
-        processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
+        processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
         max_seq_len: int = -1,
         mask_env_responses: bool = False,
         mask_truncated_completions: bool = False,
