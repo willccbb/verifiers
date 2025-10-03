@@ -1021,20 +1021,25 @@ class GRPOTrainer(Trainer):
                 content = message.get("content", [])
                 if isinstance(content, list):
                     for c in content:
-                        if isinstance(c, dict) and c.get("type") == "image":
-                            img_url = pil_to_base64_url(x["image"])
-                            c.clear()
-                            c.update({
-                                "type": "image_url",
-                                "image_url": {"url": img_url}
-                            })
+                        if isinstance(c, dict):
+                            if c.get("type") == "image":  # Convert only if not already base64
+                                if "image_url" not in c:
+                                    if "image" in x:  # only convert if PIL image exists
+                                        img_url = pil_to_base64_url(x["image"])
+                                        c.clear()
+                                        c.update({
+                                            "type": "image_url",
+                                            "image_url": {"url": img_url}
+                                        })
+                            elif c.get("type") == "image_url": # Already base64, leave as is
+                                pass
                 elif isinstance(content, str):
                     pass
                 else:
                     print("Unknown content type:", type(content))
     
             prompts.append(prompt)
-    
+        
         answers = [x["answer"] for x in batch]
         tasks = [x.get("task", "default") for x in batch]
         infos = [x.get("info", {}) for x in batch]
