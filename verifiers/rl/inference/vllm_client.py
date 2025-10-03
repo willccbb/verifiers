@@ -8,11 +8,10 @@ from openai import AsyncOpenAI
 from requests import ConnectionError
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException, Timeout
-from trl.import_utils import is_requests_available, is_vllm_available  # type: ignore
-from vllm.distributed.device_communicators.pynccl import (  # type: ignore
+from vllm.distributed.device_communicators.pynccl import (
     PyNcclCommunicator,
 )
-from vllm.distributed.utils import StatelessProcessGroup  # type: ignore
+from vllm.distributed.utils import StatelessProcessGroup
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +66,6 @@ class VLLMClient(AsyncOpenAI):
         group_port: int = 51216,
         connection_timeout: float = 0.0,
     ):
-        if not is_requests_available():
-            raise ImportError(
-                "requests is not installed. Please install it with `pip install requests`."
-            )
-        if not is_vllm_available():
-            raise ImportError(
-                "vLLM is not installed. Please install it with `pip install vllm`."
-            )
-
         super().__init__(base_url=f"http://{host}:{port}/v1", api_key="local")
         self.session = requests.Session()
         # Configure connection pooling to handle rapid requests better

@@ -1,5 +1,3 @@
-# adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/grpo_trainer.py
-
 import logging
 import time
 from collections import defaultdict, deque
@@ -8,48 +6,46 @@ from typing import Any, Dict, List, Optional, Sized, Tuple, Union
 
 import datasets
 import numpy as np
-import torch  # type: ignore[unresolved-import]
-import wandb  # type: ignore[unresolved-import]
-from accelerate.utils import (  # type: ignore[unresolved-import]
+import torch 
+import wandb 
+from accelerate.utils import (
     broadcast_object_list,
     gather_object,
     is_peft_model,
 )
-from peft import PeftConfig, get_peft_model  # type: ignore[unresolved-import]
-from torch.utils.data import DataLoader, Sampler  # type: ignore[unresolved-import]
-from transformers import AutoModelForCausalLM  # type: ignore[unresolved-import]
-from transformers.integrations.deepspeed import (  # type: ignore[unresolved-import]
+from peft import PeftConfig, get_peft_model 
+from torch.utils.data import DataLoader, Sampler 
+from transformers import AutoModelForCausalLM
+from transformers.integrations.deepspeed import ( 
     is_deepspeed_zero3_enabled,
 )
-from transformers.modeling_utils import (  # type: ignore[unresolved-import]
+from transformers.modeling_utils import (
     PreTrainedModel,
 )
-from transformers.tokenization_utils_base import (  # type: ignore[unresolved-import]
+from transformers.tokenization_utils_base import (
     PreTrainedTokenizerBase,
 )
-from transformers.trainer import Trainer  # type: ignore[unresolved-import]
-from transformers.trainer_callback import (  # type: ignore[unresolved-import]
+from transformers.trainer import Trainer 
+from transformers.trainer_callback import (
     TrainerCallback,
 )
-from transformers.trainer_utils import seed_worker  # type: ignore[unresolved-import]
-from trl.models import (  # type: ignore[unresolved-import]
-    create_reference_model,
-    prepare_deepspeed,
-)
-from trl.trainer.callbacks import (  # type: ignore[unresolved-import]
-    SyncRefModelCallback,
-)
-from trl.trainer.utils import (  # type: ignore[unresolved-import]
+from transformers.trainer_utils import seed_worker 
+from trl.models.modeling_base import create_reference_model 
+from trl.models.utils import prepare_deepspeed
+from trl.trainer.callbacks import SyncRefModelCallback
+from trl.trainer.utils import (
     disable_dropout_in_model,
     pad,
     selective_log_softmax,
 )
 
-from verifiers import Environment
-from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchRequest
-from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
-from verifiers.trainers.grpo_config import GRPOConfig
+import verifiers as vf
+
+from verifiers.rl.trainer.async_batch_generator import AsyncBatchGenerator, BatchRequest
+from verifiers.rl.trainer.async_dataloader_wrapper import AsyncDataLoaderWrapper
+from verifiers.rl.trainer.rl_config import RLConfig
 from verifiers.utils.logging_utils import print_prompt_completions_sample
+from verifiers.rl.inference.vllm_client import VLLMClient
 
 
 class RepeatSampler(Sampler):
@@ -267,12 +263,12 @@ def nanmax(tensor: torch.Tensor) -> torch.Tensor:
     return torch.max(tensor[~torch.isnan(tensor)])
 
 
-class GRPOTrainer(Trainer):
+class RLTrainer(Trainer):
     def __init__(
         self,
         model: PreTrainedModel,
-        env: Environment,
-        args: GRPOConfig,
+        env: vf.Environment,
+        args: RLConfig,
         processing_class: PreTrainedTokenizerBase,
         callbacks: Optional[list[TrainerCallback]] = None,
         optimizers: tuple[
@@ -556,7 +552,7 @@ class GRPOTrainer(Trainer):
         }
 
         # vLLM client for weight syncing only; only import if used
-        from verifiers.inference.vllm_client import VLLMClient
+        
 
         self.vllm_client = VLLMClient(
             host=host, port=port, connection_timeout=args.vllm_server_timeout
@@ -689,7 +685,7 @@ class GRPOTrainer(Trainer):
         )
 
     def _enable_gradient_checkpointing(
-        self, model: PreTrainedModel, args: GRPOConfig
+        self, model: PreTrainedModel, args: RLConfig
     ) -> PreTrainedModel:
         """Enables gradient checkpointing for the model."""
         # Ensure use_cache is disabled
@@ -1173,7 +1169,7 @@ class GRPOTrainer(Trainer):
                 )
 
             # Concatenate all data for shuffling
-            full_batch = {
+            full_batch: dict[str, torch.Tensor | None] = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
                 "old_per_token_logps": old_per_token_logps,
