@@ -68,6 +68,8 @@ def test_cli_sampling_args_precedence_over_flags(monkeypatch):
         },
         verbose=False,
         save_dataset=False,
+        save_dataset_cache=False,
+        cache_dir="~/.cache/verifiers/",
         save_to_hf_hub=False,
         hf_hub_dataset_name="",
     )
@@ -116,6 +118,8 @@ def test_cli_sampling_args_fill_from_flags_when_missing(monkeypatch):
         },
         verbose=False,
         save_dataset=False,
+        save_dataset_cache=False,
+        cache_dir="~/.cache/verifiers/",
         save_to_hf_hub=False,
         hf_hub_dataset_name="",
     )
