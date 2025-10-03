@@ -11,9 +11,6 @@ import datasets
 import numpy as np
 import torch  # type: ignore[unresolved-import]
 import wandb  # type: ignore[unresolved-import]
-import base64
-from io import BytesIO
-import transformers
 from accelerate.utils import (  # type: ignore[unresolved-import]
     broadcast_object_list,
     gather_object,
@@ -21,7 +18,6 @@ from accelerate.utils import (  # type: ignore[unresolved-import]
 )
 from peft import PeftConfig, get_peft_model  # type: ignore[unresolved-import]
 from torch.utils.data import DataLoader, Sampler  # type: ignore[unresolved-import]
-from transformers import AutoModelForCausalLM  # type: ignore[unresolved-import]
 from transformers.integrations.deepspeed import (  # type: ignore[unresolved-import]
     is_deepspeed_zero3_enabled,
 )
@@ -35,6 +31,7 @@ from transformers.trainer import Trainer  # type: ignore[unresolved-import]
 from transformers.trainer_callback import (  # type: ignore[unresolved-import]
     TrainerCallback,
 )
+from transformers import ProcessorMixin, AutoModelForCausalLM # type: ignore[unresolved-import]
 from transformers.trainer_utils import seed_worker  # type: ignore[unresolved-import]
 from trl.models import (  # type: ignore[unresolved-import]
     create_reference_model,
@@ -536,9 +533,9 @@ class GRPOTrainer(Trainer):
         elif is_deepspeed_zero3_enabled():
             model_id = model.config._name_or_path
             model_init_kwargs = {"torch_dtype": "auto"}
-            config = AutoConfig.from_pretrained(model_id)
-            architecture = getattr(transformers, config.architectures[0])
-            self.ref_model = architecture.from_pretrained(model_id, **model_init_kwargs)
+            self.ref_model = AutoModelForCausalLM.from_pretrained(
+                model_id, **model_init_kwargs
+            )
         elif is_peft_model(model):
             # If PEFT is used, the reference model is not needed since the adapter can be disabled
             # to revert to the initial model.
