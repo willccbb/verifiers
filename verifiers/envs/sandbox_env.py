@@ -1,7 +1,6 @@
 import atexit
 import signal
 import time
-from asyncio import Semaphore
 from typing import Any
 
 from prime_cli.api.client import APIClient
@@ -35,7 +34,6 @@ class SandboxEnv(vf.StatefulToolEnv):
         environment_vars: dict[str, str] | None = None,
         team_id: str | None = None,
         advanced_configs: AdvancedConfigs | None = None,
-        max_concurrent_sandboxes: int = 32,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -53,9 +51,7 @@ class SandboxEnv(vf.StatefulToolEnv):
             team_id=team_id,
             advanced_configs=advanced_configs,
         )
-        self.logger.info(f"Using {max_concurrent_sandboxes} max concurrent sandboxes")
         self.active_sandboxes = set()
-        self.sandbox_semaphore = Semaphore(max_concurrent_sandboxes)
 
         # Install handlers for regular exception, sigint (Ctrl-C) and sigterm (standard termination signal)
         atexit.register(self.cleanup_sandboxes)
@@ -102,14 +98,12 @@ class SandboxEnv(vf.StatefulToolEnv):
         try:
             await self.sandbox_client.delete(sandbox_id)
             self.active_sandboxes.discard(sandbox_id)
-            self.sandbox_semaphore.release()
             self.logger.debug(f"Deleted sandbox {sandbox_id}")
         except Exception as e:
             self.logger.warning(f"Failed to delete sandbox {sandbox_id}: {e}")
 
     async def setup_state(self, state: vf.State, **kwargs) -> vf.State:
         """Create per-rollout sandbox"""
-        await self.sandbox_semaphore.acquire()
         sandbox = await self.sandbox_client.create(self.sandbox_request)
         self.active_sandboxes.add(sandbox.id)
         self.logger.debug(f"Created sandbox {sandbox.id}")
