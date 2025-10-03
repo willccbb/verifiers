@@ -82,6 +82,67 @@ To run a quick evaluation of your Environment with an API-based model, do:
 vf-eval vf-environment-name # vf-eval -h for config options; defaults to gpt-4.1-mini, 5 prompts, 3 rollouts for each
 ```
 
+### Multi-Environment Evaluation
+
+`vf-eval` supports evaluating multiple environments in parallel, which is useful for benchmarking models across multiple tasks:
+
+```bash
+# Evaluate multiple environments in parallel
+vf-eval gsm8k math500 aime2025 -m gpt-4o-mini -n 100 -r 3
+
+# Per-environment configuration
+vf-eval gsm8k math500 \
+  --per-env-config '{
+    "gsm8k": {"num_examples": 100, "rollouts_per_example": 5},
+    "math500": {"num_examples": 50, "rollouts_per_example": 3}
+  }'
+
+# Save results to Prime Hub for tracking (single or multiple environments)
+vf-eval gsm8k \
+  -m gpt-4o-mini -n 100 -r 3 \
+  --save-to-prime-hub \
+  --eval-name "gsm8k-benchmark"
+
+# Or multiple environments
+vf-eval gsm8k math500 \
+  -m gpt-4o-mini -n 100 -r 3 \
+  --save-to-prime-hub \
+  --eval-name "math-benchmark"
+```
+
+To use Prime Hub integration, install `prime` separately:
+```bash
+# Install verifiers
+uv add verifiers
+
+# Install prime (from local or when published)
+pip install -e ../prime-cli  # or: pip install prime-cli (when published)
+```
+
+You can also use multi-environment evaluation programmatically:
+
+```python
+import asyncio
+from openai import AsyncOpenAI
+from verifiers.scripts.eval import eval_environments_parallel
+
+client = AsyncOpenAI(api_key="...", base_url="http://localhost:8000/v1")
+
+results = await eval_environments_parallel(
+    envs=["gsm8k", "math500"],
+    env_args_dict={"gsm8k": {}, "math500": {}},
+    client=client,
+    model="gpt-4o-mini",
+    num_examples=[100, 50],
+    rollouts_per_example=[3, 3],
+    max_concurrent=[32, 32],
+    sampling_args={"temperature": 0.7, "max_tokens": 2048},
+)
+
+for env, output in results.items():
+    print(f"{env}: avg_reward={sum(output.reward)/len(output.reward):.3f}")
+```
+
 The core elements of Environments in are:
 - Datasets: a Hugging Face `Dataset` with a `prompt` column for inputs, and optionally `answer (str)` or `info (dict)` columns for evaluation (both can be omitted for environments that evaluate based solely on completion quality)
 - Rollout logic: interactions between models and the environment (e.g. `env_response` + `is_completed` for any `MultiTurnEnv`)
