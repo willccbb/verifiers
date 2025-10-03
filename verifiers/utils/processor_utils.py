@@ -4,7 +4,16 @@ from inspect import signature
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizerBase, ProcessorMixin
-    
+
+def supports_images(obj): # work as a replacement for  if isinstance(processing_class, ProcessorMixin), because we already type check with lazy importfrom inspect import signature
+    if callable(obj):
+        try:
+            sig = signature(obj)
+            return "images" in sig.parameters
+        except TypeError:
+            return False
+    return False
+
 def encode_chat_with_processor(
     conversation: List[Dict],
     processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
@@ -16,8 +25,7 @@ def encode_chat_with_processor(
     Supports base64-encoded images in the conversation.
     """
         
-    sig = signature(processing_class.__call__ if hasattr(processing_class, "__call__") else processing_class) # work as a replacement for  if isinstance(processing_class, ProcessorMixin), because we already type check with lazy importfrom inspect import signature
-    if "images" in sig.parameters:
+    if supports_images(processing_class): 
         prompt_text = processing_class.apply_chat_template(
             conversation=conversation,
             add_generation_prompt=add_generation_prompt,
@@ -53,8 +61,7 @@ def encode_text_with_processor(
     """
     Encode plain text and return token IDs, handling both tokenizer and processor.
     """
-    sig = signature(processing_class.__call__ if hasattr(processing_class, "__call__") else processing_class) # work as a replacement for  if isinstance(processing_class, ProcessorMixin), because we already type check with lazy importfrom inspect import signature
-    if "images" in sig.parameters:
+    if supports_images(processing_class): 
         inputs = processing_class(
             text=[text],
             images=None,
