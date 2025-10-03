@@ -53,7 +53,7 @@ from verifiers.trainers.async_batch_generator import AsyncBatchGenerator, BatchR
 from verifiers.trainers.async_dataloader_wrapper import AsyncDataLoaderWrapper
 from verifiers.trainers.grpo_config import GRPOConfig
 from verifiers.utils.logging_utils import print_prompt_completions_sample, serialize_for_wandb, extract_images
-
+from verifiers.utils.image_utils import pil_to_base64_url
 
 class RepeatSampler(Sampler):
     """
@@ -267,15 +267,6 @@ def nanmax(tensor: torch.Tensor) -> torch.Tensor:
     if torch.isnan(tensor).all():
         return torch.tensor(float("nan"), dtype=tensor.dtype, device=tensor.device)
     return torch.max(tensor[~torch.isnan(tensor)])
-
-def pil_to_base64_url(pil_image) -> str:
-    """
-    Convert a PIL image to a base64 URL string suitable for OpenAI/vLLM messages.
-    """
-    buffered = BytesIO()
-    pil_image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_str}"
 
 class GRPOTrainer(Trainer):
     def __init__(

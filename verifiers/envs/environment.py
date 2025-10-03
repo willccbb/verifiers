@@ -26,7 +26,7 @@ from verifiers.types import (
     State,
 )
 from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
-from verifiers.utils.model_utils import encode_text_with_processor, encode_chat_with_processor
+from verifiers.utils.processor_utils import encode_text_with_processor, encode_chat_with_processor
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
