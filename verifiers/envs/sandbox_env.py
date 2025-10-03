@@ -149,7 +149,7 @@ class SandboxEnv(vf.StatefulToolEnv):
             successfully_deleted = set()
             for sandbox_id in self.active_sandboxes:
                 try:
-                    sandbox_client.wait_for_creation(sandbox_id)
+                    self.logger.debug(f"Deleting sandbox {sandbox_id}")
                     sandbox_client.delete(sandbox_id)
                     successfully_deleted.add(sandbox_id)
                     self.logger.debug(f"Successfully deleted sandbox {sandbox_id}")
