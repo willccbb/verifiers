@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,7 +38,7 @@ class BatchResult(BaseModel):
         default_factory=list
     )  # Store completions for logging
     prompts: list[Any] = Field(default_factory=list)  # Store prompts for logging
-    answers : list[Any]
+    answers : Optional[list[Any]]
 
 
 class AsyncBatchGenerator:
