@@ -7,9 +7,6 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, Union, List, Dict, Any
 from datasets import Dataset
 from openai import AsyncOpenAI, OpenAI
-import base64
-from io import BytesIO
-from PIL import Image
 from verifiers.parsers.parser import Parser
 from verifiers.rubrics.rubric import Rubric
 from verifiers.types import (
@@ -29,83 +26,12 @@ from verifiers.types import (
     State,
 )
 from verifiers.utils.message_utils import cleanup_messages, sanitize_tool_calls
+from verifiers.utils.model_utils import encode_text_with_processor, encode_chat_with_processor
 
 if TYPE_CHECKING:
     from transformers.tokenization_utils_base import (  # type: ignore
         PreTrainedTokenizerBase, ProcessorMixin
     )
-
-def _base64_to_pil(data_uri: str) -> Image.Image:
-    """Convert a base64 data URI (data:image/...;base64,...) to a PIL Image."""
-    if not data_uri.startswith("data:image"):
-        raise ValueError(f"Expected base64 image data URI, got: {data_uri[:30]}")
-    header, b64data = data_uri.split(",", 1)
-    image_data = base64.b64decode(b64data)
-    return Image.open(BytesIO(image_data)).convert("RGB")
-
-
-def encode_chat_with_processor(
-    conversation: List[Dict],
-    processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
-    add_generation_prompt: bool = False,
-    add_special_tokens: bool = False,
-) -> List[int]:
-    """
-    Apply chat template and return token IDs, handling both tokenizer and processor.
-    Supports base64-encoded images in the conversation.
-    """
-
-    if isinstance(processing_class, ProcessorMixin):
-        prompt_text = processing_class.apply_chat_template(
-            conversation=conversation,
-            add_generation_prompt=add_generation_prompt,
-            tokenize=False,
-        )
-
-        images = []
-        for msg in conversation:
-            for c in msg.get("content", []):
-                if c.get("type") == "image_url":
-                    pil_img = _base64_to_pil(c["image_url"]["url"])
-                    images.append(pil_img)
-
-        inputs = processing_class(
-            text=[prompt_text],
-            images=images if images else None,
-            return_tensors="pt",
-            add_special_tokens=add_special_tokens,
-        )
-        return inputs["input_ids"][0].tolist(), inputs["image_grid_thw"][0].tolist(), inputs["pixel_values"].tolist()
-
-    else:
-        prompt_ids : List[int] = processing_class.apply_chat_template(
-            conversation=conversation,
-            add_generation_prompt=add_generation_prompt,
-        )
-        return prompt_ids,None,None
-    
-def encode_text_with_processor(
-    text: str,
-    processing_class: Union[PreTrainedTokenizerBase, ProcessorMixin],
-) -> tuple[list[int], Any, Any]:
-    """
-    Encode plain text and return token IDs, handling both tokenizer and processor.
-    """
-    if isinstance(processing_class, ProcessorMixin):
-        inputs = processing_class(
-            text=[text],
-            images=None,
-            return_tensors="pt",
-        )
-        input_ids = inputs["input_ids"][0].tolist()
-        image_grid = inputs.get("image_grid_thw", [None])[0].tolist()
-        pixel_values = inputs.get("pixel_values", [None]).tolist()
-        return input_ids, image_grid, pixel_values
-    else:
-        prompt_ids: list[int] = processing_class.encode(
-            text
-        )
-        return prompt_ids, None, None
     
 class Environment(ABC):
     """
