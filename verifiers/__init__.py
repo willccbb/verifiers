@@ -1,4 +1,4 @@
-__version__ = "0.1.3.post0"
+__version__ = "0.1.5.dev1"
 
 import importlib
 import logging
@@ -10,6 +10,7 @@ from .envs.env_group import EnvGroup
 from .envs.environment import Environment
 from .envs.multiturn_env import MultiTurnEnv
 from .envs.singleturn_env import SingleTurnEnv
+from .envs.stateful_tool_env import StatefulToolEnv
 from .envs.tool_env import ToolEnv
 from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
@@ -52,6 +53,9 @@ def setup_logging(
 
     # Get the root logger for the verifiers package
     logger = logging.getLogger("verifiers")
+    # Remove any existing handlers to avoid duplicates
+    logger.handlers.clear()
+    # Add a new handler with desired log level
     logger.setLevel(level.upper())
     logger.addHandler(handler)
 
@@ -70,9 +74,13 @@ __all__ = [
     "RubricGroup",
     "ToolRubric",
     "MathRubric",
+    "TextArenaEnv",
     "Environment",
     "MultiTurnEnv",
     "SingleTurnEnv",
+    "PythonEnv",
+    "SandboxEnv",
+    "StatefulToolEnv",
     "ToolEnv",
     "EnvGroup",
     "extract_boxed_answer",
@@ -99,6 +107,9 @@ _LAZY_IMPORTS = {
     "grpo_defaults": "verifiers.trainers:grpo_defaults",
     "lora_defaults": "verifiers.trainers:lora_defaults",
     "MathRubric": "verifiers.rubrics.math_rubric:MathRubric",
+    "SandboxEnv": "verifiers.envs.sandbox_env:SandboxEnv",
+    "PythonEnv": "verifiers.envs.python_env:PythonEnv",
+    "TextArenaEnv": "verifiers.envs.textarena_env:TextArenaEnv",
 }
 
 
@@ -116,6 +127,9 @@ def __getattr__(name: str):
 
 
 if TYPE_CHECKING:
+    from .envs.python_env import PythonEnv  # noqa: F401
+    from .envs.sandbox_env import SandboxEnv  # noqa: F401
+    from .envs.textarena_env import TextArenaEnv  # noqa: F401
     from .rubrics.math_rubric import MathRubric  # noqa: F401
     from .trainers import (  # noqa: F401
         GRPOConfig,

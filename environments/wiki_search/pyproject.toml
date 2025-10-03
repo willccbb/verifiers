@@ -5,7 +5,7 @@ tags = ["wiki-search", "multi-turn", "agentic-search", "rag", "train", "eval"]
 requires-python = ">=3.11"
 version = "0.1.2"
 dependencies = [
-    "verifiers>=0.1.3",
+    "verifiers>=0.1.4",
     "chromadb",
     "datasets",
     "openai"
