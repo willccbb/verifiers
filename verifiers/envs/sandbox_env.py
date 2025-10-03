@@ -3,16 +3,15 @@ import signal
 import time
 from typing import Any
 
-from prime_cli.api.client import APIClient
-from prime_cli.api.sandbox import SandboxClient
-
 import verifiers as vf
 
 try:
+    from prime_cli.api.client import APIClient
     from prime_cli.api.sandbox import (  # type: ignore[import-untyped]
         AdvancedConfigs,
         AsyncSandboxClient,
         CreateSandboxRequest,
+        SandboxClient,
     )
 except ImportError:
     raise ImportError(
