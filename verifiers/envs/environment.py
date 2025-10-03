@@ -931,7 +931,7 @@ class Environment(ABC):
         state: State,
         processing_class: Union["PreTrainedTokenizerBase", "ProcessorMixin"],
         mask_env_responses: bool = False,
-    ) -> tuple[list[int], list[int], list[int], list[int], list[float]]:
+    ) -> tuple[list[int], list[int], list[int], list[int], list[int], list[int], list[float]]:
         """
         Process completion format conversations using incremental prefixes.
         """
