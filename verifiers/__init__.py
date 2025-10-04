@@ -16,7 +16,12 @@ from .parsers.parser import Parser
 from .parsers.think_parser import ThinkParser
 from .parsers.xml_parser import XMLParser
 from .rubrics.judge_rubric import JudgeRubric
-from .rubrics.rubric import Rubric
+from .rubrics.rubric import (
+    Rubric,
+    normalize_groups,
+    rank_groups,
+    standardize_groups,
+)
 from .rubrics.rubric_group import RubricGroup
 from .rubrics.tool_rubric import ToolRubric
 from .utils.data_utils import (
@@ -83,6 +88,9 @@ __all__ = [
     "StatefulToolEnv",
     "ToolEnv",
     "EnvGroup",
+    "standardize_groups",
+    "normalize_groups",
+    "rank_groups",
     "extract_boxed_answer",
     "extract_hash_answer",
     "load_example_dataset",

@@ -316,8 +316,8 @@ class TestRubric:
         ]  # Lengths of completions
 
     @pytest.mark.asyncio
-    async def test_score_rollouts_with_apply_weights(self):
-        """Test scoring rollouts with apply_weights parameter."""
+    async def test_score_rollouts_with_weights(self):
+        """Test scoring rollouts applies reward function weights correctly."""
 
         def func1(completion, **kwargs):
             return 1.0
@@ -333,8 +333,7 @@ class TestRubric:
         tasks = ["test"]
         infos = [{}]
 
-        # Test with apply_weights=True (default)
-        results_weighted = await rubric.score_rollouts(
+        results = await rubric.score_rollouts(
             prompts=prompts,  # type: ignore
             completions=completions,  # type: ignore
             answers=answers,
@@ -343,26 +342,13 @@ class TestRubric:
             ],
             tasks=tasks,
             infos=infos,
-            apply_weights=True,
         )
 
-        assert results_weighted.reward[0] == 1.0 * 2.0 + 0.5 * 3.0  # 2.0 + 1.5 = 3.5
-
-        # Test with apply_weights=False (should not be used, but test anyway)
-        results_unweighted = await rubric.score_rollouts(
-            prompts=prompts,  # type: ignore
-            completions=completions,  # type: ignore
-            answers=answers,
-            states=[
-                {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
-            ],
-            tasks=tasks,
-            infos=infos,
-            apply_weights=False,
-        )
-
-        # When apply_weights=False, only individual scores are returned, no weighted sum
-        assert results_unweighted.reward[0] == 1.0 * 2.0 + 0.5 * 3.0  # Still weighted
+        # Weighted sum: 1.0 * 2.0 + 0.5 * 3.0 = 2.0 + 1.5 = 3.5
+        assert results.reward[0] == 3.5
+        # Individual metrics should not be weighted
+        assert results.metrics["func1"][0] == 1.0
+        assert results.metrics["func2"][0] == 0.5
 
     @pytest.mark.asyncio
     async def test_score_rollouts_empty(self):
@@ -539,3 +525,309 @@ class TestRubric:
 
         assert result1 == 0.0
         assert result2 == 0.0
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_standardize(self):
+        """Test standardize_groups transformation."""
+
+        def simple_reward(completion, **kwargs):
+            return float(completion)
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        # Create rollouts with 2 groups of 3 rollouts each
+        # Group 1: [1.0, 2.0, 3.0] -> mean=2.0, std=0.816
+        # Group 2: [4.0, 5.0, 6.0] -> mean=5.0, std=0.816
+        prompts = ["p1", "p1", "p1", "p2", "p2", "p2"]
+        completions = ["1.0", "2.0", "3.0", "4.0", "5.0", "6.0"]
+        answers = [""] * 6
+        tasks = ["test"] * 6
+        infos = [{}] * 6
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 6
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform="standardize",
+        )
+
+        # After standardization, each group should have mean≈0 and std≈1
+        rewards = results.reward
+        group1 = rewards[:3]
+        group2 = rewards[3:]
+
+        # Check that means are close to 0
+        assert abs(sum(group1) / 3) < 1e-10
+        assert abs(sum(group2) / 3) < 1e-10
+
+        # Check relative ordering is preserved
+        assert group1[0] < group1[1] < group1[2]
+        assert group2[0] < group2[1] < group2[2]
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_normalize(self):
+        """Test normalize_groups transformation (min-max normalization)."""
+
+        def simple_reward(completion, **kwargs):
+            return float(completion)
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        # Create rollouts with 2 groups
+        # Group 1: [1.0, 2.0, 3.0] -> normalized to [0.0, 0.5, 1.0]
+        # Group 2: [10.0, 20.0, 30.0] -> normalized to [0.0, 0.5, 1.0]
+        prompts = ["p1", "p1", "p1", "p2", "p2", "p2"]
+        completions = ["1.0", "2.0", "3.0", "10.0", "20.0", "30.0"]
+        answers = [""] * 6
+        tasks = ["test"] * 6
+        infos = [{}] * 6
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 6
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform="normalize",
+        )
+
+        rewards = results.reward
+
+        # Both groups should be normalized to [0.0, 0.5, 1.0]
+        assert pytest.approx(rewards[0], abs=1e-6) == 0.0
+        assert pytest.approx(rewards[1], abs=1e-6) == 0.5
+        assert pytest.approx(rewards[2], abs=1e-6) == 1.0
+        assert pytest.approx(rewards[3], abs=1e-6) == 0.0
+        assert pytest.approx(rewards[4], abs=1e-6) == 0.5
+        assert pytest.approx(rewards[5], abs=1e-6) == 1.0
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_rank(self):
+        """Test rank_groups transformation."""
+
+        def simple_reward(completion, **kwargs):
+            return float(completion)
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        # Create rollouts with varying scores
+        prompts = ["p1", "p1", "p1", "p2", "p2", "p2"]
+        completions = ["3.0", "1.0", "2.0", "30.0", "10.0", "20.0"]
+        answers = [""] * 6
+        tasks = ["test"] * 6
+        infos = [{}] * 6
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 6
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform="rank",
+        )
+
+        rewards = results.reward
+
+        # Ranks should be 0, 1, 2 for each group (0=lowest, 2=highest)
+        # Group 1: [3.0, 1.0, 2.0] -> ranks [2, 0, 1]
+        assert rewards[0] == 2.0  # 3.0 is highest
+        assert rewards[1] == 0.0  # 1.0 is lowest
+        assert rewards[2] == 1.0  # 2.0 is middle
+
+        # Group 2: [30.0, 10.0, 20.0] -> ranks [2, 0, 1]
+        assert rewards[3] == 2.0  # 30.0 is highest
+        assert rewards[4] == 0.0  # 10.0 is lowest
+        assert rewards[5] == 1.0  # 20.0 is middle
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_custom_function(self):
+        """Test custom group transformation function."""
+
+        def simple_reward(completion, **kwargs):
+            return float(completion)
+
+        def custom_transform(rewards: list[float]) -> list[float]:
+            """Custom transform: subtract min from each value in group."""
+            min_val = min(rewards)
+            return [r - min_val for r in rewards]
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        prompts = ["p1", "p1", "p1"]
+        completions = ["5.0", "7.0", "9.0"]
+        answers = [""] * 3
+        tasks = ["test"] * 3
+        infos = [{}] * 3
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 3
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform=custom_transform,
+        )
+
+        rewards = results.reward
+
+        # Should subtract 5.0 from each: [0.0, 2.0, 4.0]
+        assert rewards[0] == 0.0
+        assert rewards[1] == 2.0
+        assert rewards[2] == 4.0
+
+    @pytest.mark.asyncio
+    async def test_score_rollouts_without_grouping_unchanged(self):
+        """Test that score_rollouts without group_size behaves as before."""
+
+        def simple_reward(completion, **kwargs):
+            return float(completion)
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        prompts = ["p1", "p1", "p1"]
+        completions = ["1.0", "2.0", "3.0"]
+        answers = [""] * 3
+        tasks = ["test"] * 3
+        infos = [{}] * 3
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 3
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+        )
+
+        # Should return original rewards without any transformation
+        assert results.reward == [1.0, 2.0, 3.0]
+
+    @pytest.mark.asyncio
+    async def test_group_size_validation(self):
+        """Test that group_size must divide total rollouts evenly."""
+
+        def simple_reward(completion, **kwargs):
+            return 1.0
+
+        rubric = Rubric(funcs=[simple_reward], weights=[1.0])
+
+        prompts = ["p1", "p1", "p1", "p2", "p2"]  # 5 rollouts
+        completions = ["a", "b", "c", "d", "e"]
+        answers = [""] * 5
+        tasks = ["test"] * 5
+        infos = [{}] * 5
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 5
+
+        # group_size=2 should fail because 5 is not divisible by 2
+        with pytest.raises(
+            ValueError, match="Number of rollouts .* must be divisible by group_size"
+        ):
+            await rubric.score_rollouts(
+                prompts=prompts,  # type: ignore
+                completions=completions,  # type: ignore
+                answers=answers,
+                states=states,
+                tasks=tasks,
+                infos=infos,
+                group_size=2,
+            )
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_with_metrics(self):
+        """Test that group transformations apply to both reward and metrics."""
+
+        def reward1(completion, **kwargs):
+            return float(completion)
+
+        def reward2(completion, **kwargs):
+            return float(completion) * 2
+
+        rubric = Rubric(funcs=[reward1, reward2], weights=[1.0, 0.5])
+
+        prompts = ["p1", "p1", "p1"]
+        completions = ["1.0", "2.0", "3.0"]
+        answers = [""] * 3
+        tasks = ["test"] * 3
+        infos = [{}] * 3
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 3
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform="normalize",
+        )
+
+        # Both metrics should be normalized
+        assert pytest.approx(results.metrics["reward1"][0], abs=1e-6) == 0.0
+        assert pytest.approx(results.metrics["reward1"][1], abs=1e-6) == 0.5
+        assert pytest.approx(results.metrics["reward1"][2], abs=1e-6) == 1.0
+
+        assert pytest.approx(results.metrics["reward2"][0], abs=1e-6) == 0.0
+        assert pytest.approx(results.metrics["reward2"][1], abs=1e-6) == 0.5
+        assert pytest.approx(results.metrics["reward2"][2], abs=1e-6) == 1.0
+
+    @pytest.mark.asyncio
+    async def test_group_transformation_constant_rewards(self):
+        """Test standardize handles constant rewards in a group gracefully."""
+
+        def constant_reward(completion, **kwargs):
+            return 5.0  # All rewards are the same
+
+        rubric = Rubric(funcs=[constant_reward], weights=[1.0])
+
+        prompts = ["p1", "p1", "p1"]
+        completions = ["a", "b", "c"]
+        answers = [""] * 3
+        tasks = ["test"] * 3
+        infos = [{}] * 3
+        states = [
+            {"timing": {"generation_ms": 0.0, "scoring_ms": 0.0, "total_ms": 0.0}}
+        ] * 3
+
+        results = await rubric.score_rollouts(
+            prompts=prompts,  # type: ignore
+            completions=completions,  # type: ignore
+            answers=answers,
+            states=states,
+            tasks=tasks,
+            infos=infos,
+            group_size=3,
+            group_transform="standardize",
+        )
+
+        # When std=0, standardized values should be 0
+        assert all(r == 0.0 for r in results.reward)

@@ -572,7 +572,6 @@ class Environment(ABC):
                     max_concurrent=score_limit
                     if score_limit is not None
                     else max_concurrent,
-                    apply_weights=True,
                 )
                 results.reward = rollout_scores.reward
                 results.metrics = rollout_scores.metrics
