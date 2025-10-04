@@ -97,5 +97,5 @@ def save_results_to_hf_hub(
         )
     else:
         dataset_name = hf_hub_dataset_name
-    dataset.push_to_hub(dataset_name)
+    dataset.push_to_hub(dataset_name, env)
     return dataset_name
