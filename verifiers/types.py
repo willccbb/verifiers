@@ -22,10 +22,10 @@ from openai.types.shared_params import (  # noqa: F401
     FunctionDefinition,
     FunctionParameters,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
 # typing aliases
-ChatMessage = ChatCompletionMessageParam
+ChatMessage = SerializeAsAny[ChatCompletionMessageParam]
 MessageType = Literal["chat", "completion"]
 ModelResponse = Completion | ChatCompletion | None
 
