@@ -350,6 +350,21 @@ class Rubric:
                 raise ValueError(
                     f"Number of rollouts ({len(prompts)}) must be divisible by group_size ({group_size})"
                 )
+            
+            # Validate all input lists are divisible by group_size
+            input_lists = [
+                ("completions", completions),
+                ("answers", answers),
+                ("states", states),
+                ("tasks", tasks),
+                ("infos", infos),
+            ]
+            
+            for list_name, input_list in input_lists:
+                if input_list is not None and len(input_list) % group_size != 0:
+                    raise ValueError(
+                        f"Number of {list_name} ({len(input_list)}) must be divisible by group_size ({group_size})"
+                    )
 
         if max_concurrent > 0:
             semaphore = asyncio.Semaphore(max_concurrent)
@@ -416,6 +431,14 @@ class Rubric:
                         end_idx = start_idx + group_size
                         group = vals[start_idx:end_idx]
                         transformed_group = group_transform(group)
+                        
+                        # Validate that the transformed group has the expected length
+                        if len(transformed_group) != group_size:
+                            raise ValueError(
+                                f"Group {i}: group_transform returned {len(transformed_group)} items, "
+                                f"expected {group_size} items"
+                            )
+                        
                         result.extend(transformed_group)
                     return result
 
