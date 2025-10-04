@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import importlib
 import importlib.util
 import json
@@ -7,19 +8,127 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, cast
+from typing import Any
 
 import numpy as np
 from datasets import Dataset
+from openai import AsyncOpenAI, OpenAI
 
 import verifiers as vf
-from verifiers import setup_logging
-from verifiers.types import Endpoints
-from verifiers.utils.client_utils import setup_client
+from verifiers.types import GenerateOutputs
 from verifiers.utils.message_utils import messages_to_printable, sanitize_tool_calls
 
 # Setup logger for eval script using verifiers logging format
 logger = logging.getLogger("verifiers.scripts.eval")
+
+
+def push_eval_to_prime_hub(
+    eval_name: str,
+    model_name: str,
+    dataset: str,
+    metrics: dict[str, float],
+    metadata: dict[str, Any],
+    results: list[dict[str, Any]] | None = None,
+) -> None:
+    try:
+        from prime_cli.api.evals import EvalsClient, EvalsAPIError
+        
+        eval_data = {
+            "eval_name": eval_name,
+            "model_name": model_name,
+            "dataset": dataset,
+            "metrics": metrics,
+            "metadata": metadata,
+        }
+        
+        if results is not None:
+            eval_data["results"] = results
+        
+        client = EvalsClient()
+        response = client.push_eval(eval_data)
+        
+        viewer_url = response.get("viewer_url")
+        
+        if viewer_url:
+            logger.info(
+                f"✓ Pushed eval '{eval_name}' to Prime Hub\n"
+                f"  View at: {viewer_url}"
+            )
+        else:
+            logger.info(f"✓ Pushed eval '{eval_name}' to Prime Hub")
+            
+    except ImportError:
+        logger.warning(
+            "prime-cli not found. Install with: pip install prime-cli\n"
+            "Skipping push to Prime Hub."
+        )
+    except Exception as e:
+        logger.warning(f"Failed to push eval to Prime Hub: {e}")
+
+
+async def eval_environment_async(
+    env: str,
+    env_args: dict,
+    client: AsyncOpenAI,
+    model: str,
+    num_examples: int,
+    rollouts_per_example: int,
+    max_concurrent: int,
+    sampling_args: dict | None,
+) -> tuple[str, GenerateOutputs]:
+    logger.info(f"Loading environment: {env}")
+    vf_env = vf.load_environment(env_id=env, **env_args)
+    
+    if vf_env.eval_dataset is None:
+        logger.debug(f"No eval dataset for {env}, using train dataset")
+        dataset = vf_env.get_dataset(n=num_examples)
+    else:
+        dataset = vf_env.get_eval_dataset(n=num_examples)
+    
+    if rollouts_per_example > 1:
+        dataset = dataset.repeat(rollouts_per_example)
+    
+    logger.info(f"Evaluating {env} with {len(dataset)} samples...")
+    
+    results = await vf_env.a_generate(
+        inputs=dataset,
+        client=client,
+        model=model,
+        sampling_args=sampling_args,
+        score_rollouts=True,
+        max_concurrent=max_concurrent,
+    )
+    
+    return env, results
+
+
+async def eval_environments_parallel(
+    envs: list[str],
+    env_args_dict: dict[str, dict],
+    client: AsyncOpenAI,
+    model: str,
+    num_examples: list[int],
+    rollouts_per_example: list[int],
+    max_concurrent: list[int],
+    sampling_args: dict | None,
+) -> dict[str, GenerateOutputs]:
+    tasks = [
+        eval_environment_async(
+            env=env,
+            env_args=env_args_dict.get(env, {}),
+            client=client,
+            model=model,
+            num_examples=n,
+            rollouts_per_example=r,
+            max_concurrent=c,
+            sampling_args=sampling_args,
+        )
+        for env, n, r, c in zip(envs, num_examples, rollouts_per_example, max_concurrent)
+    ]
+    
+    results = await asyncio.gather(*tasks)
+    
+    return dict(results)
 
 
 def eval_environment(
@@ -219,17 +328,115 @@ def eval_environment(
             logger.info(f"Saved dataset to Hugging Face Hub: {dataset_name}")
 
 
+def setup_client_from_args(args):
+    try:
+        endpoints_path_obj = Path(args.endpoints_path)
+        if endpoints_path_obj.is_dir():
+            endpoints_file = endpoints_path_obj / "endpoints.py"
+        else:
+            endpoints_file = endpoints_path_obj
+
+        if endpoints_file.exists():
+            logger.info(f"Loading endpoint registry from {endpoints_file}")
+            spec = importlib.util.spec_from_file_location("endpoints", endpoints_file)
+            assert spec and spec.loader
+            endpoints_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(endpoints_module)
+            ENDPOINTS = endpoints_module.ENDPOINTS
+        else:
+            raise ImportError(f"endpoints.py not found at {endpoints_file}")
+    except (ImportError, AttributeError):
+        ENDPOINTS = {}
+    
+    # Resolve model/API config
+    model = args.model
+    api_key_var = args.api_key_var
+    api_base_url = args.api_base_url
+    
+    if model in ENDPOINTS:
+        api_key_var = ENDPOINTS[model]["key"]
+        api_base_url = ENDPOINTS[model]["url"]
+        model = ENDPOINTS[model]["model"]
+    
+    api_key_value = os.getenv(api_key_var, "EMPTY")
+    client = AsyncOpenAI(api_key=api_key_value, base_url=api_base_url)
+    
+    return client, model
+
+
+def prepare_sampling_args_from_cli(args):
+    """Prepare sampling arguments from CLI args."""
+    merged_sampling_args = {}
+    if args.sampling_args is not None:
+        merged_sampling_args.update(args.sampling_args)
+    if "max_tokens" not in merged_sampling_args:
+        merged_sampling_args["max_tokens"] = args.max_tokens
+    if args.temperature is not None and "temperature" not in merged_sampling_args:
+        merged_sampling_args["temperature"] = args.temperature
+    return merged_sampling_args
+
+
+def display_and_push_results(env, results, model, args, num_examples, rollouts_per_example, max_concurrent, sampling_args):
+    """Display results and optionally push to Prime Hub."""
+    logger.info(f"\n--- {env} ---")
+    logger.info(f"Rewards: avg={np.mean(results.reward):.3f}, std={np.std(results.reward):.3f}")
+    
+    for metric_name, metric_values in results.metrics.items():
+        logger.info(f"{metric_name}: avg={np.mean(metric_values):.3f}, std={np.std(metric_values):.3f}")
+    
+    if args.save_to_prime_hub:
+        eval_name = args.eval_name or f"{model.replace('/', '-')}-{env}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        
+        metrics = {
+            "avg_reward": float(np.mean(results.reward)),
+            "std_reward": float(np.std(results.reward)),
+            "num_samples": len(results.reward),
+        }
+        for metric_name, metric_values in results.metrics.items():
+            metrics[f"avg_{metric_name}"] = float(np.mean(metric_values))
+            metrics[f"std_{metric_name}"] = float(np.std(metric_values))
+        
+        metadata = {
+            "environment": env,
+            "model": model,
+            "num_examples": num_examples,
+            "rollouts_per_example": rollouts_per_example,
+            "max_concurrent": max_concurrent,
+            "sampling_args": sampling_args,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+        
+        push_eval_to_prime_hub(
+            eval_name=eval_name,
+            model_name=model,
+            dataset=env,
+            metrics=metrics,
+            metadata=metadata,
+        )
+
+
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Evaluate environment(s) using verifiers. Supports single or multiple environments."
+    )
     parser.add_argument(
-        "env", type=str, default="gsm8k", help="Environment module name"
+        "env",
+        type=str,
+        nargs='+',
+        help="Environment module name(s). Pass multiple for parallel evaluation (e.g., 'gsm8k math500')"
     )
     parser.add_argument(
         "--env-args",
         "-a",
         type=json.loads,
         default={},
-        help='Environment module arguments as JSON object (e.g., \'{"key": "value", "num": 42}\')',
+        help='Environment module arguments as JSON object. For single env: \'{"key": "value"}\'. For multi-env: \'{"env1": {"key": "val"}, "env2": {...}}\'',
+    )
+    parser.add_argument(
+        "--per-env-config",
+        type=json.loads,
+        default=None,
+        help='Per-environment configuration as JSON: \'{"env1": {"num_examples": 10, "rollouts_per_example": 3}, ...}\'',
     )
     parser.add_argument(
         "--env-dir-path",
@@ -337,39 +544,98 @@ def main():
         default="",
         help="Name of dataset to save to Hugging Face Hub",
     )
-    args = parser.parse_args()
-
-    # Build headers from repeated --header flags
-    merged_headers: Dict[str, str] = {}
-    for h in args.header or []:
-        if ":" not in h:
-            raise ValueError(f"--header must be 'Name: Value', got: {h!r}")
-        k, v = h.split(":", 1)
-        k, v = k.strip(), v.strip()
-        if not k:
-            raise ValueError("--header name cannot be empty")
-        merged_headers[k] = v
-
-    eval_environment(
-        env=args.env,
-        env_args=args.env_args,
-        env_dir_path=args.env_dir_path,
-        endpoints_path=args.endpoints_path,
-        model=args.model,
-        api_key_var=args.api_key_var,
-        api_base_url=args.api_base_url,
-        num_examples=args.num_examples,
-        rollouts_per_example=args.rollouts_per_example,
-        max_concurrent=args.max_concurrent,
-        max_tokens=args.max_tokens,
-        temperature=args.temperature,
-        sampling_args=args.sampling_args,
-        verbose=args.verbose,
-        save_dataset=args.save_dataset,
-        save_to_hf_hub=args.save_to_hf_hub,
-        hf_hub_dataset_name=args.hf_hub_dataset_name,
-        extra_headers=merged_headers,
+    parser.add_argument(
+        "--save-to-prime-hub",
+        "-P",
+        default=False,
+        action="store_true",
+        help="Save evaluation results to Prime Hub (requires prime-cli)",
     )
+    parser.add_argument(
+        "--eval-name",
+        type=str,
+        default=None,
+        help="Name for the evaluation run (used when saving to Prime Hub)",
+    )
+    args = parser.parse_args()
+    
+    # Normalize to list
+    envs = args.env if isinstance(args.env, list) else [args.env]
+    
+    # Setup client and model
+    client, model = setup_client_from_args(args)
+    
+    # Prepare sampling arguments
+    sampling_args = prepare_sampling_args_from_cli(args)
+    
+    # Prepare per-environment configuration
+    env_args_dict = {}
+    if args.per_env_config:
+        for env in envs:
+            if env in args.per_env_config:
+                env_args_dict[env] = args.per_env_config[env].get("env_args", {})
+    else:
+        if any(env in args.env_args for env in envs):
+            env_args_dict = args.env_args
+        else:
+            env_args_dict = {env: args.env_args for env in envs}
+    
+    # Prepare per-environment parameters
+    num_examples_list = []
+    rollouts_list = []
+    max_concurrent_list = []
+    
+    for env in envs:
+        if args.per_env_config and env in args.per_env_config:
+            cfg = args.per_env_config[env]
+            num_examples_list.append(cfg.get("num_examples", args.num_examples))
+            rollouts_list.append(cfg.get("rollouts_per_example", args.rollouts_per_example))
+            max_concurrent_list.append(cfg.get("max_concurrent", args.max_concurrent))
+        else:
+            num_examples_list.append(args.num_examples)
+            rollouts_list.append(args.rollouts_per_example)
+            max_concurrent_list.append(args.max_concurrent)
+    
+    # Run evaluation (always use async path)
+    logger.info(f"Evaluating {len(envs)} environment{'s' if len(envs) > 1 else ''}: {', '.join(envs)}")
+    
+    results_dict = asyncio.run(
+        eval_environments_parallel(
+            envs=envs,
+            env_args_dict=env_args_dict,
+            client=client,
+            model=model,
+            num_examples=num_examples_list,
+            rollouts_per_example=rollouts_list,
+            max_concurrent=max_concurrent_list,
+            sampling_args=sampling_args,
+        )
+    )
+    
+    # Display results
+    if len(envs) > 1:
+        logger.info("\n" + "="*80)
+        logger.info("EVALUATION RESULTS")
+        logger.info("="*80)
+    
+    for idx, (env, results) in enumerate(results_dict.items()):
+        display_and_push_results(
+            env=env,
+            results=results,
+            model=model,
+            args=args,
+            num_examples=num_examples_list[idx],
+            rollouts_per_example=rollouts_list[idx],
+            max_concurrent=max_concurrent_list[idx],
+            sampling_args=sampling_args,
+        )
+    
+    if len(envs) > 1:
+        logger.info("\n" + "="*80)
+        logger.info(f"✓ Completed evaluation of {len(envs)} environments")
+        logger.info("="*80)
+    else:
+        logger.info(f"✓ Evaluation complete")
 
 
 if __name__ == "__main__":
